@@ -1,14 +1,100 @@
-name: Build Gansu Gaokao Scorer EXE
+name: Build Cross-Platform Gaokao Scorer
 
-# 触发机制：仅保留 workflow_dispatch (手动触发)
-# 删除了 push 触发器，因此代码更新时不会自动运行
+# 触发器：手动触发，并提供选项选择需要编译的平台
 on:
   workflow_dispatch:
+    inputs:
+      build_windows:
+        description: '编译 Windows 版本 (.exe)'
+        required: true
+        default: true
+        type: boolean
+      build_linux:
+        description: '编译 Linux 版本 (二进制)'
+        required: true
+        default: true
+        type: boolean
+      build_macos:
+        description: '编译 macOS 版本 (Unix Executable)'
+        required: true
+        default: true
+        type: boolean
 
 jobs:
-  build:
+  # ==========================
+  # Job 1: Windows 构建
+  # ==========================
+  build-windows:
+    if: ${{ inputs.build_windows == true }}
     runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        # 强制安装 pyinstaller 确保环境中有此工具
+        pip install pyinstaller
+
+    - name: Build EXE
+      run: |
+        # --collect-all customtkinter: 确保打包了库里的主题文件
+        pyinstaller --noconsole --onefile --name "Gansu_Gaokao_Scorer_Win" --collect-all customtkinter main.py
+
+    - name: Upload Windows Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Gansu_Gaokao_Scorer_Windows
+        path: dist/Gansu_Gaokao_Scorer_Win.exe
+
+  # ==========================
+  # Job 2: Linux 构建
+  # ==========================
+  build-linux:
+    if: ${{ inputs.build_linux == true }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install System Dependencies (Tkinter)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk
+
+    - name: Install Python Dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build Linux Binary
+      run: |
+        # Linux下通常不加 --windowed 以便调试，或者加 --noconsole
+        pyinstaller --noconsole --onefile --name "Gansu_Gaokao_Scorer_Linux" --collect-all customtkinter main.py
+
+    - name: Upload Linux Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Gansu_Gaokao_Scorer_Linux
+        path: dist/Gansu_Gaokao_Scorer_Linux
+
+  # ==========================
+  # Job 3: macOS 构建
+  # ==========================
+  build-macos:
+    if: ${{ inputs.build_macos == true }}
+    runs-on: macos-latest
     steps:
     - uses: actions/checkout@v3
 
@@ -19,18 +105,18 @@ jobs:
 
     - name: Install Dependencies
       run: |
-        python -m pip install --upgrade pip
+        pip install --upgrade pip
         pip install -r requirements.txt
+        pip install pyinstaller
 
-    - name: Build with PyInstaller
+    - name: Build macOS App
       run: |
-        # --onefile: 打包成单文件
-        # --noconsole: 运行时不显示黑框命令行
-        # --name: 指定生成的exe名字
-        pyinstaller --onefile --noconsole --name Gansu_Gaokao_Scorer main.py
+        # macOS 推荐使用 --windowed
+        pyinstaller --windowed --onefile --name "Gansu_Gaokao_Scorer_Mac" --collect-all customtkinter main.py
 
-    - name: Upload Artifact
+    - name: Upload macOS Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Gansu_Gaokao_Scorer_EXE
-        path: dist/Gansu_Gaokao_Scorer.exe
+        name: Gansu_Gaokao_Scorer_MacOS
+        # 上传生成的可执行文件
+        path: dist/Gansu_Gaokao_Scorer_Mac*
