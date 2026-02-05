@@ -1,36 +1,43 @@
-name: Build Gansu Gaokao Scorer EXE
+name: Build Windows Executable
 
-# 触发机制：仅保留 workflow_dispatch (手动触发)
-# 删除了 push 触发器，因此代码更新时不会自动运行
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [created]
 
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
 
     steps:
     - uses: actions/checkout@v3
-
-    - name: Set up Python
+    
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
-
-    - name: Install Dependencies
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-
+        pip install pyinstaller
+        pip install pywin32
+    
     - name: Build with PyInstaller
       run: |
-        # --onefile: 打包成单文件
-        # --noconsole: 运行时不显示黑框命令行
-        # --name: 指定生成的exe名字
-        pyinstaller --onefile --noconsole --name 科学计算器 main.py
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
+        # 创建spec文件（可选，PyInstaller会自动生成）
+        pyinstaller --onefile --windowed --name="ScientificCalculator" --icon=icon.ico scientific_calculator.py
+        # 如果不需要图标可以简化命令
+        # pyinstaller --onefile --windowed --name="ScientificCalculator" scientific_calculator.py
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
       with:
-        name: Gansu_Gaokao_Scorer_EXE
-        path: dist/Gansu_Gaokao_Scorer.exe
+        name: ScientificCalculator-${{ matrix.python-version }}
+        path: dist/ScientificCalculator.exe
