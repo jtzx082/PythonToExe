@@ -28,11 +28,6 @@ on:
         required: true
         default: 'true'
         type: boolean
-      upload-release:
-        description: 'Upload to release'
-        required: false
-        default: 'false'
-        type: boolean
 
   # 也可以在推送标签时自动构建（可选）
   push:
@@ -51,25 +46,16 @@ env:
 jobs:
   build-windows:
     runs-on: windows-latest
-    name: Build for Windows (${{ matrix.python-version }})
+    name: Build for Windows
     
-    # 设置策略，可以同时构建多个Python版本
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
-      # 如果手动指定了Python版本，则只构建指定版本
-      ${{ github.event_name == 'workflow_dispatch' && format('
-        matrix: 
-          python-version: ["{0}"]', inputs.python-version) || '' }}
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
     
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python ${{ github.event.inputs.python-version || '3.10' }}
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: ${{ github.event.inputs.python-version || '3.10' }}
     
     - name: Install dependencies
       run: |
@@ -90,13 +76,16 @@ jobs:
     - name: Build with PyInstaller
       id: build
       run: |
-        # 构建命令根据输入参数动态生成
+        # 构建命令
         $BUILD_CMD = "pyinstaller"
         
         # 根据构建类型添加参数
-        ${{ github.event_name == 'workflow_dispatch' && inputs.build-type == 'onedir' && format('
-        $BUILD_CMD = "$BUILD_CMD"') || '
-        $BUILD_CMD = "$BUILD_CMD --onefile"' }}
+        $BUILD_TYPE = "${{ github.event.inputs.build-type || 'onefile' }}"
+        if ($BUILD_TYPE -eq "onedir") {
+          # onedir模式，不使用--onefile
+        } else {
+          $BUILD_CMD = "$BUILD_CMD --onefile"
+        }
         
         # 添加无控制台窗口参数
         $BUILD_CMD = "$BUILD_CMD --windowed"
@@ -105,13 +94,10 @@ jobs:
         $BUILD_CMD = "$BUILD_CMD --name $env:PROJECT_NAME"
         
         # 如果包含图标且图标文件存在
-        ${{ github.event_name == 'workflow_dispatch' && inputs.include-icon == 'true' && format('
-        if (Test-Path "icon.ico") {{
+        $INCLUDE_ICON = "${{ github.event.inputs.include-icon || 'true' }}"
+        if (($INCLUDE_ICON -eq "true") -and (Test-Path "icon.ico")) {
           $BUILD_CMD = "$BUILD_CMD --icon=icon.ico"
-        }}') || '
-        if (Test-Path "icon.ico") {
-          $BUILD_CMD = "$BUILD_CMD --icon=icon.ico"
-        }' }}
+        }
         
         # 添加清理和优化参数
         $BUILD_CMD = "$BUILD_CMD --clean"
@@ -130,7 +116,7 @@ jobs:
           # 获取文件大小
           $fileInfo = Get-Item "dist\$env:PROJECT_NAME.exe"
           $fileSize = [math]::Round($fileInfo.Length / 1MB, 2)
-          echo "::set-output name=file_size::$fileSize"
+          echo "file_size=$fileSize" >> $env:GITHUB_OUTPUT
           echo "Build successful! File size: ${fileSize}MB"
         } else {
           echo "::error::Build failed! Executable not found."
@@ -140,7 +126,7 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-artifact@v3
       with:
-        name: ${{ env.PROJECT_NAME }}-windows-py${{ matrix.python-version }}
+        name: ${{ env.PROJECT_NAME }}-windows-py${{ github.event.inputs.python-version || '3.10' }}
         path: dist/${{ env.PROJECT_NAME }}.exe
     
     - name: Upload to release (if tag exists)
@@ -233,8 +219,7 @@ jobs:
         echo "| Platform | Status | Python Version |" >> $GITHUB_STEP_SUMMARY
         echo "|----------|--------|----------------|" >> $GITHUB_STEP_SUMMARY
         
-        ${{ matrix.python-version && format('
-        echo "| Windows | {0} | {1} |" >> $GITHUB_STEP_SUMMARY', needs.build-windows.result, matrix.python-version) || '' }}
+        echo "| Windows | ${{ needs.build-windows.result }} | ${{ github.event.inputs.python-version || '3.10' }} |" >> $GITHUB_STEP_SUMMARY
         
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "## Artifacts" >> $GITHUB_STEP_SUMMARY
@@ -244,7 +229,7 @@ jobs:
         if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Build Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "- Python Version: ${{ inputs.python-version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Build Type: ${{ inputs.build-type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Include Icon: ${{ inputs.include-icon }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Python Version: ${{ github.event.inputs.python-version || '3.10' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build Type: ${{ github.event.inputs.build-type || 'onefile' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Include Icon: ${{ github.event.inputs.include-icon || 'true' }}" >> $GITHUB_STEP_SUMMARY
         fi
