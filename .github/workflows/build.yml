@@ -27,7 +27,7 @@ jobs:
         # --onefile: 打包成单文件
         # --noconsole: 运行时不显示黑框命令行
         # --name: 指定生成的exe名字
-        pyinstaller --onefile --noconsole --name Gansu_Gaokao_Scorer main.py
+        pyinstaller --onefile --noconsole --name 科学计算器 main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
