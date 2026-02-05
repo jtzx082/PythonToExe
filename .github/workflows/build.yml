@@ -214,18 +214,21 @@ jobs:
         echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
         echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
         
+        # 获取目标平台字符串
+        TARGET_PLATFORMS="${{ github.event.inputs.target-platforms || 'windows,linux,macos' }}"
+        
         # Windows 状态
-        if contains(github.event.inputs.target-platforms, 'windows'); then
+        if [[ $TARGET_PLATFORMS == *"windows"* ]]; then
           echo "| 🪟 Windows | ${{ needs.build-windows.result }} |" >> $GITHUB_STEP_SUMMARY
         fi
         
         # Linux 状态
-        if contains(github.event.inputs.target-platforms, 'linux'); then
+        if [[ $TARGET_PLATFORMS == *"linux"* ]]; then
           echo "| 🐧 Linux | ${{ needs.build-linux.result }} |" >> $GITHUB_STEP_SUMMARY
         fi
         
         # macOS 状态
-        if contains(github.event.inputs.target-platforms, 'macos'); then
+        if [[ $TARGET_PLATFORMS == *"macos"* ]]; then
           echo "| 🍎 macOS | ${{ needs.build-macos.result }} |" >> $GITHUB_STEP_SUMMARY
         fi
         
@@ -235,15 +238,15 @@ jobs:
         echo "You can download the built executables from the Artifacts section above:" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
-        if contains(github.event.inputs.target-platforms, 'windows'); then
+        if [[ $TARGET_PLATFORMS == *"windows"* ]]; then
           echo "- **${{ env.PROJECT_NAME }}-windows**: Windows executable (.exe)" >> $GITHUB_STEP_SUMMARY
         fi
         
-        if contains(github.event.inputs.target-platforms, 'linux'); then
+        if [[ $TARGET_PLATFORMS == *"linux"* ]]; then
           echo "- **${{ env.PROJECT_NAME }}-linux**: Linux executable" >> $GITHUB_STEP_SUMMARY
         fi
         
-        if contains(github.event.inputs.target-platforms, 'macos'); then
+        if [[ $TARGET_PLATFORMS == *"macos"* ]]; then
           echo "- **${{ env.PROJECT_NAME }}-macos**: macOS executable" >> $GITHUB_STEP_SUMMARY
         fi
         
@@ -251,7 +254,7 @@ jobs:
         echo "## 📝 Usage Notes" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "1. **Windows**: Run the `.exe` file directly" >> $GITHUB_STEP_SUMMARY
-        echo "2. **Linux**: Make the file executable first: `chmod +x ScientificCalculator`" >> $GITHUB_STEP_SUMMARY
+        echo "2. **Linux**: Make the file executable first: \`chmod +x ScientificCalculator\`" >> $GITHUB_STEP_SUMMARY
         echo "3. **macOS**: The app may need to be granted permission in Security & Privacy settings" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "---" >> $GITHUB_STEP_SUMMARY
