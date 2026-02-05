@@ -1,8 +1,8 @@
 name: Build Gansu Gaokao Scorer EXE
 
+# 触发机制：仅保留 workflow_dispatch (手动触发)
+# 删除了 push 触发器，因此代码更新时不会自动运行
 on:
-  push:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
