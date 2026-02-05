@@ -4,8 +4,8 @@ import numpy as np
 import threading
 import os
 import sys
-import platform     # 新增：判断操作系统
-import subprocess   # 新增：用于执行打开文件夹命令
+import platform     
+import subprocess   
 from tkinter import filedialog, messagebox
 
 # --- 全局外观设置 ---
@@ -25,7 +25,7 @@ class GaokaoApp(ctk.CTk):
         self.file_path = None
         self.df_raw = None
         self.sheet_names = []
-        self.param_entries = {} # 存储参数输入框的字典
+        self.param_entries = {} 
         
         # 布局配置
         self.grid_columnconfigure(1, weight=1)
@@ -36,7 +36,7 @@ class GaokaoApp(ctk.CTk):
         # ==========================
         self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(9, weight=1) 
+        self.sidebar_frame.grid_rowconfigure(10, weight=1) # 让中间空出空间
 
         # Logo
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=22, weight="bold"))
@@ -61,13 +61,13 @@ class GaokaoApp(ctk.CTk):
         self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
         self.class_col_dropdown.set("等待加载...")
 
-        # 底部按钮区
+        # 底部按钮区 (布局行号调整以适应弹性空间)
         self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始赋分计算", height=50, fg_color="green", font=ctk.CTkFont(size=16, weight="bold"), command=self.start_calculation)
-        self.btn_calc.grid(row=10, column=0, padx=20, pady=15)
+        self.btn_calc.grid(row=11, column=0, padx=20, pady=15)
         self.btn_calc.configure(state="disabled")
 
         self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果 Excel", height=40, command=self.export_file)
-        self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
+        self.btn_export.grid(row=12, column=0, padx=20, pady=(0, 30))
         self.btn_export.configure(state="disabled")
 
         # ==========================
@@ -83,14 +83,20 @@ class GaokaoApp(ctk.CTk):
         # 创建选项卡
         self.tabview = ctk.CTkTabview(self.main_frame)
         self.tabview.pack(fill="both", expand=True)
+        
+        # 添加三个 Tab
         self.tabview.add("科目设置")
         self.tabview.add("赋分标准设置")
+        self.tabview.add("说明与规则") # 新增 Tab
         
         # --- Tab 1: 科目设置 ---
         self.setup_subject_tab()
 
         # --- Tab 2: 赋分参数设置 ---
         self.setup_params_tab()
+        
+        # --- Tab 3: 说明与规则 (新增) ---
+        self.setup_help_tab()
 
         # 进度条
         self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
@@ -145,31 +151,85 @@ class GaokaoApp(ctk.CTk):
             ('E', '2',  '40',  '30')
         ]
 
-        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
+        self.param_entries = {} 
 
         for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
-            # 等级标签
             ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
             
-            # 百分比输入
             e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
             e_pct.insert(0, pct)
             e_pct.grid(row=row, column=1, pady=5)
             
-            # 上限输入
             e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
             e_max.insert(0, tmax)
             e_max.grid(row=row, column=2, pady=5)
             
-            # 下限输入
             e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
             e_min.insert(0, tmin)
             e_min.grid(row=row, column=3, pady=5)
 
-            # 存入字典方便调用
             self.param_entries[f"{grade}_percent"] = e_pct
             self.param_entries[f"{grade}_max"] = e_max
             self.param_entries[f"{grade}_min"] = e_min
+
+    def setup_help_tab(self):
+        """新增：说明与规则 Tab 页面的内容"""
+        tab = self.tabview.tab("说明与规则")
+        
+        # 创建只读文本框
+        textbox = ctk.CTkTextbox(tab, font=("Microsoft YaHei UI", 14), wrap="word")
+        textbox.pack(fill="both", expand=True, padx=15, pady=15)
+        
+        # 说明文档内容
+        help_content = """【一、甘肃省新高考赋分规则说明】
+
+1. 基本原理
+   思想政治、地理、化学、生物学 4 门科目作为等级赋分科目。
+   将每门科目的原始成绩从高到低划分为 A、B、C、D、E 五个等级。
+   
+2. 等级划分比例与赋分区间 (默认标准)
+   ------------------------------------------------------------
+   等级 |  人数比例  |  原始分区间   |  赋分区间 (分)
+   ------------------------------------------------------------
+    A   |    约15%   |  [Y2, Y1]    |  100 ~ 86
+    B   |    约35%   |  [Y2, Y1]    |   85 ~ 71
+    C   |    约35%   |  [Y2, Y1]    |   70 ~ 56
+    D   |    约13%   |  [Y2, Y1]    |   55 ~ 41
+    E   |    约 2%   |  [Y2, Y1]    |   40 ~ 30
+   ------------------------------------------------------------
+
+3. 计算公式 (等比例转换)
+   假设某同学原始分为 Y，该等级原始分最高为 Y2，最低为 Y1；
+   对应赋分等级最高为 T2，最低为 T1，则赋分成绩 T 计算如下：
+
+       (Y - Y1) / (Y2 - Y1) = (T - T1) / (T2 - T1)
+
+   最后结果 T 四舍五入取整。
+
+============================================================
+
+【二、软件使用注意事项】
+
+1. Excel 文件格式要求：
+   - 第一行必须是【表头】（如：姓名、班级、语文、数学...）。
+   - 不能有【合并单元格】，否则可能导致读取数据错位。
+   - 分数列应为纯数字，缺考请留空或填0。
+
+2. 操作流程：
+   第一步：点击左侧“导入 Excel”。
+   第二步：选择正确的 Sheet 工作表。
+   第三步：在“科目设置”中勾选列（区分直接计入和赋分科目）。
+   第四步：点击“开始赋分计算”。
+   第五步：导出结果。
+
+3. 常见报错解决：
+   - 如果提示“权限错误”，请检查是否已经在 Excel 中打开了该文件，请先关闭 Excel 再导入。
+   - 如果计算结果全为空，请检查是否选对了“班级列”。
+
+【俞晋全名师工作室 出品 | 2026】
+"""
+        textbox.insert("0.0", help_content)
+        textbox.configure(state="disabled") # 设置为只读模式
 
     # --------------------------
     # 文件加载与 UI 更新逻辑
@@ -236,10 +296,9 @@ class GaokaoApp(ctk.CTk):
             add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
 
     # --------------------------
-    # 核心计算逻辑 (动态读取参数)
+    # 核心计算逻辑
     # --------------------------
     def get_user_configs(self):
-        """从UI界面读取用户输入的参数"""
         configs = []
         grades = ['A', 'B', 'C', 'D', 'E']
         try:
@@ -268,7 +327,6 @@ class GaokaoApp(ctk.CTk):
             messagebox.showwarning("提示", "请至少勾选一个科目！")
             return
         
-        # 验证并获取配置
         self.user_configs = self.get_user_configs()
         if not self.user_configs:
             return
@@ -283,7 +341,7 @@ class GaokaoApp(ctk.CTk):
     def run_math_logic(self):
         try:
             df = self.df_raw.copy()
-            grade_configs = self.user_configs # 使用用户自定义的配置
+            grade_configs = self.user_configs 
 
             def calculate_assigned_score(series):
                 series_num = pd.to_numeric(series, errors='coerce')
