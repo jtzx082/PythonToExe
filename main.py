@@ -15,20 +15,23 @@ class GaokaoApp(ctk.CTk):
         super().__init__()
 
         # 1. 窗口基础设置
-        self.title("甘肃新高考赋分系统 Pro Max | 俞晋全制作")
-        self.geometry("1100x850")
-        self.minsize(900, 700)
+        self.title("甘肃新高考赋分系统 Pro Max (自定义参数版) | 俞晋全名师工作室")
+        self.geometry("1200x850")
+        self.minsize(1000, 750)
         
         # 数据变量
         self.file_path = None
         self.df_raw = None
         self.sheet_names = []
+        self.param_entries = {} # 存储参数输入框的字典
         
         # 布局配置
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # === 左侧边栏 ===
+        # ==========================
+        # === 左侧边栏 (操作区) ===
+        # ==========================
         self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
         self.sidebar_frame.grid_rowconfigure(9, weight=1) 
@@ -65,17 +68,42 @@ class GaokaoApp(ctk.CTk):
         self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
         self.btn_export.configure(state="disabled")
 
-        # === 右侧内容区 ===
+        # ==========================
+        # === 右侧主内容区 (Tab) ===
+        # ==========================
         self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         
         # 状态栏
-        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请点击左侧按钮导入数据。", anchor="w", font=("Microsoft YaHei UI", 16))
-        self.status_label.pack(fill="x", pady=(0, 15))
+        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请先导入数据，然后确认【赋分标准】。", anchor="w", font=("Microsoft YaHei UI", 16))
+        self.status_label.pack(fill="x", pady=(0, 10))
 
+        # 创建选项卡
+        self.tabview = ctk.CTkTabview(self.main_frame)
+        self.tabview.pack(fill="both", expand=True)
+        self.tabview.add("科目设置")
+        self.tabview.add("赋分标准设置")
+        
+        # --- Tab 1: 科目设置 ---
+        self.setup_subject_tab()
+
+        # --- Tab 2: 赋分参数设置 ---
+        self.setup_params_tab()
+
+        # 进度条
+        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
+        self.progressbar.pack(fill="x", pady=(15, 0))
+        self.progressbar.set(0)
+
+    # --------------------------
+    # 界面构建辅助函数
+    # --------------------------
+    def setup_subject_tab(self):
+        tab = self.tabview.tab("科目设置")
+        
         # 滚动设置区
-        self.scroll_frame = ctk.CTkScrollableFrame(self.main_frame, label_text="科目勾选设置")
-        self.scroll_frame.pack(fill="both", expand=True)
+        self.scroll_frame = ctk.CTkScrollableFrame(tab, label_text="勾选对应列名")
+        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # 原始计入科目区
         self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【直接计入总分】 (语数外 + 物理/历史):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
@@ -91,13 +119,59 @@ class GaokaoApp(ctk.CTk):
         self.assign_checkboxes_frame.pack(fill="x", pady=5, padx=10)
         self.assign_checkboxes = []
 
-        # 进度条
-        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progressbar.pack(fill="x", pady=(20, 0))
-        self.progressbar.set(0)
+    def setup_params_tab(self):
+        tab = self.tabview.tab("赋分标准设置")
+        
+        info_lbl = ctk.CTkLabel(tab, text="请根据实际需求修改参数（默认值为甘肃省标准）。\n人数比例请输入整数（如15代表15%）。", font=("Microsoft YaHei UI", 13))
+        info_lbl.pack(pady=10)
 
-    # --- 文件与界面逻辑 ---
+        # 参数网格容器
+        grid_frame = ctk.CTkFrame(tab)
+        grid_frame.pack(padx=20, pady=10)
 
+        # 表头
+        headers = ["等级", "人数比例 (%)", "赋分上限 (T2)", "赋分下限 (T1)"]
+        for col, text in enumerate(headers):
+            ctk.CTkLabel(grid_frame, text=text, font=("Arial", 12, "bold")).grid(row=0, column=col, padx=15, pady=10)
+
+        # 默认数据 (甘肃标准)
+        default_data = [
+            ('A', '15', '100', '86'),
+            ('B', '35', '85',  '71'),
+            ('C', '35', '70',  '56'),
+            ('D', '13', '55',  '41'),
+            ('E', '2',  '40',  '30')
+        ]
+
+        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
+
+        for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
+            # 等级标签
+            ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
+            
+            # 百分比输入
+            e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
+            e_pct.insert(0, pct)
+            e_pct.grid(row=row, column=1, pady=5)
+            
+            # 上限输入
+            e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
+            e_max.insert(0, tmax)
+            e_max.grid(row=row, column=2, pady=5)
+            
+            # 下限输入
+            e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
+            e_min.insert(0, tmin)
+            e_min.grid(row=row, column=3, pady=5)
+
+            # 存入字典方便调用
+            self.param_entries[f"{grade}_percent"] = e_pct
+            self.param_entries[f"{grade}_max"] = e_max
+            self.param_entries[f"{grade}_min"] = e_min
+
+    # --------------------------
+    # 文件加载与 UI 更新逻辑
+    # --------------------------
     def load_file_action(self):
         file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
         if not file_path: return
@@ -136,7 +210,7 @@ class GaokaoApp(ctk.CTk):
             self.create_subject_checkboxes(columns)
             
             self.btn_calc.configure(state="normal")
-            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请勾选对应科目")
+            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请在【科目设置】页勾选")
         except Exception as e:
             messagebox.showerror("错误", f"加载工作表失败: {e}")
 
@@ -159,8 +233,30 @@ class GaokaoApp(ctk.CTk):
         for col in columns:
             add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
 
-    # --- 核心计算逻辑 (新增原始总分计算) ---
-    
+    # --------------------------
+    # 核心计算逻辑 (动态读取参数)
+    # --------------------------
+    def get_user_configs(self):
+        """从UI界面读取用户输入的参数"""
+        configs = []
+        grades = ['A', 'B', 'C', 'D', 'E']
+        try:
+            for g in grades:
+                pct = float(self.param_entries[f"{g}_percent"].get()) / 100.0
+                t_max = int(self.param_entries[f"{g}_max"].get())
+                t_min = int(self.param_entries[f"{g}_min"].get())
+                
+                configs.append({
+                    'grade': g,
+                    'percent': pct,
+                    't_max': t_max,
+                    't_min': t_min
+                })
+            return configs
+        except ValueError:
+            messagebox.showerror("参数错误", "赋分标准中请输入有效的数字！")
+            return None
+
     def start_calculation(self):
         self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
         self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
@@ -169,9 +265,14 @@ class GaokaoApp(ctk.CTk):
         if not self.selected_raw and not self.selected_assign:
             messagebox.showwarning("提示", "请至少勾选一个科目！")
             return
+        
+        # 验证并获取配置
+        self.user_configs = self.get_user_configs()
+        if not self.user_configs:
+            return
 
         self.btn_calc.configure(state="disabled")
-        self.status_label.configure(text="正在全速计算中...")
+        self.status_label.configure(text="正在根据自定义参数计算...")
         self.progressbar.configure(mode="indeterminate")
         self.progressbar.start()
         
@@ -180,15 +281,7 @@ class GaokaoApp(ctk.CTk):
     def run_math_logic(self):
         try:
             df = self.df_raw.copy()
-            
-            # 定义赋分标准
-            grade_configs = [
-                {'grade': 'A', 'percent': 0.15, 't_max': 100, 't_min': 86},
-                {'grade': 'B', 'percent': 0.35, 't_max': 85,  't_min': 71},
-                {'grade': 'C', 'percent': 0.35, 't_max': 70,  't_min': 56},
-                {'grade': 'D', 'percent': 0.13, 't_max': 55,  't_min': 41},
-                {'grade': 'E', 'percent': 0.02, 't_max': 40,  't_min': 30},
-            ]
+            grade_configs = self.user_configs # 使用用户自定义的配置
 
             def calculate_assigned_score(series):
                 series_num = pd.to_numeric(series, errors='coerce')
@@ -207,7 +300,9 @@ class GaokaoApp(ctk.CTk):
                     chunk = sorted_scores.iloc[curr:end]
                     Y2, Y1 = chunk.max(), chunk.min()
                     T2, T1 = cfg['t_max'], cfg['t_min']
+                    
                     def linear(Y): return (T2+T1)/2 if Y2==Y1 else T1 + ((Y-Y1)*(T2-T1))/(Y2-Y1)
+                    
                     result.loc[chunk.index] = chunk.apply(linear)
                     curr = end
                 return result.round()
@@ -222,64 +317,46 @@ class GaokaoApp(ctk.CTk):
                     dframe[cl_rk] = None
                 return yr_rk, cl_rk
 
-            # === 准备收集列 ===
-            # 用于计算总分的列表
-            cols_for_raw_total = []    # 存放所有科目的【原始】分数列名
-            cols_for_final_total = []  # 存放原始科目+赋分科目【赋分后】的分数列名
-            
-            output_cols_order = []     # 记录中间成绩列的展示顺序
+            cols_for_raw_total = []    
+            cols_for_final_total = []  
+            output_cols_order = []     
 
-            # 1. 处理原始科目 (语数外+物理历史)
+            # 1. 原始科目
             for sub in self.selected_raw:
                 df[sub] = pd.to_numeric(df[sub], errors='coerce')
                 yr_rk, cl_rk = calc_ranks(df, sub, sub)
-                
-                # 原始科目：既算在原始总分里，也算在最终总分里
                 cols_for_raw_total.append(sub)
                 cols_for_final_total.append(sub)
-                
                 output_cols_order.extend([sub, yr_rk, cl_rk])
 
-            # 2. 处理赋分科目 (化生政地)
+            # 2. 赋分科目
             for sub in self.selected_assign:
-                # 原始成绩
                 df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                
-                # 赋分成绩
                 assigned_col_name = f"{sub}赋分"
                 df[assigned_col_name] = calculate_assigned_score(df[sub])
                 
-                # 计算赋分排 (题目要求：赋分科目只排赋分后的)
                 yr_rk, cl_rk = calc_ranks(df, assigned_col_name, assigned_col_name)
                 
-                # 归档
-                cols_for_raw_total.append(sub)            # 原始总分用这一列
-                cols_for_final_total.append(assigned_col_name) # 最终总分用这一列
-                
-                # 展示顺序: 原始 -> 赋分 -> 年排 -> 班排
+                cols_for_raw_total.append(sub)            
+                cols_for_final_total.append(assigned_col_name) 
                 output_cols_order.extend([sub, assigned_col_name, yr_rk, cl_rk])
 
-            # 3. 计算【原始总分】及排名
+            # 3. 原始总分
             df["原始总分"] = df[cols_for_raw_total].sum(axis=1, min_count=1)
             raw_yr_rk, raw_cl_rk = calc_ranks(df, "原始总分", "原始总分")
             raw_total_group = ["原始总分", raw_yr_rk, raw_cl_rk]
 
-            # 4. 计算【最终总分】(赋分后) 及排名
+            # 4. 最终总分
             df["总分"] = df[cols_for_final_total].sum(axis=1, min_count=1)
             final_yr_rk, final_cl_rk = calc_ranks(df, "总分", "总分")
             final_total_group = ["总分", final_yr_rk, final_cl_rk]
 
-            # 默认按最终总分年排排序
             df = df.sort_values(final_yr_rk)
 
-            # 5. 构建最终表格顺序
-            # 基础信息 + 单科详情 + 原始总分(新) + 最终总分
             all_generated_cols = set(output_cols_order + raw_total_group + final_total_group)
             base_info_cols = [c for c in df.columns if c not in all_generated_cols]
             
-            # 关键：将 raw_total_group 放在 final_total_group 前面
             final_order = base_info_cols + output_cols_order + raw_total_group + final_total_group
-            
             final_order = [c for c in final_order if c in df.columns]
             self.df_result = df[final_order]
 
@@ -291,9 +368,9 @@ class GaokaoApp(ctk.CTk):
 
     def finish_calculation(self):
         self.stop_loading_ui()
-        self.status_label.configure(text="✅ 计算完成！包含原始总分与赋分总分。")
+        self.status_label.configure(text="✅ 计算完成！数据已应用当前赋分标准。")
         self.btn_export.configure(state="normal", fg_color="#2CC985", text="导出 Excel 结果")
-        messagebox.showinfo("成功", "计算完成！\n已新增【原始总分】及其排名，并排在【赋分总分】之前。")
+        messagebox.showinfo("成功", "计算完成！\n请注意：本次计算使用了您在【赋分标准设置】中填写的参数。")
 
     def stop_loading_ui(self):
         self.progressbar.stop()
@@ -302,7 +379,7 @@ class GaokaoApp(ctk.CTk):
         self.btn_calc.configure(state="normal")
 
     def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_ProMax.xlsx")
+        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
         if save_path:
             try:
                 self.df_result.to_excel(save_path, index=False)
