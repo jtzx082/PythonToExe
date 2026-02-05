@@ -1,200 +1,339 @@
+import customtkinter as ctk
 import pandas as pd
 import numpy as np
-import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+import threading
 import os
+import sys
+from tkinter import filedialog, messagebox
 
-# --------------------------
-# 核心算法逻辑
-# --------------------------
+# 设置外观模式 (System, Dark, Light)
+ctk.set_appearance_mode("System")  
+# 设置颜色主题 (blue, dark-blue, green)
+ctk.set_default_color_theme("blue")  
 
-def get_grade_config():
-    """定义赋分等级和区间标准 (甘肃/通用 3+1+2)"""
-    return [
-        {'grade': 'A', 'percent': 0.15, 't_max': 100, 't_min': 86},
-        {'grade': 'B', 'percent': 0.35, 't_max': 85,  't_min': 71},
-        {'grade': 'C', 'percent': 0.35, 't_max': 70,  't_min': 56},
-        {'grade': 'D', 'percent': 0.13, 't_max': 55,  't_min': 41},
-        {'grade': 'E', 'percent': 0.02, 't_max': 40,  't_min': 30},
-    ]
+class GaokaoApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
 
-def calculate_assigned_score(series):
-    """
-    对单科原始成绩进行赋分计算
-    会自动忽略空值（即没选该科的学生），只对有分数的学生群体进行赋分
-    """
-    # 1. 强制转换为数字类型，非数字变为NaN
-    series_numeric = pd.to_numeric(series, errors='coerce')
-    
-    # 2. 过滤掉没选该科的学生（NaN）
-    valid_scores = series_numeric.dropna()
-    
-    total_count = len(valid_scores)
-    
-    # 如果没人选这科，返回全空
-    if total_count == 0:
-        return pd.Series(index=series.index, dtype=float)
-
-    # 3. 排序：降序
-    sorted_scores = valid_scores.sort_values(ascending=False)
-    
-    # 4. 划分等级并计算
-    assigned_result = pd.Series(index=valid_scores.index, dtype=float)
-    
-    current_idx = 0
-    configs = get_grade_config()
-    
-    for cfg in configs:
-        count = int(np.round(total_count * cfg['percent']))
-        if cfg['grade'] == 'E':
-            count = total_count - current_idx
+        # 1. 窗口基础设置
+        self.title("甘肃新高考赋分系统 Pro | 俞晋全名师工作室")
+        self.geometry("1100x800")
+        self.minsize(900, 700)
         
-        if count <= 0:
-            continue
-
-        end_idx = min(current_idx + count, total_count)
-        if current_idx >= end_idx:
-            break
-
-        grade_indices = sorted_scores.iloc[current_idx : end_idx].index
-        grade_raw_scores = sorted_scores.iloc[current_idx : end_idx]
+        # 数据存储变量
+        self.file_path = None
+        self.df_raw = None     # 原始读取的数据
+        self.df_working = None # 当前工作表的数据
+        self.sheet_names = []
         
-        Y2 = grade_raw_scores.max()
-        Y1 = grade_raw_scores.min()
-        T2 = cfg['t_max']
-        T1 = cfg['t_min']
+        # 布局容器配置
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # === 左侧边栏 (控制区) ===
+        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(8, weight=1)
+
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+
+        # 步骤1: 导入文件
+        self.btn_load = ctk.CTkButton(self.sidebar_frame, text="1. 导入Excel成绩表", command=self.load_file_action)
+        self.btn_load.grid(row=1, column=0, padx=20, pady=10)
+
+        # 步骤2: 选择工作表 (Sheet)
+        self.lbl_sheet = ctk.CTkLabel(self.sidebar_frame, text="选择工作表:", anchor="w")
+        self.lbl_sheet.grid(row=2, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.sheet_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_sheet_event)
+        self.sheet_dropdown.grid(row=3, column=0, padx=20, pady=(5, 10))
+        self.sheet_dropdown.set("请先导入文件")
+        self.sheet_dropdown.configure(state="disabled")
+
+        # 步骤3: 选择班级列
+        self.lbl_class = ctk.CTkLabel(self.sidebar_frame, text="选择班级列 (用于班排):", anchor="w")
+        self.lbl_class.grid(row=4, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.class_col_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[])
+        self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
+        self.class_col_dropdown.set("等待加载...")
+
+        # 底部操作按钮
+        self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始计算", fg_color="green", command=self.start_calculation)
+        self.btn_calc.grid(row=9, column=0, padx=20, pady=10)
+        self.btn_calc.configure(state="disabled")
+
+        self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果", command=self.export_file)
+        self.btn_export.grid(row=10, column=0, padx=20, pady=(0, 20))
+        self.btn_export.configure(state="disabled")
+
+        # === 右侧主内容区 ===
+        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         
-        def calculate_single(Y):
-            if Y2 == Y1: 
-                return (T2 + T1) / 2
+        # 顶部状态栏
+        self.status_label = ctk.CTkLabel(self.main_frame, text="就绪 - 请导入Excel文件", anchor="w", font=("Arial", 14))
+        self.status_label.pack(fill="x", pady=(0, 10))
+
+        # 滚动区域 (用于放置多选框)
+        self.scroll_frame = ctk.CTkScrollableFrame(self.main_frame, label_text="科目设置 (自动识别列名)")
+        self.scroll_frame.pack(fill="both", expand=True)
+
+        # 内部容器：原始分科目
+        self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【原始计入科目】(语数外+首选):", anchor="w", font=("Arial", 12, "bold"))
+        self.lbl_raw.pack(fill="x", pady=(5, 0))
+        self.raw_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
+        self.raw_checkboxes_frame.pack(fill="x", pady=5)
+        self.raw_checkboxes = [] # 存储复选框对象
+
+        # 内部容器：赋分科目
+        self.lbl_assign = ctk.CTkLabel(self.scroll_frame, text="【等级赋分科目】(再选科目):", anchor="w", font=("Arial", 12, "bold"))
+        self.lbl_assign.pack(fill="x", pady=(20, 0))
+        self.assign_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
+        self.assign_checkboxes_frame.pack(fill="x", pady=5)
+        self.assign_checkboxes = [] # 存储复选框对象
+
+        # 进度条
+        self.progressbar = ctk.CTkProgressBar(self.main_frame)
+        self.progressbar.pack(fill="x", pady=(20, 0))
+        self.progressbar.set(0)
+
+    # --- 逻辑处理 ---
+
+    def load_file_action(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        if not file_path:
+            return
+        
+        self.file_path = file_path
+        self.status_label.configure(text=f"正在读取: {os.path.basename(file_path)}...")
+        self.progressbar.start()
+        
+        # 开启线程读取，防止界面卡顿
+        threading.Thread(target=self.read_excel_sheets).start()
+
+    def read_excel_sheets(self):
+        try:
+            excel_file = pd.ExcelFile(self.file_path)
+            self.sheet_names = excel_file.sheet_names
+            
+            # 回到主线程更新UI
+            self.after(0, self.update_sheet_ui)
+        except Exception as e:
+            self.after(0, lambda: messagebox.showerror("错误", f"读取文件失败: {e}"))
+            self.after(0, self.progressbar.stop)
+
+    def update_sheet_ui(self):
+        self.progressbar.stop()
+        self.progressbar.set(1)
+        self.status_label.configure(text=f"已加载: {os.path.basename(self.file_path)}")
+        
+        # 更新Sheet下拉框
+        self.sheet_dropdown.configure(values=self.sheet_names, state="normal")
+        self.sheet_dropdown.set(self.sheet_names[0])
+        
+        # 自动加载第一个Sheet的数据
+        self.change_sheet_event(self.sheet_names[0])
+
+    def change_sheet_event(self, sheet_name):
+        self.status_label.configure(text=f"正在加载工作表: {sheet_name}...")
+        try:
+            # 读取数据
+            self.df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name)
+            columns = self.df_raw.columns.tolist()
+            
+            # 更新班级下拉框
+            self.class_col_dropdown.configure(values=columns)
+            # 智能猜测班级列
+            for col in columns:
+                if "班" in str(col):
+                    self.class_col_dropdown.set(col)
+                    break
             else:
-                return T1 + ((Y - Y1) * (T2 - T1)) / (Y2 - Y1)
+                self.class_col_dropdown.set(columns[0] if columns else "")
 
-        assigned_vals = grade_raw_scores.apply(calculate_single)
-        assigned_result.loc[grade_indices] = assigned_vals
+            # 生成科目复选框
+            self.create_subject_checkboxes(columns)
+            
+            self.btn_calc.configure(state="normal")
+            self.status_label.configure(text=f"工作表 {sheet_name} 加载完成，请选择科目。")
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"加载工作表失败: {e}")
+
+    def create_subject_checkboxes(self, columns):
+        # 清除旧的复选框
+        for cb in self.raw_checkboxes: cb.destroy()
+        for cb in self.assign_checkboxes: cb.destroy()
+        self.raw_checkboxes.clear()
+        self.assign_checkboxes.clear()
         
-        current_idx = end_idx
+        # 常见的科目名称，用于自动勾选
+        common_raw = ["语文", "数学", "英语", "物理", "历史", "外语"]
+        common_assign = ["化学", "生物", "地理", "政治", "思想政治"]
 
-    return assigned_result.round()
+        # 创建原始分复选框 (网格布局)
+        for i, col in enumerate(columns):
+            cb = ctk.CTkCheckBox(self.raw_checkboxes_frame, text=col)
+            cb.grid(row=i//4, column=i%4, sticky="w", padx=10, pady=5)
+            # 自动勾选
+            if any(n in str(col) for n in common_raw):
+                cb.select()
+            self.raw_checkboxes.append(cb)
 
-def calculate_rankings(df, score_col, class_col, rank_col_name_grade, rank_col_name_class):
-    """
-    计算排名（年级排 + 班级排）
-    score_col: 要排名的分数列名
-    class_col: 班级列名
-    """
-    # 1. 年级排名 (method='min' 表示并列第1，下一个人第3)
-    df[rank_col_name_grade] = df[score_col].rank(ascending=False, method='min')
+        # 创建赋分复选框
+        for i, col in enumerate(columns):
+            cb = ctk.CTkCheckBox(self.assign_checkboxes_frame, text=col)
+            cb.grid(row=i//4, column=i%4, sticky="w", padx=10, pady=5)
+            # 自动勾选
+            if any(n in str(col) for n in common_assign):
+                cb.select()
+            self.assign_checkboxes.append(cb)
+
+    # --- 核心计算逻辑 ---
     
-    # 2. 班级排名 (分组计算)
-    if class_col in df.columns:
-        df[rank_col_name_class] = df.groupby(class_col)[score_col].rank(ascending=False, method='min')
-    else:
-        df[rank_col_name_class] = None # 如果没找到班级列，留空
+    def start_calculation(self):
+        # 获取用户选择
+        self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
+        self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
+        self.selected_class_col = self.class_col_dropdown.get()
 
-# --------------------------
-# GUI 与 业务流程
-# --------------------------
+        if not self.selected_raw and not self.selected_assign:
+            messagebox.showwarning("提示", "请至少选择一个科目！")
+            return
 
-def run_app():
-    root = tk.Tk()
-    root.withdraw()
-
-    try:
-        messagebox.showinfo("甘肃新高考赋分工具 Pro", 
-                            "版本更新说明：\n"
-                            "1. 支持选课组合差异化处理（没分数的科目自动跳过）。\n"
-                            "2. 总分自动合成（原始分科目 + 赋分后科目）。\n"
-                            "3. 自动生成单科及总分的【年级排名】和【班级排名】。")
-
-        # 1. 选择文件
-        file_path = filedialog.askopenfilename(title="选择学生成绩表 (Excel)", filetypes=[("Excel files", "*.xlsx *.xls")])
-        if not file_path: return
-
-        df = pd.read_excel(file_path)
-
-        # 2. 识别关键列名
-        # 2.1 班级列
-        class_col = simpledialog.askstring("列名配置", "请输入Excel中【班级】所在的列名：\n(例如：班级 / 班号 / Class)", initialvalue="班级")
-        if not class_col or class_col not in df.columns:
-            messagebox.showwarning("警告", f"未找到列名'{class_col}'，将无法计算班级排名，仅计算年级排名。")
-            class_col = None
-
-        # 2.2 原始分科目 (语数外 + 物理/历史)
-        raw_subs_str = simpledialog.askstring("科目配置 1/2", 
-            "请输入【直接计入总分】的原始分科目：\n(包括：语文、数学、英语、物理、历史)\n用逗号分隔", 
-            initialvalue="语文,数学,英语,物理,历史")
-        if not raw_subs_str: return
-        raw_subs = [s.strip() for s in raw_subs_str.replace("，", ",").split(",") if s.strip() and s.strip() in df.columns]
-
-        # 2.3 赋分科目 (化生政地)
-        assign_subs_str = simpledialog.askstring("科目配置 2/2", 
-            "请输入需【等级赋分】的科目：\n(通常为：化学、生物、政治、地理)\n用逗号分隔", 
-            initialvalue="化学,生物,政治,地理")
-        if not assign_subs_str: return
-        assign_subs = [s.strip() for s in assign_subs_str.replace("，", ",").split(",") if s.strip() and s.strip() in df.columns]
-
-        # 3. 开始处理
-        output_df = df.copy()
+        self.btn_calc.configure(state="disabled")
+        self.status_label.configure(text="正在进行赋分计算...")
+        self.progressbar.start()
         
-        # 用于存储最终用于加总分的列名
-        final_score_columns = []
+        threading.Thread(target=self.run_math_logic).start()
 
-        # --- A. 处理原始分科目 ---
-        for sub in raw_subs:
-            # 确保是数字，处理空值
-            output_df[sub] = pd.to_numeric(output_df[sub], errors='coerce')
-            final_score_columns.append(sub) # 原始分直接加入总分计算列表
+    def run_math_logic(self):
+        try:
+            df = self.df_raw.copy()
             
-            # 计算原始分排名
-            calculate_rankings(output_df, sub, class_col, f"{sub}_年排", f"{sub}_班排")
+            # 定义赋分标准
+            grade_configs = [
+                {'grade': 'A', 'percent': 0.15, 't_max': 100, 't_min': 86},
+                {'grade': 'B', 'percent': 0.35, 't_max': 85,  't_min': 71},
+                {'grade': 'C', 'percent': 0.35, 't_max': 70,  't_min': 56},
+                {'grade': 'D', 'percent': 0.13, 't_max': 55,  't_min': 41},
+                {'grade': 'E', 'percent': 0.02, 't_max': 40,  't_min': 30},
+            ]
 
-        # --- B. 处理赋分科目 ---
-        for sub in assign_subs:
-            # 1. 计算赋分
-            assigned_col_name = f"{sub}_赋分"
-            try:
-                # 赋分逻辑已经包含空值处理
-                output_df[assigned_col_name] = calculate_assigned_score(df[sub])
-            except Exception as e:
-                messagebox.showerror("错误", f"计算 {sub} 失败: {e}")
-                return
+            def calculate_assigned_score(series):
+                series_numeric = pd.to_numeric(series, errors='coerce')
+                valid_scores = series_numeric.dropna()
+                total_count = len(valid_scores)
+                if total_count == 0: return pd.Series(index=series.index, dtype=float)
+
+                sorted_scores = valid_scores.sort_values(ascending=False)
+                assigned_result = pd.Series(index=valid_scores.index, dtype=float)
+                current_idx = 0
+                
+                for cfg in grade_configs:
+                    count = int(np.round(total_count * cfg['percent']))
+                    if cfg['grade'] == 'E': count = total_count - current_idx
+                    if count <= 0: continue
+                    
+                    end_idx = min(current_idx + count, total_count)
+                    if current_idx >= end_idx: break
+
+                    grade_indices = sorted_scores.iloc[current_idx : end_idx].index
+                    grade_raw_scores = sorted_scores.iloc[current_idx : end_idx]
+                    
+                    Y2, Y1 = grade_raw_scores.max(), grade_raw_scores.min()
+                    T2, T1 = cfg['t_max'], cfg['t_min']
+                    
+                    def calc_single(Y):
+                        return (T2 + T1) / 2 if Y2 == Y1 else T1 + ((Y - Y1) * (T2 - T1)) / (Y2 - Y1)
+
+                    assigned_result.loc[grade_indices] = grade_raw_scores.apply(calc_single)
+                    current_idx = end_idx
+                return assigned_result.round()
+
+            def calc_ranks(dframe, col, class_col):
+                if col not in dframe.columns: return
+                dframe[f"{col}_年排"] = dframe[col].rank(ascending=False, method='min')
+                if class_col and class_col in dframe.columns:
+                    dframe[f"{col}_班排"] = dframe.groupby(class_col)[col].rank(ascending=False, method='min')
+
+            final_score_cols = []
             
-            # 2. 将赋分后的列加入总分计算列表
-            # 注意：如果某学生没选这科，这里是NaN，sum的时候会自动忽略
-            final_score_columns.append(assigned_col_name)
+            # 1. 处理原始分
+            for sub in self.selected_raw:
+                df[sub] = pd.to_numeric(df[sub], errors='coerce')
+                calc_ranks(df, sub, self.selected_class_col)
+                final_score_cols.append(sub)
 
-            # 3. 对“赋分后”的成绩进行排名 (用户要求：赋分科目只对赋分后成绩排名)
-            calculate_rankings(output_df, assigned_col_name, class_col, f"{sub}_赋分_年排", f"{sub}_赋分_班排")
+            # 2. 处理赋分
+            for sub in self.selected_assign:
+                assigned_col = f"{sub}_赋分"
+                df[assigned_col] = calculate_assigned_score(df[sub])
+                calc_ranks(df, assigned_col, self.selected_class_col)
+                final_score_cols.append(assigned_col)
 
-        # --- C. 计算总分 ---
-        # 核心逻辑：将所有相关列（原始分列 + 赋分后列）相加
-        # min_count=1 确保如果所有科目都是NaN（缺考），总分也是NaN，而不是0
-        output_df["总分"] = output_df[final_score_columns].sum(axis=1, min_count=1)
+            # 3. 计算总分
+            df["总分"] = df[final_score_cols].sum(axis=1, min_count=1)
+            calc_ranks(df, "总分", self.selected_class_col)
+            
+            # 默认按总分排序
+            df = df.sort_values("总分_年排")
 
-        # --- D. 计算总分排名 ---
-        calculate_rankings(output_df, "总分", class_col, "总分_年排", "总分_班排")
-        
-        # 排序：默认按总分年级排名排序
-        output_df = output_df.sort_values("总分_年排")
+            # 4. 优化列顺序 (整理表格)
+            # 基础信息列 (除去成绩和排名之外的列)
+            processed_cols = []
+            for sub in self.selected_raw:
+                processed_cols.extend([sub, f"{sub}_年排", f"{sub}_班排"])
+            for sub in self.selected_assign:
+                assigned_col = f"{sub}_赋分"
+                processed_cols.extend([assigned_col, f"{assigned_col}_年排", f"{assigned_col}_班排"])
+            
+            total_cols = ["总分", "总分_年排", "总分_班排"]
+            
+            # 找出所有涉及的计算列，剩下的即为基础信息列(姓名、考号等)
+            all_calc_cols = set(processed_cols + total_cols + self.selected_assign) 
+            base_cols = [c for c in df.columns if c not in all_calc_cols]
+            
+            # 最终顺序: 基础信息 + (原始分+排名) + (赋分+排名) + 总分+排名
+            # 注意：这里我们只保留赋分后的列，不保留赋分前的原始列(避免混淆)，如果需要保留请修改此处
+            final_order = base_cols + processed_cols + total_cols
+            
+            # 过滤掉不存在的列（以防万一）
+            final_order = [c for c in final_order if c in df.columns]
+            
+            self.df_result = df[final_order]
 
-        # 4. 整理列顺序 (可选：把排名列放对应的成绩后面，这里为了简单，直接全部输出)
-        # 如果想让表格好看一点，可以简单重排一下列，这里保留所有列以防数据丢失
+            self.after(0, self.finish_calculation)
 
-        # 5. 导出
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分排名结果.xlsx")
-        
+        except Exception as e:
+            self.after(0, lambda: messagebox.showerror("计算错误", str(e)))
+            self.after(0, self.stop_loading_ui)
+
+    def finish_calculation(self):
+        self.stop_loading_ui()
+        self.status_label.configure(text="计算完成！请点击导出。")
+        self.btn_export.configure(state="normal", fg_color="green")
+        messagebox.showinfo("成功", "赋分及排名计算完成！\n请点击下方【导出结果】按钮保存文件。")
+
+    def stop_loading_ui(self):
+        self.progressbar.stop()
+        self.btn_calc.configure(state="normal")
+
+    def export_file(self):
+        save_path = filedialog.asksaveasfilename(
+            title="保存结果",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx")],
+            initialfile="赋分排名结果.xlsx"
+        )
         if save_path:
-            output_df.to_excel(save_path, index=False)
-            messagebox.showinfo("成功", f"处理完成！\n已包含单科及总分的班排、年排。\n文件保存至: {save_path}")
             try:
+                self.df_result.to_excel(save_path, index=False)
+                messagebox.showinfo("保存成功", f"文件已保存至:\n{save_path}")
                 os.startfile(os.path.dirname(save_path))
-            except:
-                pass
-
-    except Exception as e:
-        import traceback
-        messagebox.showerror("系统错误", f"发生意外错误:\n{str(e)}\n\n{traceback.format_exc()}")
+            except Exception as e:
+                messagebox.showerror("保存失败", str(e))
 
 if __name__ == "__main__":
-    run_app()
+    app = GaokaoApp()
+    app.mainloop()
