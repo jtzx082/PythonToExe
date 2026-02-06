@@ -1,10 +1,10 @@
-name: Build SmartDivider Final Fix
+name: Build Molecule Viewer
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
@@ -13,80 +13,38 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            TARGET: windows
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Win main.py
-            OUT_FILE: dist/SmartDivider-Win.exe
-          
-          - os: ubuntu-22.04
-            TARGET: linux
-            # 针对 Linux，我们依然加上 collect-all jaraco 作为双重保险
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --collect-all jaraco --name SmartDivider-Linux main.py
-            OUT_FILE: dist/SmartDivider-Linux
-            
-          - os: macos-latest
-            TARGET: macos
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Mac main.py
-            OUT_FILE: dist/SmartDivider-Mac
+        os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10' 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10' # 3.10 兼容性较好
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          
-          # 【核心修复在这里】
-          # 强制安装 70.0.0 版本以下的 setuptools
-          # 这彻底避开了 jaraco 的报错根源
-          pip install "setuptools<70.0.0"
-          
-          # 安装您的依赖
-          pip install -r requirements.txt
-          
-          # 再次补充安装 jaraco，防止万一
-          pip install jaraco.text jaraco.classes jaraco.context jaraco.functools
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-      - name: Build with PyInstaller
-        run: ${{ matrix.CMD_BUILD }}
+    - name: Build with PyInstaller
+      # 使用 --onefile 打包成单文件，--noconsole 隐藏黑框(仅限Win/Mac)
+      run: |
+        pyinstaller --name="Chem3D_Viewer" --onefile --windowed --clean --collect-all customtkinter main.py
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: SmartDivider-${{ matrix.TARGET }}
-          path: ${{ matrix.OUT_FILE }}
+    - name: Rename Output (Linux/Mac)
+      if: matrix.os != 'windows-latest'
+      run: |
+        mv dist/Chem3D_Viewer dist/Chem3D_Viewer_${{ matrix.os }}
 
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - name: Download Windows Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: SmartDivider-windows
-      - name: Download Linux Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: SmartDivider-linux
-      - name: Download Mac Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: SmartDivider-macos
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            SmartDivider-Win.exe
-            SmartDivider-Linux
-            SmartDivider-Mac
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Rename Output (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        ren dist\Chem3D_Viewer.exe Chem3D_Viewer_windows.exe
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: Chem3D_Viewer_${{ matrix.os }}
+        path: dist/
