@@ -1,10 +1,10 @@
-name: Build SmartDivider
+name: Build SmartDivider Fixed
 
 on:
   push:
     tags:
-      - 'v*' # 只有打 tag (如 v1.0) 时才触发构建，节省资源
-  workflow_dispatch: # 允许手动触发
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -16,15 +16,19 @@ jobs:
         include:
           - os: windows-latest
             TARGET: windows
-            CMD_BUILD: pyinstaller --onefile --windowed --name SmartDivider-Win main.py
+            # Windows通常兼容性较好，但也加上 collect-all 防止主题丢失
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Win main.py
             OUT_FILE: dist/SmartDivider-Win.exe
-          - os: ubuntu-latest
+          
+          - os: ubuntu-20.04  # 【关键修改1】使用旧版系统构建，兼容性更强
             TARGET: linux
-            CMD_BUILD: pyinstaller --onefile --windowed --name SmartDivider-Linux main.py
+            # 【关键修改2】增加 --collect-all customtkinter
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Linux main.py
             OUT_FILE: dist/SmartDivider-Linux
+            
           - os: macos-latest
             TARGET: macos
-            CMD_BUILD: pyinstaller --onefile --windowed --name SmartDivider-Mac main.py
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Mac main.py
             OUT_FILE: dist/SmartDivider-Mac
 
     steps:
@@ -34,7 +38,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # 推荐使用 3.10 或 3.11 保持稳定
+          python-version: '3.10' 
 
       - name: Install dependencies
         run: |
@@ -60,17 +64,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: SmartDivider-windows
-
       - name: Download Linux Artifact
         uses: actions/download-artifact@v4
         with:
           name: SmartDivider-linux
-
       - name: Download Mac Artifact
         uses: actions/download-artifact@v4
         with:
           name: SmartDivider-macos
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
