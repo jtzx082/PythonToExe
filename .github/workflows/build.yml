@@ -1,10 +1,10 @@
-name: Build SmartDivider Fixed
+name: Build SmartDivider Final
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - 'v*'  # 打标签 v1.0 等触发
+  workflow_dispatch: # 允许手动点按钮触发
 
 jobs:
   build:
@@ -16,19 +16,19 @@ jobs:
         include:
           - os: windows-latest
             TARGET: windows
-            # Windows通常兼容性较好，但也加上 collect-all 防止主题丢失
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Win main.py
+            # Windows 下通常比较宽容，但也加上 hidden-import 以防万一
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --hidden-import=jaraco.text --hidden-import=jaraco.classes --name SmartDivider-Win main.py
             OUT_FILE: dist/SmartDivider-Win.exe
           
-          - os: ubuntu-22.04  # 【关键修改1】使用旧版系统构建，兼容性更强
+          - os: ubuntu-22.04 # 使用 22.04 兼顾速度和兼容性
             TARGET: linux
-            # 【关键修改2】增加 --collect-all customtkinter
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Linux main.py
+            # 【关键修复】针对 Linux 的 jaraco 报错，强制引入相关模块
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --hidden-import=jaraco.text --hidden-import=jaraco.classes --hidden-import=pkg_resources.py2_warn --name SmartDivider-Linux main.py
             OUT_FILE: dist/SmartDivider-Linux
             
           - os: macos-latest
             TARGET: macos
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Mac main.py
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --hidden-import=jaraco.text --hidden-import=jaraco.classes --name SmartDivider-Mac main.py
             OUT_FILE: dist/SmartDivider-Mac
 
     steps:
@@ -43,6 +43,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # 显式安装 jaraco 相关库，确保环境里一定有
+          pip install jaraco.text jaraco.classes
           pip install -r requirements.txt
 
       - name: Build with PyInstaller
