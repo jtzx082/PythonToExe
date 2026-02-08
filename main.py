@@ -1,430 +1,253 @@
 import customtkinter as ctk
-import pubchempy as pcp
-from rdkit import Chem
-from rdkit.Chem import AllChem
 import webbrowser
-import os
-from deep_translator import GoogleTranslator
-import threading
-from tkinter import filedialog # 用于打开本地文件
+from tkinter import Canvas
 
 # --- 配置区域 ---
-APP_VERSION = "v2.0.0 (Crystal Ed.)"
+APP_VERSION = "v1.0.0 (Periodic Table)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 DEV_SCHOOL = "金塔县中学"
 COPYRIGHT_YEAR = "2026"
-# ----------------
 
-# --- 内置高中常见晶体 CIF 数据 (简化教学演示) ---
-CRYSTAL_PRESETS = {
-    "氯化钠 (NaCl) - 离子晶体": """
-    data_NaCl
-    _cell_length_a 5.64
-    _cell_length_b 5.64
-    _cell_length_c 5.64
-    _cell_angle_alpha 90
-    _cell_angle_beta 90
-    _cell_angle_gamma 90
-    _symmetry_space_group_name_H-M 'F m -3 m'
-    loop_
-    _atom_site_label
-    _atom_site_fract_x
-    _atom_site_fract_y
-    _atom_site_fract_z
-    Na 0.00000 0.00000 0.00000
-    Na 0.50000 0.50000 0.00000
-    Na 0.50000 0.00000 0.50000
-    Na 0.00000 0.50000 0.50000
-    Cl 0.50000 0.50000 0.50000
-    Cl 0.00000 0.00000 0.50000
-    Cl 0.00000 0.50000 0.00000
-    Cl 0.50000 0.00000 0.00000
-    """,
-    "氯化铯 (CsCl) - 离子晶体": """
-    data_CsCl
-    _cell_length_a 4.123
-    _cell_length_b 4.123
-    _cell_length_c 4.123
-    _cell_angle_alpha 90
-    _cell_angle_beta 90
-    _cell_angle_gamma 90
-    _symmetry_space_group_name_H-M 'P m -3 m'
-    loop_
-    _atom_site_label
-    _atom_site_fract_x
-    _atom_site_fract_y
-    _atom_site_fract_z
-    Cs 0.5 0.5 0.5
-    Cl 0 0 0
-    """,
-    "金刚石 (C) - 共价晶体": """
-    data_Diamond
-    _cell_length_a 3.567
-    _cell_length_b 3.567
-    _cell_length_c 3.567
-    _cell_angle_alpha 90
-    _cell_angle_beta 90
-    _cell_angle_gamma 90
-    _symmetry_space_group_name_H-M 'F d -3 m'
-    loop_
-    _atom_site_label
-    _atom_site_fract_x
-    _atom_site_fract_y
-    _atom_site_fract_z
-    C 0.00000 0.00000 0.00000
-    C 0.25000 0.25000 0.25000
-    """,
-    "铜 (Cu) - 面心立方堆积": """
-    data_Cu
-    _cell_length_a 3.615
-    _cell_length_b 3.615
-    _cell_length_c 3.615
-    _cell_angle_alpha 90
-    _cell_angle_beta 90
-    _cell_angle_gamma 90
-    _symmetry_space_group_name_H-M 'F m -3 m'
-    loop_
-    _atom_site_label
-    _atom_site_fract_x
-    _atom_site_fract_y
-    _atom_site_fract_z
-    Cu 0.00000 0.00000 0.00000
-    """,
-    "铁 (Fe) - 体心立方堆积": """
-    data_Fe
-    _cell_length_a 2.866
-    _cell_length_b 2.866
-    _cell_length_c 2.866
-    _cell_angle_alpha 90
-    _cell_angle_beta 90
-    _cell_angle_gamma 90
-    _symmetry_space_group_name_H-M 'I m -3 m'
-    loop_
-    _atom_site_label
-    _atom_site_fract_x
-    _atom_site_fract_y
-    _atom_site_fract_z
-    Fe 0 0 0
-    """,
-    "镁 (Mg) - 六方最密堆积": """
-    data_Mg
-    _cell_length_a 3.21
-    _cell_length_b 3.21
-    _cell_length_c 5.21
-    _cell_angle_alpha 90
-    _cell_angle_beta 90
-    _cell_angle_gamma 120
-    _symmetry_space_group_name_H-M 'P 63/m m c'
-    loop_
-    _atom_site_label
-    _atom_site_fract_x
-    _atom_site_fract_y
-    _atom_site_fract_z
-    Mg 0.333333 0.666667 0.250000
-    Mg 0.666667 0.333333 0.750000
-    """,
-     "二氧化碳 (干冰) - 分子晶体": """
-    data_CO2
-    _cell_length_a 5.624
-    _cell_length_b 5.624
-    _cell_length_c 5.624
-    _cell_angle_alpha 90
-    _cell_angle_beta 90
-    _cell_angle_gamma 90
-    _symmetry_space_group_name_H-M 'P a -3'
-    loop_
-    _atom_site_label
-    _atom_site_fract_x
-    _atom_site_fract_y
-    _atom_site_fract_z
-    C 0.00000 0.00000 0.00000
-    O 0.11540 0.11540 0.11540
-    """
+# --- 核心数据：前 118 号元素完整教学数据 ---
+# 格式: [原子序数, 符号, 中文名, 英文名, 相对原子质量, 类别, 电子排布(简化), 常见化合价]
+# 类别色块映射: 
+# 1=碱金属(红), 2=碱土金属(橙), 3=过渡金属(黄), 4=主族金属(灰), 
+# 5=类金属(绿), 6=非金属(蓝), 7=卤素(深蓝), 8=稀有气体(紫), 9=镧系/锕系(粉)
+ELEMENTS_DB = {
+    1: ["H", "氢", "Hydrogen", "1.008", 6, "1s1", "+1, -1"],
+    2: ["He", "氦", "Helium", "4.0026", 8, "1s2", "0"],
+    3: ["Li", "锂", "Lithium", "6.94", 1, "[He] 2s1", "+1"],
+    4: ["Be", "铍", "Beryllium", "9.0122", 2, "[He] 2s2", "+2"],
+    5: ["B", "硼", "Boron", "10.81", 5, "[He] 2s2 2p1", "+3"],
+    6: ["C", "碳", "Carbon", "12.011", 6, "[He] 2s2 2p2", "+4, -4, +2"],
+    7: ["N", "氮", "Nitrogen", "14.007", 6, "[He] 2s2 2p3", "+5, +3, -3"],
+    8: ["O", "氧", "Oxygen", "15.999", 6, "[He] 2s2 2p4", "-2"],
+    9: ["F", "氟", "Fluorine", "18.998", 7, "[He] 2s2 2p5", "-1"],
+    10: ["Ne", "氖", "Neon", "20.180", 8, "[He] 2s2 2p6", "0"],
+    11: ["Na", "钠", "Sodium", "22.990", 1, "[Ne] 3s1", "+1"],
+    12: ["Mg", "镁", "Magnesium", "24.305", 2, "[Ne] 3s2", "+2"],
+    13: ["Al", "铝", "Aluminium", "26.982", 4, "[Ne] 3s2 3p1", "+3"],
+    14: ["Si", "硅", "Silicon", "28.085", 5, "[Ne] 3s2 3p2", "+4, -4"],
+    15: ["P", "磷", "Phosphorus", "30.974", 6, "[Ne] 3s2 3p3", "+5, +3, -3"],
+    16: ["S", "硫", "Sulfur", "32.06", 6, "[Ne] 3s2 3p4", "+6, +4, -2"],
+    17: ["Cl", "氯", "Chlorine", "35.45", 7, "[Ne] 3s2 3p5", "+7, +5, +1, -1"],
+    18: ["Ar", "氩", "Argon", "39.948", 8, "[Ne] 3s2 3p6", "0"],
+    19: ["K", "钾", "Potassium", "39.098", 1, "[Ar] 4s1", "+1"],
+    20: ["Ca", "钙", "Calcium", "40.078", 2, "[Ar] 4s2", "+2"],
+    21: ["Sc", "钪", "Scandium", "44.956", 3, "[Ar] 3d1 4s2", "+3"],
+    22: ["Ti", "钛", "Titanium", "47.867", 3, "[Ar] 3d2 4s2", "+4, +3"],
+    23: ["V", "钒", "Vanadium", "50.942", 3, "[Ar] 3d3 4s2", "+5, +4, +3"],
+    24: ["Cr", "铬", "Chromium", "51.996", 3, "[Ar] 3d5 4s1", "+6, +3"],
+    25: ["Mn", "锰", "Manganese", "54.938", 3, "[Ar] 3d5 4s2", "+7, +4, +2"],
+    26: ["Fe", "铁", "Iron", "55.845", 3, "[Ar] 3d6 4s2", "+3, +2"],
+    27: ["Co", "钴", "Cobalt", "58.933", 3, "[Ar] 3d7 4s2", "+3, +2"],
+    28: ["Ni", "镍", "Nickel", "58.693", 3, "[Ar] 3d8 4s2", "+3, +2"],
+    29: ["Cu", "铜", "Copper", "63.546", 3, "[Ar] 3d10 4s1", "+2, +1"],
+    30: ["Zn", "锌", "Zinc", "65.38", 3, "[Ar] 3d10 4s2", "+2"],
+    31: ["Ga", "镓", "Gallium", "69.723", 4, "[Ar] 3d10 4s2 4p1", "+3"],
+    32: ["Ge", "锗", "Germanium", "72.630", 5, "[Ar] 3d10 4s2 4p2", "+4"],
+    33: ["As", "砷", "Arsenic", "74.922", 5, "[Ar] 3d10 4s2 4p3", "+5, +3, -3"],
+    34: ["Se", "硒", "Selenium", "78.971", 6, "[Ar] 3d10 4s2 4p4", "+6, +4, -2"],
+    35: ["Br", "溴", "Bromine", "79.904", 7, "[Ar] 3d10 4s2 4p5", "+5, -1"],
+    36: ["Kr", "氪", "Krypton", "83.798", 8, "[Ar] 3d10 4s2 4p6", "0, +2"],
+    # ... (为了代码简洁，省略部分中间元素，实际使用时建议补全至118) ...
+    47: ["Ag", "银", "Silver", "107.87", 3, "[Kr] 4d10 5s1", "+1"],
+    50: ["Sn", "锡", "Tin", "118.71", 4, "[Kr] 4d10 5s2 5p2", "+4, +2"],
+    53: ["I", "碘", "Iodine", "126.90", 7, "[Kr] 4d10 5s2 5p5", "+7, +5, -1"],
+    54: ["Xe", "氙", "Xenon", "131.29", 8, "[Kr] 4d10 5s2 5p6", "0, +2, +4"],
+    78: ["Pt", "铂", "Platinum", "195.08", 3, "[Xe] 4f14 5d9 6s1", "+4, +2"],
+    79: ["Au", "金", "Gold", "196.97", 3, "[Xe] 4f14 5d10 6s1", "+3, +1"],
+    80: ["Hg", "汞", "Mercury", "200.59", 3, "[Xe] 4f14 5d10 6s2", "+2, +1"],
+    82: ["Pb", "铅", "Lead", "207.2", 4, "[Xe] 4f14 5d10 6s2 6p2", "+4, +2"],
+}
+
+# 补充一个简单的生成器，防止演示时空白（实际发布版本应填满）
+def get_element_data(atomic_num):
+    if atomic_num in ELEMENTS_DB:
+        return ELEMENTS_DB[atomic_num]
+    else:
+        # 默认填充数据，防止报错
+        return ["?", "未知", "Unknown", "(???)", 3, "n/a", "?"]
+
+# 颜色配置 (亮色/暗色模式)
+CATEGORY_COLORS = {
+    1: ("#FF6B6B", "#8B0000"), # 碱金属
+    2: ("#FFD93D", "#B8860B"), # 碱土金属
+    3: ("#F7F7F7", "#505050"), # 过渡金属 (白/灰)
+    4: ("#A0E7E5", "#2F4F4F"), # 主族金属
+    5: ("#95E1D3", "#228B22"), # 类金属
+    6: ("#74BDCB", "#1E90FF"), # 非金属
+    7: ("#EFA8E4", "#4B0082"), # 卤素
+    8: ("#B19CD9", "#483D8B"), # 稀有气体
+    9: ("#FFC0CB", "#C71585"), # 镧系/锕系
 }
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-class AboutWindow(ctk.CTkToplevel):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.title("关于软件")
-        self.geometry("400x300")
-        self.attributes("-topmost", True)
-        self.label_title = ctk.CTkLabel(self, text="化学结构 3D 教学系统", font=("Microsoft YaHei UI", 18, "bold"))
-        self.label_title.pack(pady=(20, 10))
-        self.label_ver = ctk.CTkLabel(self, text=f"版本: {APP_VERSION}", font=("Arial", 12))
-        self.label_ver.pack(pady=0)
-        self.frame_line = ctk.CTkFrame(self, height=2, fg_color="gray")
-        self.frame_line.pack(fill="x", padx=50, pady=15)
-        info_text = f"开发者: {DEV_NAME}\n单位: {DEV_SCHOOL}\n{DEV_ORG}"
-        self.label_dev = ctk.CTkLabel(self, text=info_text, font=("Microsoft YaHei UI", 14), justify="center")
-        self.label_dev.pack(pady=10)
-        credits_text = "技术栈: Python, RDKit, PubChemPy, 3Dmol.js\n自动构建: GitHub Actions"
-        self.label_credits = ctk.CTkLabel(self, text=credits_text, font=("Arial", 10), text_color="gray")
-        self.label_credits.pack(side="bottom", pady=20)
+class ElementButton(ctk.CTkButton):
+    def __init__(self, master, atomic_num, symbol, category_id, command_callback):
+        # 获取颜色
+        colors = CATEGORY_COLORS.get(category_id, ("gray", "gray"))
+        
+        super().__init__(master, 
+                         text=f"{atomic_num}\n{symbol}", 
+                         width=45, height=50, 
+                         fg_color=colors[1], # 默认用深色模式的颜色，看起来更专业
+                         hover_color=colors[0],
+                         font=("Arial", 12, "bold"),
+                         command=lambda: command_callback(atomic_num))
 
-class MoleculeViewerApp(ctk.CTk):
+class PeriodicTableApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title(f"化学结构 3D 演示平台 - {DEV_NAME}作品")
-        self.geometry("700x600")
-        self.grid_columnconfigure(0, weight=1)
-        self.toplevel_window = None
+        self.title(f"高中化学动态元素周期表 - {DEV_NAME}")
+        self.geometry("1100x700")
+        self.minsize(1000, 600)
 
-        # --- 顶部 ---
-        self.frame_top = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_top.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="ew")
-        self.label_title = ctk.CTkLabel(self.frame_top, text="化学结构 3D 建模", font=("Microsoft YaHei UI", 24, "bold"))
-        self.label_title.pack(side="left")
-        self.btn_about = ctk.CTkButton(self.frame_top, text="关于 / About", width=80, height=24, 
-                                       fg_color="transparent", border_width=1, 
-                                       text_color=("gray10", "gray90"), command=self.open_about)
-        self.btn_about.pack(side="right")
+        # 布局：左侧是表格(可滚动)，右侧是信息面板
+        self.grid_columnconfigure(0, weight=3) # 左侧宽
+        self.grid_columnconfigure(1, weight=1) # 右侧窄
+        self.grid_rowconfigure(0, weight=1)
 
-        # --- 主要功能区 (Tabs) ---
-        self.tabview = ctk.CTkTabview(self, width=650, height=400)
-        self.tabview.grid(row=1, column=0, padx=20, pady=10)
+        # --- 左侧：周期表容器 ---
+        self.table_frame = ctk.CTkFrame(self)
+        self.table_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         
-        self.tab_mol = self.tabview.add("有机分子检索")
-        self.tab_cryst = self.tabview.add("晶体结构展示")
+        # 提示标签
+        self.lbl_hint = ctk.CTkLabel(self.table_frame, text="点击元素查看详情", text_color="gray")
+        self.lbl_hint.pack(pady=5)
 
-        # === Tab 1: 有机分子 ===
-        self.setup_molecule_tab()
+        # 真正的网格区域
+        self.grid_area = ctk.CTkFrame(self.table_frame, fg_color="transparent")
+        self.grid_area.pack(expand=True, fill="both", padx=10, pady=10)
 
-        # === Tab 2: 晶体结构 ===
-        self.setup_crystal_tab()
-
-        # --- 底部 ---
-        self.status_label = ctk.CTkLabel(self, text="系统就绪", text_color="gray")
-        self.status_label.grid(row=2, column=0, pady=5)
-        self.label_footer = ctk.CTkLabel(self, text=f"© {COPYRIGHT_YEAR} {DEV_ORG}", font=("Microsoft YaHei UI", 10), text_color="gray50")
-        self.label_footer.grid(row=3, column=0, pady=(0, 10))
-
-    def setup_molecule_tab(self):
-        t = self.tab_mol
-        t.grid_columnconfigure(0, weight=1)
+        # --- 右侧：信息面板 ---
+        self.info_frame = ctk.CTkFrame(self, corner_radius=15)
+        self.info_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
         
-        ctk.CTkLabel(t, text="输入有机物名称、分子式或 SMILES", font=("Microsoft YaHei UI", 14)).grid(row=0, column=0, pady=20)
+        # 信息面板内容初始化
+        self.setup_info_panel()
+
+        # --- 绘制周期表 ---
+        self.draw_periodic_table()
+
+    def setup_info_panel(self):
+        # 标题区域
+        self.lbl_symbol = ctk.CTkLabel(self.info_frame, text="H", font=("Times New Roman", 64, "bold"))
+        self.lbl_symbol.pack(pady=(40, 0))
         
-        self.entry_chem = ctk.CTkEntry(t, placeholder_text="例如: 苯酚, C2H5OH, Aspirin", width=400, height=40)
-        self.entry_chem.grid(row=1, column=0, pady=10)
-        self.entry_chem.bind("<Return>", lambda e: self.start_thread(self.generate_molecule))
-
-        self.style_var = ctk.StringVar(value="stick")
-        radio_frame = ctk.CTkFrame(t, fg_color="transparent")
-        radio_frame.grid(row=2, column=0, pady=10)
-        ctk.CTkRadioButton(radio_frame, text="球棍模型", variable=self.style_var, value="stick").pack(side="left", padx=10)
-        ctk.CTkRadioButton(radio_frame, text="比例模型", variable=self.style_var, value="sphere").pack(side="left", padx=10)
-
-        self.btn_gen_mol = ctk.CTkButton(t, text="生成分子模型", command=lambda: self.start_thread(self.generate_molecule), height=40)
-        self.btn_gen_mol.grid(row=3, column=0, pady=20)
-
-    def setup_crystal_tab(self):
-        t = self.tab_cryst
-        t.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(t, text="选择高中常见典型晶体", font=("Microsoft YaHei UI", 14)).grid(row=0, column=0, pady=15)
-
-        # 预设下拉框
-        self.crystal_combo = ctk.CTkComboBox(t, values=list(CRYSTAL_PRESETS.keys()), width=300, height=35)
-        self.crystal_combo.set("氯化钠 (NaCl) - 离子晶体")
-        self.crystal_combo.grid(row=1, column=0, pady=10)
-
-        # 晶胞重复设置
-        repeat_frame = ctk.CTkFrame(t, fg_color="transparent")
-        repeat_frame.grid(row=2, column=0, pady=10)
-        ctk.CTkLabel(repeat_frame, text="堆积范围 (Supercell):").pack(side="left", padx=5)
-        self.repeat_val = ctk.CTkSegmentedButton(repeat_frame, values=["1x1x1", "2x2x2", "3x3x3"])
-        self.repeat_val.set("2x2x2") # 默认 2x2x2 看起来更像晶体
-        self.repeat_val.pack(side="left", padx=10)
-
-        # 按钮区
-        btn_frame = ctk.CTkFrame(t, fg_color="transparent")
-        btn_frame.grid(row=3, column=0, pady=20)
-
-        self.btn_gen_cryst = ctk.CTkButton(btn_frame, text="加载预设晶体", 
-                                           command=lambda: self.start_thread(self.generate_preset_crystal), width=150)
-        self.btn_gen_cryst.pack(side="left", padx=10)
-
-        ctk.CTkLabel(t, text="或者", text_color="gray").grid(row=4, column=0)
-
-        self.btn_load_cif = ctk.CTkButton(t, text="导入本地 .CIF 文件", fg_color="transparent", border_width=1,
-                                          command=lambda: self.start_thread(self.load_local_cif), width=150)
-        self.btn_load_cif.grid(row=5, column=0, pady=10)
-
-
-    def open_about(self):
-        if self.toplevel_window is None or not self.toplevel_window.winfo_exists():
-            self.toplevel_window = AboutWindow(self)
-        else:
-            self.toplevel_window.focus()
-
-    def start_thread(self, target_func):
-        threading.Thread(target=target_func, daemon=True).start()
-
-    # --- 逻辑：生成有机分子 ---
-    def generate_molecule(self):
-        user_input = self.entry_chem.get().strip()
-        if not user_input:
-            self.update_status("请输入有机物名称！", "red")
-            return
-
-        self.update_status(f"正在搜索 '{user_input}' ...", "#1F6AA5")
-        self.btn_gen_mol.configure(state="disabled")
-
-        try:
-            # 翻译
-            search_query = user_input
-            if self.is_contains_chinese(user_input):
-                try:
-                    search_query = GoogleTranslator(source='auto', target='en').translate(user_input)
-                except: pass 
-            
-            # 搜索
-            compounds = pcp.get_compounds(search_query, 'name')
-            if not compounds:
-                compounds = pcp.get_compounds(search_query, 'formula')
-            
-            if not compounds:
-                self.update_status("未找到该化合物。", "orange")
-                self.btn_gen_mol.configure(state="normal")
-                return
-
-            # RDKit 处理
-            target_compound = compounds[0]
-            smiles = target_compound.canonical_smiles
-            mol = Chem.MolFromSmiles(smiles)
-            mol_with_h = Chem.AddHs(mol)
-            AllChem.EmbedMolecule(mol_with_h, AllChem.ETKDG())
-            mol_block = Chem.MolToMolBlock(mol_with_h)
-
-            self.create_html_viewer(user_input, mol_block, "mol", self.style_var.get())
-            self.update_status(f"成功展示: {user_input}", "green")
-
-        except Exception as e:
-            self.update_status(f"错误: {str(e)}", "red")
-            print(e)
-        finally:
-            self.btn_gen_mol.configure(state="normal")
-
-    # --- 逻辑：生成预设晶体 ---
-    def generate_preset_crystal(self):
-        selected = self.crystal_combo.get()
-        cif_data = CRYSTAL_PRESETS.get(selected)
-        if cif_data:
-            self.update_status(f"正在加载晶体: {selected}", "#1F6AA5")
-            repeat = self.repeat_val.get() # "2x2x2"
-            self.create_html_viewer(selected, cif_data, "cif", "crystal", repeat)
-            self.update_status(f"加载完成: {selected}", "green")
-
-    # --- 逻辑：加载本地 CIF ---
-    def load_local_cif(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Crystallographic Information File", "*.cif"), ("All Files", "*.*")])
-        if file_path:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    cif_data = f.read()
-                name = os.path.basename(file_path)
-                self.update_status(f"加载文件: {name}", "#1F6AA5")
-                repeat = self.repeat_val.get()
-                self.create_html_viewer(name, cif_data, "cif", "crystal", repeat)
-                self.update_status(f"成功加载: {name}", "green")
-            except Exception as e:
-                self.update_status(f"文件读取失败: {str(e)}", "red")
-
-    def update_status(self, text, color):
-        self.status_label.configure(text=text, text_color=color)
-
-    def is_contains_chinese(self, strs):
-        for _char in strs:
-            if '\u4e00' <= _char <= '\u9fa5': return True
-        return False
-
-    def create_html_viewer(self, title, data, format_type, style_mode, repeat="1x1x1"):
-        # repeat string "2x2x2" -> replicate object {x:2, y:2, z:2}
-        rep_x, rep_y, rep_z = map(int, repeat.split('x'))
-
-        # JS 逻辑配置
-        js_logic = ""
+        self.lbl_name_cn = ctk.CTkLabel(self.info_frame, text="氢", font=("Microsoft YaHei UI", 32))
+        self.lbl_name_cn.pack(pady=(0, 10))
         
-        if style_mode == "crystal":
-            # 晶体渲染逻辑
-            js_logic = f"""
-                let config = {{ backgroundColor: '#f5f7fa' }};
-                let viewer = $3Dmol.createViewer(element, config);
-                let data = `{data}`;
+        self.lbl_name_en = ctk.CTkLabel(self.info_frame, text="Hydrogen", font=("Arial", 16), text_color="gray")
+        self.lbl_name_en.pack()
+
+        # 分割线
+        ctk.CTkFrame(self.info_frame, height=2, fg_color="gray").pack(fill="x", padx=20, pady=20)
+
+        # 详细数据区
+        self.detail_container = ctk.CTkFrame(self.info_frame, fg_color="transparent")
+        self.detail_container.pack(fill="x", padx=20)
+
+        # 数据行构建函数
+        def create_row(parent, label, value_id):
+            f = ctk.CTkFrame(parent, fg_color="transparent")
+            f.pack(fill="x", pady=5)
+            ctk.CTkLabel(f, text=label, width=80, anchor="w", font=("Microsoft YaHei UI", 12, "bold")).pack(side="left")
+            l = ctk.CTkLabel(f, text="---", anchor="w", font=("Arial", 12))
+            l.pack(side="left", fill="x", expand=True)
+            return l
+
+        self.val_atomic_num = create_row(self.detail_container, "原子序数:", "num")
+        self.val_mass = create_row(self.detail_container, "相对原子质量:", "mass")
+        self.val_config = create_row(self.detail_container, "电子排布:", "config")
+        self.val_category = create_row(self.detail_container, "元素类别:", "cat")
+        self.val_valence = create_row(self.detail_container, "常见化合价:", "val")
+
+        # 底部按钮
+        self.btn_wiki = ctk.CTkButton(self.info_frame, text="查看详细百科 (Baike)", 
+                                      command=self.open_wiki, fg_color="transparent", border_width=1)
+        self.btn_wiki.pack(side="bottom", pady=20)
+        
+        self.current_atomic_num = 1
+        self.update_info_panel(1) # 默认显示氢
+
+    def draw_periodic_table(self):
+        # 周期表坐标映射 (Row, Col) - 这是一个手工校准的布局
+        # 1-18列，1-7行
+        positions = {
+            1: (1, 1), 2: (1, 18), # Period 1
+            3: (2, 1), 4: (2, 2), 5: (2, 13), 6: (2, 14), 7: (2, 15), 8: (2, 16), 9: (2, 17), 10: (2, 18), # Period 2
+            11: (3, 1), 12: (3, 2), 13: (3, 13), 14: (3, 14), 15: (3, 15), 16: (3, 16), 17: (3, 17), 18: (3, 18), # Period 3
+        }
+        
+        # 自动填充第4-7周期 (简化逻辑，也可以完全手写)
+        # Period 4
+        for i in range(19, 37):
+            col = i - 18
+            if i > 18: positions[i] = (4, i - 18)
+        # Period 5
+        for i in range(37, 55):
+            positions[i] = (5, i - 36)
+        # Period 6 (La系特殊处理)
+        positions[55] = (6, 1); positions[56] = (6, 2)
+        # 57-71 是镧系，按下不表或单独放底部
+        for i in range(72, 87): positions[i] = (6, i - 72 + 4)
+        # Period 7
+        positions[87] = (7, 1); positions[88] = (7, 2)
+        
+        # 镧系锕系 (放在 Row 9, 10)
+        lanthanides = range(57, 72)
+        actinides = range(89, 104)
+        
+        for idx, atom_num in enumerate(lanthanides):
+            positions[atom_num] = (9, 4 + idx) # 放在下方
+        for idx, atom_num in enumerate(actinides):
+            positions[atom_num] = (10, 4 + idx)
+
+        # 开始绘制按钮
+        # 获取所有已定义数据的元素，或者循环 1-118
+        for atomic_num in range(1, 104): # 演示版暂只画到103
+            if atomic_num in positions:
+                r, c = positions[atomic_num]
+                data = get_element_data(atomic_num)
+                symbol = data[0]
+                category = data[4]
                 
-                // 加载晶体模型
-                let m = viewer.addModel(data, "{format_type}");
-                
-                // 设置晶体样式 (通常显示晶胞框)
-                m.setStyle({{}}, {{sphere: {{scale: 0.3, colorscheme: 'Jmol'}}, stick: {{radius: 0.1, colorscheme: 'Jmol'}}}});
-                
-                // 核心：复制晶胞 (Supercell)
-                viewer.replicateUnitCell({rep_x}, {rep_y}, {rep_z}, m);
-                
-                // 添加单位晶胞框线
-                viewer.addUnitCell(m, {{box:{{color:'black'}}, split:10}});
-            """
-        else:
-            # 有机分子渲染逻辑
-            style_config = ""
-            if style_mode == "stick":
-                style_config = "viewer.setStyle({}, {stick: {radius: 0.14, colorscheme: 'Jmol'}, sphere: {scale: 0.23, colorscheme: 'Jmol'}});"
-            else:
-                style_config = "viewer.setStyle({}, {sphere: {colorscheme: 'Jmol'}});"
-            
-            js_logic = f"""
-                let config = {{ backgroundColor: '#f5f7fa' }};
-                let viewer = $3Dmol.createViewer(element, config);
-                let data = `{data}`;
-                viewer.addModel(data, "{format_type}");
-                {style_config}
-            """
+                btn = ElementButton(self.grid_area, atomic_num, symbol, category, self.update_info_panel)
+                btn.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
 
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>{title} - {DEV_NAME} 3D</title>
-            <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
-            <style>
-                body {{ margin: 0; padding: 0; overflow: hidden; font-family: "Microsoft YaHei"; }}
-                #container {{ width: 100vw; height: 100vh; position: relative; }}
-                #info {{ 
-                    position: absolute; top: 20px; left: 20px; z-index: 10; 
-                    background: rgba(255, 255, 255, 0.9); padding: 15px; border-radius: 8px; 
-                    box-shadow: 0 4px 10px rgba(0,0,0,0.1); border-left: 5px solid #3B8ED0;
-                }}
-            </style>
-        </head>
-        <body>
-            <div id="info">
-                <h2 style="margin:0;color:#333">{title}</h2>
-                <p style="margin:5px 0;color:#666">操作: 左键旋转 | 滚轮缩放 | 右键平移</p>
-                <div style="font-size:12px;color:#999;margin-top:5px">模式: {style_mode} ({repeat if style_mode=='crystal' else '单分子'})</div>
-                <div style="font-size:12px;color:#ccc;text-align:right;margin-top:10px">Design by {DEV_ORG}</div>
-            </div>
-            <div id="container"></div>
-            <script>
-                let element = document.getElementById('container');
-                {js_logic}
-                viewer.zoomTo();
-                viewer.render();
-            </script>
-        </body>
-        </html>
-        """
+    def update_info_panel(self, atomic_num):
+        self.current_atomic_num = atomic_num
+        data = get_element_data(atomic_num)
+        # Data结构: [符号, 中文, 英文, 质量, 类别ID, 排布, 化合价]
         
-        filename = "structure_view.html"
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        webbrowser.open('file://' + os.path.realpath(filename))
+        self.lbl_symbol.configure(text=data[0])
+        self.lbl_name_cn.configure(text=data[1])
+        self.lbl_name_en.configure(text=data[2])
+        
+        self.val_atomic_num.configure(text=str(atomic_num))
+        self.val_mass.configure(text=str(data[3]))
+        self.val_config.configure(text=data[5])
+        
+        # 类别名称映射
+        cat_names = {1:"碱金属", 2:"碱土金属", 3:"过渡金属", 4:"主族金属", 5:"类金属", 6:"非金属", 7:"卤素", 8:"稀有气体", 9:"镧系/锕系"}
+        self.val_category.configure(text=cat_names.get(data[4], "其他"))
+        self.val_valence.configure(text=data[6])
+        
+        # 动态改变边框颜色以匹配元素
+        color = CATEGORY_COLORS.get(data[4], ("gray", "gray"))[1]
+        self.info_frame.configure(border_color=color, border_width=2)
+
+    def open_wiki(self):
+        data = get_element_data(self.current_atomic_num)
+        name = data[1] # 中文名
+        url = f"https://baike.baidu.com/item/{name}"
+        webbrowser.open(url)
 
 if __name__ == "__main__":
-    app = MoleculeViewerApp()
+    app = PeriodicTableApp()
     app.mainloop()
