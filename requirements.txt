@@ -1,2 +1,4 @@
 customtkinter
+openai
+python-docx
 pyinstaller
