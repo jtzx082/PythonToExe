@@ -1,7 +1,6 @@
 name: Build and Release Academic Writer
 
 on:
-  # 手动触发
   workflow_dispatch:
     inputs:
       build_for:
@@ -25,17 +24,12 @@ on:
           - '3.10'
           - '3.11'
           - '3.12'
-  
-  # 合并 push 事件
   push:
     branches: [ main ]
     tags: [ 'v*' ]
-  
-  # 创建 pull request 时也会触发
   pull_request:
     branches: [ main ]
 
-# 设置权限
 permissions:
   contents: write
   packages: write
@@ -44,7 +38,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -63,239 +56,119 @@ jobs:
     
     - name: Run import tests
       run: |
-        echo "Testing basic imports..."
         python -c "
-try:
-    import tkinter
-    print('✓ Tkinter available')
-except ImportError as e:
-    print(f'✗ Tkinter error: {e}')
-
-try:
-    import openai
-    print('✓ OpenAI available')
-except ImportError as e:
-    print(f'✗ OpenAI error: {e}')
-
-try:
-    from PIL import Image
-    print('✓ Pillow available')
-except ImportError as e:
-    print(f'✗ Pillow error: {e}')
-
-try:
-    import markdown
-    print('✓ Markdown available')
-except ImportError as e:
-    print(f'✗ Markdown error: {e}')
-
-print('Basic import tests completed')
+import tkinter, openai, markdown
+from PIL import Image
+print('✓ All core libraries available')
         "
-    
-    - name: Check directory structure
-      run: |
-        echo "Checking project structure..."
-        find . -name "*.py" | head -10
-        echo ""
-        echo "Python files count:"
-        find . -name "*.py" | wc -l
 
   build-windows:
     runs-on: windows-latest
     needs: test
-    # 修正：将多行条件表达式改为单行
-    if: (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'windows')) || startsWith(github.ref, 'refs/tags/v')
-    
+    # 修复：使用单引号包裹整个表达式，避免 YAML 解析歧义
+    if: "${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'windows')) || startsWith(github.ref, 'refs/tags/v') }}"
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ github.event.inputs.python_version || '3.10' }}
-    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller pywin32
-    
-    - name: Create necessary directories
-      run: |
-        mkdir output
-        mkdir templates
-        mkdir config
-        mkdir assets
-    
-    - name: Build Windows executable
-      run: |
-        python build_simple.py
-    
-    - name: Upload Windows artifact
+        pip install -r requirements.txt pyinstaller pywin32
+    - name: Build
+      run: python build_simple.py
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: AcademicWriter-Windows
-        path: dist/
-        retention-days: 7
+        path: dist/AcademicWriterPro.exe
 
   build-macos:
     runs-on: macos-latest
     needs: test
-    # 修正：将多行条件表达式改为单行
-    if: (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'macos')) || startsWith(github.ref, 'refs/tags/v')
-    
+    if: "${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'macos')) || startsWith(github.ref, 'refs/tags/v') }}"
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ github.event.inputs.python_version || '3.10' }}
-    
     - name: Install dependencies
       run: |
         python3 -m pip install --upgrade pip
-        pip3 install -r requirements.txt
-        pip3 install pyinstaller
-    
-    - name: Create necessary directories
-      run: |
-        mkdir -p output
-        mkdir -p templates
-        mkdir -p config
-        mkdir -p assets
-    
-    - name: Build macOS application
-      run: |
-        python3 build_simple.py
-    
-    - name: Upload macOS artifact
+        pip3 install -r requirements.txt pyinstaller
+    - name: Build
+      run: python3 build_simple.py
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: AcademicWriter-macOS
-        path: dist/
-        retention-days: 7
+        path: dist/AcademicWriterPro
 
   build-linux:
     runs-on: ubuntu-latest
     needs: test
-    # 修正：将多行条件表达式改为单行
-    if: (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'linux')) || startsWith(github.ref, 'refs/tags/v')
-    
+    if: "${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'linux')) || startsWith(github.ref, 'refs/tags/v') }}"
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
+    - name: Install system deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk python3-dev libx11-dev
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ github.event.inputs.python_version || '3.10' }}
-    
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-tk python3-dev
-        sudo apt-get install -y libx11-dev libxext-dev libxft-dev libxinerama-dev libxcursor-dev libxrender-dev libxfixes-dev libxrandr-dev libxi-dev
-    
-    - name: Install Python dependencies
+    - name: Install Python deps
       run: |
         python3 -m pip install --upgrade pip
-        pip3 install -r requirements.txt
-        pip3 install pyinstaller
-    
-    - name: Create necessary directories
-      run: |
-        mkdir -p output
-        mkdir -p templates
-        mkdir -p config
-        mkdir -p assets
-    
-    - name: Build Linux executable
-      run: |
-        python3 build_simple.py
-    
-    - name: Make Linux executable
-      run: |
-        chmod +x dist/AcademicWriterPro
-    
-    - name: Upload Linux artifact
+        pip3 install -r requirements.txt pyinstaller
+    - name: Build
+      run: python3 build_simple.py
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: AcademicWriter-Linux
-        path: dist/
-        retention-days: 7
+        path: dist/AcademicWriterPro
 
   release:
     needs: [build-windows, build-macos, build-linux]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    
-    permissions:
-      contents: write
-    
     steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
         path: artifacts
     
-    - name: List downloaded artifacts
+    - name: Prepare Release Files
       run: |
-        echo "Artifacts structure:"
-        find artifacts -type f -name "*" | sort
-    
-    - name: Create Release
-      id: create_release
-      uses: softprops/action-gh-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        mkdir release_assets
+        cp artifacts/AcademicWriter-Windows/AcademicWriterPro.exe release_assets/AcademicWriter-Windows.exe
+        cp artifacts/AcademicWriter-macOS/AcademicWriterPro release_assets/AcademicWriter-macOS
+        cp artifacts/AcademicWriter-Linux/AcademicWriterPro release_assets/AcademicWriter-Linux
+        chmod +x release_assets/AcademicWriter-macOS release_assets/AcademicWriter-Linux
+
+    - name: Create Release and Upload Assets
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.ref_name }}
-        release_name: "Academic Writer ${{ github.ref_name }}"
+        name: "Academic Writer ${{ github.ref_name }}"
         body: |
           ## Academic Writer ${{ github.ref_name }}
-          
-          ### 下载
-          - **Windows**: AcademicWriter-Windows.zip
-          - **macOS**: AcademicWriter-macOS.zip  
-          - **Linux**: AcademicWriter-Linux.tar.gz
-          
-          ### 更新日志
           - 初始版本发布
-          - 支持多平台构建
+          - 支持多平台构建 (Windows/macOS/Linux)
           - 集成 DeepSeek API
-          - 图形用户界面
         draft: false
         prerelease: false
-    
-    - name: Upload Windows release asset
-      uses: actions/upload-release-asset@v1
+        files: |
+          release_assets/AcademicWriter-Windows.exe
+          release_assets/AcademicWriter-macOS
+          release_assets/AcademicWriter-Linux
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: artifacts/AcademicWriter-Windows/AcademicWriterPro.exe
-        asset_name: AcademicWriter-Windows.exe
-        asset_content_type: application/vnd.microsoft.portable-executable
-    
-    - name: Upload macOS release asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: artifacts/AcademicWriter-macOS/AcademicWriterPro
-        asset_name: AcademicWriter-macOS
-        asset_content_type: application/octet-stream
-    
-    - name: Upload Linux release asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: artifacts/AcademicWriter-Linux/AcademicWriterPro
-        asset_name: AcademicWriter-Linux
-        asset_content_type: application/octet-stream
