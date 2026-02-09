@@ -23,28 +23,66 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      # ---- Linux: install runtime deps required by Qt xcb plugin ----
+      # Qt 6.5+ requires libxcb-cursor0 to load xcb platform plugin. [1](https://www.cnblogs.com/gccbuaa/p/19254097)[2](https://github.com/pyinstaller/pyinstaller/issues/5414)
+      - name: Install Linux runtime deps for Qt (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-cursor0 \
+            libxcb-xinerama0 \
+            libxcb-icccm4 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            libxkbcommon-x11-0
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+
+      # ---- Linux: add fcitx5 input method plugin into PySide6 ----
+      # PySide6 often lacks fcitx plugin; adding it enables Chinese input with fcitx5. [3](https://blog.csdn.net/gitblog_00511/article/details/148916652)[5](https://github.com/NotCookey/Pyinstaller-Github-Actions)
+      - name: Detect PySide6 Qt plugins path (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "PYSIDE_QT_PLUGINS=$(python -c 'import PySide6, os; print(os.path.join(os.path.dirname(PySide6.__file__), \"Qt\", \"plugins\"))')" >> $GITHUB_ENV
+          echo "PySide6 Qt plugins path: $PYSIDE_QT_PLUGINS"
+
+      - name: Add fcitx5 Support to PySide6 (Linux)
+        if: runner.os == 'Linux'
+        uses: chenmozhijin/fcitx5-pyside@master
+        with:
+          plugins-path: ${{ env.PYSIDE_QT_PLUGINS }}
 
       - name: Build with PyInstaller
         shell: bash
         run: |
           rm -rf build dist || true
 
-          # Linux 下通常不需要 --windowed；Windows/macOS GUI 建议用 --windowed 隐藏控制台
+          # Linux: use onedir (more robust for Qt plugin deployment). [7](https://blog.csdn.net/qq_48379015/article/details/153739176)
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            pyinstaller --noconfirm --clean --onefile --name PaperWriter main.py
+            pyinstaller --noconfirm --clean --onedir --name PaperWriter main.py
           else
+            # Windows/macOS: onefile + windowed
             pyinstaller --noconfirm --clean --onefile --windowed --name PaperWriter main.py
           fi
 
           ls -R dist
 
+      # ---- Linux: quick self-test (headless) to catch startup issues early ----
+      - name: Self-test (Linux, offscreen)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          export QT_QPA_PLATFORM=offscreen
+          ./dist/PaperWriter/PaperWriter --selftest
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: PaperWriter-${{ runner.os }}
-          path: dist/*
+          path: dist/**
