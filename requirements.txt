@@ -1,8 +1,5 @@
 customtkinter
-openai
 python-docx
 pyinstaller
 packaging
 pillow
-pypdf
-openpyxl
