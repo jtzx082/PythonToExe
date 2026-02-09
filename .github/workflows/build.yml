@@ -1,6 +1,6 @@
-name: Build Paper Writer
+name: Build GongWenFormatter
 
-on: 
+on:
   workflow_dispatch:
 
 jobs:
@@ -8,7 +8,6 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
@@ -16,78 +15,31 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.9'
 
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Install Tkinter (Linux)
-      if: runner.os == 'Linux'
-      run: sudo apt-get update && sudo apt-get install -y python3-tk tcl-dev tk-dev libx11-dev
-
-    - name: Build Windows
-      if: runner.os == 'Windows'
+    - name: Build with PyInstaller
       shell: bash
       run: |
-        pyinstaller --name="PaperAI" --onefile --windowed --clean \
-        --collect-all customtkinter \
-        --collect-all docx \
-        --collect-all openai \
-        --collect-all pypdf \
-        --collect-all openpyxl \
-        --hidden-import=docx \
-        --hidden-import=openai \
-        --hidden-import=pypdf \
-        --hidden-import=openpyxl \
-        main.py
-
-    - name: Build Linux
-      if: runner.os == 'Linux'
-      run: |
-        pyinstaller --name="PaperAI" --onefile --clean \
-        --collect-all customtkinter \
-        --collect-all docx \
-        --collect-all openai \
-        --collect-all pypdf \
-        --collect-all openpyxl \
-        --hidden-import=docx \
-        --hidden-import=openai \
-        --hidden-import=pypdf \
-        --hidden-import=openpyxl \
-        main.py
-
-    - name: Build macOS
-      if: runner.os == 'macOS'
-      run: |
-        pyinstaller --name="PaperAI" --onefile --windowed --clean \
-        --collect-all customtkinter \
-        --collect-all docx \
-        --collect-all openai \
-        --collect-all pypdf \
-        --collect-all openpyxl \
-        --hidden-import=docx \
-        --hidden-import=openai \
-        --hidden-import=pypdf \
-        --hidden-import=openpyxl \
-        main.py
-
-    - name: Rename Output
-      shell: bash
-      run: |
-        if [ "${{ runner.os }}" == "Windows" ]; then
-          mv dist/PaperAI.exe dist/PaperAI_Windows.exe
-        elif [ "${{ runner.os }}" == "macOS" ]; then
-          mv dist/PaperAI dist/PaperAI_macOS
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          pyinstaller --name="公文排版助手" --onefile --windowed --add-data "config.json;." main.py
+        elif [ "$RUNNER_OS" == "Linux" ]; then
+          # Linux 需要 tkinter 支持
+          sudo apt-get install python3-tk
+          pyinstaller --name="GongWenFormatter_Linux" --onefile --windowed main.py
         else
-          mv dist/PaperAI dist/PaperAI_Linux
+          # macOS
+          pyinstaller --name="GongWenFormatter_Mac" --onefile --windowed main.py
         fi
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: PaperAI_${{ runner.os }}
+        name: GongWenFormatter-${{ matrix.os }}
         path: dist/
