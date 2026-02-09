@@ -8,6 +8,7 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
@@ -15,7 +16,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
 
@@ -24,18 +25,36 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Build with PyInstaller
+    # Linux 必须安装 tkinter 支持库
+    - name: Install Tkinter (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+    # Windows 构建 (移除 add-data，因为 config.json 会在运行时生成)
+    - name: Build Windows
+      if: runner.os == 'Windows'
       shell: bash
       run: |
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          pyinstaller --name="公文排版助手" --onefile --windowed --add-data "config.json;." main.py
-        elif [ "$RUNNER_OS" == "Linux" ]; then
-          # Linux 需要 tkinter 支持
-          sudo apt-get install python3-tk
-          pyinstaller --name="GongWenFormatter_Linux" --onefile --windowed main.py
-        else
-          # macOS
-          pyinstaller --name="GongWenFormatter_Mac" --onefile --windowed main.py
+        pyinstaller --name="公文排版助手" --onefile --windowed --clean main.py
+
+    # Linux 构建
+    - name: Build Linux
+      if: runner.os == 'Linux'
+      run: |
+        pyinstaller --name="GongWenFormatter_Linux" --onefile --windowed --clean main.py
+
+    # macOS 构建
+    - name: Build macOS
+      if: runner.os == 'macOS'
+      run: |
+        pyinstaller --name="GongWenFormatter_Mac" --onefile --windowed --clean main.py
+
+    # 重命名输出文件以便区分 (可选，用于 Artifact 上传)
+    - name: Rename Output
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" == "Windows" ]; then
+          mv dist/公文排版助手.exe dist/GongWenFormatter_Windows.exe
         fi
 
     - name: Upload Artifacts
