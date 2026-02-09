@@ -5,6 +5,7 @@ on:
 
 jobs:
   build:
+    # 动态指定运行环境
     name: Build on ${{ matrix.config.os }}
     runs-on: ${{ matrix.config.os }}
     strategy:
@@ -12,7 +13,8 @@ jobs:
       matrix:
         config:
           - { os: windows-latest, name: Windows, sep: '\' }
-          - { os: ubuntu-20.04, name: Linux, sep: '/' }
+          # 【修改点】将 20.04 改为 22.04，解决一直排队等待的问题
+          - { os: ubuntu-22.04, name: Linux, sep: '/' }
           - { os: macos-latest, name: macOS, sep: '/' }
 
     steps:
@@ -28,10 +30,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    # Linux 依赖安装
     - name: Install Tkinter (Linux)
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk tcl-dev tk-dev libx11-dev
 
+    # Windows 打包
     - name: Build Windows
       if: runner.os == 'Windows'
       shell: bash
@@ -44,6 +48,7 @@ jobs:
         --hidden-import=openai \
         main.py
 
+    # Linux 打包 (无windowed，方便调试)
     - name: Build Linux
       if: runner.os == 'Linux'
       run: |
@@ -55,6 +60,7 @@ jobs:
         --hidden-import=openai \
         main.py
 
+    # macOS 打包
     - name: Build macOS
       if: runner.os == 'macOS'
       run: |
