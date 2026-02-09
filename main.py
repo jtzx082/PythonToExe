@@ -19,7 +19,8 @@ DEV_ORG = "俞晋全高中化学名师工作室"
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-# === 文体风格定义 (参照您上传的文稿风格，而非死板内容) ===
+# === 文体风格定义 (深度参照您上传的文稿) ===
+# 这里定义了不同文体的“基因”，确保写出来像您上传的范文
 STYLE_GUIDE = {
     "期刊论文": {
         "desc": "参照《虚拟仿真》、《热重分析》等范文。学术严谨，理实结合。",
@@ -190,21 +191,20 @@ class MasterWriterApp(ctk.CTk):
     # --- 交互逻辑 ---
 
     def on_mode_change(self, choice):
-        style = STYLE_GUIDE.get(choice, STYLE_GUIDE["期刊论文"])
-        
-        # 自动填充建议
+        # 自动填充标题示例
         if choice == "期刊论文":
             self.entry_topic.delete(0, "end")
             self.entry_topic.insert(0, "高中化学虚拟仿真实验教学的价值与策略研究")
             self.txt_instructions.delete("0.0", "end")
-            self.txt_instructions.insert("0.0", "参照我上传的《氯气》和《热重》范文风格。内容要扎实，多举例。")
+            self.txt_instructions.insert("0.0", "参照《氯气》和《热重》范文风格。内容要扎实，多举例。")
             self.entry_words.delete(0, "end")
-            self.entry_words.insert(0, "4000")
+            self.entry_words.insert(0, "3000")
         elif choice == "教学反思":
             self.entry_topic.delete(0, "end")
             self.entry_topic.insert(0, "高三化学二轮复习课后的深刻反思")
             self.entry_words.delete(0, "end")
             self.entry_words.insert(0, "2000")
+        
         # 清空大纲，提示用户重新生成
         self.txt_outline.delete("0.0", "end")
         self.txt_outline.insert("0.0", f"（请点击“生成大纲”按钮，AI将为您规划【{choice}】的结构...）")
