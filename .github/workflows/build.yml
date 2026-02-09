@@ -10,41 +10,29 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-    
-    runs-on: ${{ matrix.os }}
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Build with PyInstaller (Linux/macOS)
-      if: runner.os != 'Windows'
-      run: |
-        pyinstaller --noconfirm --onefile --windowed --name "DeepSeekWriter" --add-data "venv/lib/python3.10/site-packages/customtkinter:customtkinter/" main.py
-        # 注意：CustomTkinter 需要手动包含资源文件，上面的路径可能需要根据实际环境微调，
-        # 在 GitHub Actions 环境中，我们可以使用更通用的方式，或者让 customtkinter 自动处理（通常 --collect-all customtkinter 可解决）。
-    
-    - name: Build with PyInstaller (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        pyinstaller --noconfirm --onefile --windowed --name "DeepSeekWriter" --collect-all customtkinter main.py
-        
-    - name: Build with PyInstaller (Universal - Recommended method)
-      # 覆盖上面的单独步骤，使用 collect-all 确保 customtkinter 资源被打包
-      run: |
-        pyinstaller --noconfirm --onefile --windowed --name "DeepSeekWriter" --collect-all customtkinter main.py
 
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: DeepSeekWriter-${{ runner.os }}
-        path: dist/
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        # 使用 --collect-all customtkinter 自动收集该库的所有资源文件，适配所有平台
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name "DeepSeekWriter" --collect-all customtkinter main.py
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeepSeekWriter-${{ runner.os }}
+          path: dist/
