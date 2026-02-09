@@ -12,7 +12,7 @@ import time
 import re
 
 # --- 配置区域 ---
-APP_VERSION = "v14.0.1 (Linux Fix)"
+APP_VERSION = "v15.0.0 (Anti-Hollow Content)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 # ----------------
@@ -20,50 +20,69 @@ DEV_ORG = "俞晋全高中化学名师工作室"
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-# === 动态预设库 ===
+# === 动态预设库 (深度优化 Prompt) ===
 PRESET_CONFIGS = {
-    "自由定制 / 其它文稿": {
-        "topic": "（在此输入任何文稿的主题，如：国旗下讲话、新闻通稿、申报材料）",
-        "instruction": "请详细描述您的要求：\n1. 场景：比如‘全校师生大会’或‘教研组会议’。\n2. 语气：比如‘激昂感人’或‘严肃客观’。\n3. 特殊要求：比如‘要引用一句古诗’。",
-        "words": "1000",
-        "is_custom": True 
-    },
     "期刊论文 (标准学术)": {
         "topic": "高中化学虚拟仿真实验教学的价值与策略研究",
-        "instruction": "要求：\n1. 必须包含：摘要、关键词、引言、正文章节、结语、参考文献。\n2. 重点写‘教学策略’，结合具体的《氯气》实验案例。",
+        "instruction": "要求：\n1. 结构：摘要、引言、理论价值、教学策略、结语、参考文献。\n2. 【拒绝空洞】：策略部分必须结合具体的《氯气》实验案例，写出具体步骤。\n3. 【拒绝复述】：不要反复强调“本文旨在...”，直接写干货。",
         "words": "4000",
-        "is_custom": False
+        "needs_refs": True 
+    },
+    "教学反思 (深度实战)": {
+        "topic": "高三化学二轮复习课后的深刻反思",
+        "instruction": "要求：\n1. 第一人称‘我’。\n2. 【拒绝套话】：不要写“为了提高学生能力”这种废话。直接写“哪道题学生做错了”、“哪个环节冷场了”。\n3. 结构：现象描述 -> 原因剖析 -> 改进清单。",
+        "words": "1500",
+        "needs_refs": False
     },
     "教学案例 (叙事风格)": {
         "topic": "《钠与水反应》教学案例分析",
-        "instruction": "要求：\n1. 结构：案例背景、情境描述（重点）、案例分析、反思。\n2. 像讲故事一样描述课堂冲突。",
+        "instruction": "要求：\n1. 像写小说一样描述课堂：要有对话“老师，为什么...”，要有动作“小明猛地站起来”。\n2. 不要堆砌理论，要还原现场。",
         "words": "2500",
-        "is_custom": False
+        "needs_refs": False
     },
-    "教学反思 (个人独白)": {
-        "topic": "高三化学二轮复习课后的深刻反思",
-        "instruction": "要求：\n1. 第一人称‘我’。\n2. 结构：初衷、效果、不足、改进。",
-        "words": "1500",
-        "is_custom": False
-    },
-    "工作计划 (行政公文)": {
+    "工作计划 (务实版)": {
         "topic": "2026年春季学期高二化学备课组工作计划",
-        "instruction": "要求：\n1. 结构：指导思想、目标、措施、行事历。\n2. 条理清晰，多用数据。",
+        "instruction": "要求：\n1. 多用数据：每周几次教研？备课组几个人？目标分是多少？\n2. 多列清单：具体到月份的安排表。",
         "words": "2000",
-        "is_custom": False
+        "needs_refs": False
     },
-    "工作总结 (汇报材料)": {
+    "工作总结 (数据版)": {
         "topic": "2025年度个人教学工作总结",
-        "instruction": "要求：\n1. 结构：概况、成绩、不足、规划。\n2. 数据详实。",
+        "instruction": "要求：\n1. 用数据说话：平均分提升了多少？发表了几篇文章？\n2. 举具体例子：辅导了哪个临界生？",
         "words": "3000",
-        "is_custom": False
+        "needs_refs": False
+    },
+    "自由定制 / 其它文稿": {
+        "topic": "（在此输入任何文稿的主题）",
+        "instruction": "请详细描述要求。越具体越好。",
+        "words": "1000",
+        "is_custom": True 
     }
 }
 
-class UniversalWriterApp(ctk.CTk):
+# === 结构模板 (针对“空洞”问题的优化) ===
+TEMPLATE_CONFIG = {
+    "期刊论文 (标准学术)": [
+        {"title": "摘要与关键词", "prompt": "写摘要和关键词。摘要要直接说：用了什么方法，得出了什么具体结论。不要写“本文对...进行了探讨”这种废话。"},
+        {"title": "一、问题的提出", "prompt": "写引言。不要写宏大的教育背景。直接描述你在教学中遇到的具体困难（例如：学生对微观概念理解困难，实验有危险）。用一个具体的教学场景开头。"},
+        {"title": "二、核心概念与价值", "prompt": "写理论价值。结合具体的化学知识点（如氧化还原反应）。不要空谈理论，要说清楚这个理论解决哪个具体化学问题。"},
+        {"title": "三、教学策略与实践", "prompt": "【重点章节】请详细描述 2-3 个具体的教学策略。必须结合具体的实验案例（如氯气制备）。写出：教师做了什么？学生做了什么？效果如何？细节越丰富越好。"},
+        {"title": "四、成效与反思", "prompt": "写成效和反思。成效要具体（如：及格率提升了5%）。反思要诚恳（如：设备偶尔卡顿）。"},
+        {"title": "参考文献", "prompt": "列出5-8条参考文献。"}
+    ],
+    "教学反思 (深度实战)": [
+        {"title": "一、教学背景与初衷", "prompt": "简述这节课的课题和初衷。不要啰嗦。直接说：我本来想解决什么问题。"},
+        {"title": "二、课堂“意外”与问题", "prompt": "【核心】描述课堂上发生的真实问题。例如：某个提问全班沉默；某个实验现象不明显。请还原当时的场景和对话。"},
+        {"title": "三、原因的深度剖析", "prompt": "分析上述问题的原因。不要怪学生基础差。多找自己的原因（如：备课不充分、预设太理想化）。"},
+        {"title": "四、具体的改进措施", "prompt": "列出 3 条具体的改进措施。例如：下次我要准备...材料；我要把这个提问改成..."}
+    ],
+    # 其他文体依然沿用之前的逻辑，但在 System Prompt 中加强了“去空洞化”指令
+}
+
+class InteractiveWriterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title(f"全能写作助手 (修复版) - {DEV_NAME}")
+        self.title(f"全能写作助手 (深度实战版) - {DEV_NAME}")
         self.geometry("1200x900")
         
         self.grid_columnconfigure(0, weight=1)
@@ -100,10 +119,10 @@ class UniversalWriterApp(ctk.CTk):
         t.grid_rowconfigure(5, weight=1) 
 
         # 1. 文体选择
-        ctk.CTkLabel(t, text="文体类型:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=0, column=0, padx=10, pady=10, sticky="e")
+        ctk.CTkLabel(t, text="选择文体:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=0, column=0, padx=10, pady=10, sticky="e")
         modes = list(PRESET_CONFIGS.keys())
         self.combo_mode = ctk.CTkComboBox(t, values=modes, width=250, command=self.on_mode_change)
-        self.combo_mode.set("自由定制 / 其它文稿")
+        self.combo_mode.set("期刊论文 (标准学术)")
         self.combo_mode.grid(row=0, column=1, padx=10, pady=10, sticky="w")
         
         # 2. 标题
@@ -133,7 +152,7 @@ class UniversalWriterApp(ctk.CTk):
         self.paned_frame.grid_rowconfigure(1, weight=1)
 
         # 左侧：大纲区
-        ctk.CTkLabel(self.paned_frame, text="第一步：生成大纲 (AI 自动规划结构)", text_color="#1F6AA5", font=("bold", 12)).grid(row=0, column=0, sticky="w", padx=5)
+        ctk.CTkLabel(self.paned_frame, text="第一步：生成大纲 (可修改)", text_color="#1F6AA5", font=("bold", 12)).grid(row=0, column=0, sticky="w", padx=5)
         self.txt_outline = ctk.CTkTextbox(self.paned_frame, font=("Microsoft YaHei UI", 13)) 
         self.txt_outline.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         
@@ -163,8 +182,7 @@ class UniversalWriterApp(ctk.CTk):
         self.btn_export = ctk.CTkButton(btn_write_frame, text="导出 Word", command=self.save_to_word, width=100)
         self.btn_export.pack(side="right", padx=5)
 
-        # 初始化
-        self.on_mode_change("自由定制 / 其它文稿")
+        self.on_mode_change("期刊论文 (标准学术)")
 
     # === Tab 2: 设置 ===
     def setup_settings_tab(self):
@@ -186,7 +204,7 @@ class UniversalWriterApp(ctk.CTk):
     # --- 交互逻辑 ---
 
     def on_mode_change(self, choice):
-        preset = PRESET_CONFIGS.get(choice, PRESET_CONFIGS["自由定制 / 其它文稿"])
+        preset = PRESET_CONFIGS.get(choice, PRESET_CONFIGS["期刊论文 (标准学术)"])
         self.entry_topic.delete(0, "end")
         self.entry_topic.insert(0, preset["topic"])
         self.txt_instructions.delete("0.0", "end")
@@ -212,7 +230,7 @@ class UniversalWriterApp(ctk.CTk):
             return None
         return OpenAI(api_key=key, base_url=base)
 
-    # --- 任务：生成大纲 ---
+    # --- 任务：生成大纲 (智能结构) ---
     def run_gen_outline(self):
         self.stop_event.clear()
         topic = self.entry_topic.get().strip()
@@ -230,35 +248,30 @@ class UniversalWriterApp(ctk.CTk):
         if not client: return
 
         self.btn_gen_outline.configure(state="disabled", text="规划中...")
-        self.status_label.configure(text=f"正在根据您的指令规划【{mode}】结构...", text_color="#1F6AA5")
+        self.status_label.configure(text=f"正在规划【{mode}】结构...", text_color="#1F6AA5")
         
-        if "自由定制" in mode:
-            prompt = f"""
-            你是一位专业文秘。请根据用户要求，设计一份文稿大纲。
-            文章主题：{topic}
-            用户具体指令：{instr}
-            
-            【要求】：
-            1. 请分析这应该是什么文体（如演讲稿、新闻、申报材料等）。
-            2. 根据文体设计 4-6 个合理的章节标题。
-            3. 直接输出标题，不要 Markdown 符号。
-            """
-        elif "期刊论文" in mode:
-            prompt = f"""
-            请为高中化学论文《{topic}》设计大纲。
-            【强制要求】：必须包含：摘要与关键词、一、引言；二、理论价值；三、教学策略；四、结语；参考文献。
-            用户指令：{instr}
-            直接输出标题，无Markdown。
-            """
-        else:
-            prompt = f"""
-            请为《{topic}》设计一份【{mode}】大纲。
-            【强制要求】：
-            1. 严禁包含‘摘要’、‘关键词’、‘参考文献’。
-            2. 按照该文体的标准结构设计章节（如一、二、三）。
-            用户指令：{instr}
-            直接输出标题，无Markdown。
-            """
+        # 1. 优先使用预设的强制模板
+        template = TEMPLATE_CONFIG.get(mode)
+        
+        if template:
+            # 如果有强制模板，直接从模板中提取标题
+            self.txt_outline.delete("0.0", "end")
+            for section in template:
+                self.txt_outline.insert("end", section["title"] + "\n")
+            self.status_label.configure(text="大纲已加载（基于标准模板），您可以手动修改。", text_color="green")
+            self.btn_gen_outline.configure(state="normal", text="1. 生成/重置大纲")
+            return
+
+        # 2. 如果没有预设模板（比如自由定制），则调用 AI 生成
+        prompt = f"""
+        任务：为《{topic}》写一份【{mode}】的大纲。
+        用户的特殊指令：{instr}
+        
+        要求：
+        1. 请列出文章的章节标题（每行一个）。
+        2. 不要包含任何 Markdown 符号（如 # 或 *）。
+        3. 只要标题，不要任何解释性文字。
+        """
         
         try:
             resp = client.chat.completions.create(
@@ -275,14 +288,14 @@ class UniversalWriterApp(ctk.CTk):
                     self.txt_outline.insert("end", c)
                     self.txt_outline.see("end")
             
-            self.status_label.configure(text="大纲已生成！您可以手动修改左侧大纲，然后点击'撰写全文'。", text_color="green")
+            self.status_label.configure(text="大纲已生成！请手动修改后点击'撰写全文'。", text_color="green")
 
         except Exception as e:
             self.status_label.configure(text=f"API 错误: {str(e)}", text_color="red")
         finally:
             self.btn_gen_outline.configure(state="normal", text="1. 生成/重置大纲")
 
-    # --- 任务：撰写全文 ---
+    # --- 任务：撰写全文 (去空洞化逻辑) ---
     def run_full_write(self):
         self.stop_event.clear()
         
@@ -312,6 +325,11 @@ class UniversalWriterApp(ctk.CTk):
         
         avg_words = int(total_words / len(sections))
         total_steps = len(sections)
+        
+        # 获取模板的 Prompt 映射（如果有）
+        template = TEMPLATE_CONFIG.get(mode, [])
+        # 构建一个 {标题: Prompt} 的字典，方便查找
+        prompt_map = {item["title"]: item["prompt"] for item in template}
 
         try:
             for i, section_title in enumerate(sections):
@@ -326,24 +344,34 @@ class UniversalWriterApp(ctk.CTk):
                 self.txt_content.insert("end", f"\n\n【{section_title}】\n")
                 self.txt_content.see("end")
 
-                # 构建 Prompt
+                # --- 智能 Prompt 构建 ---
+                # 1. 尝试从模板中找特定的 Prompt
+                specific_prompt = prompt_map.get(section_title, f"请撰写{section_title}的内容。")
+                
+                # 2. 构建去空洞化的 System Prompt
                 system_prompt = f"""
-                你是一位专业文秘。
-                当前任务：根据大纲，撰写文章的【{section_title}】部分。
+                你是一位务实的高中化学教师。
+                当前任务：撰写文章的【{section_title}】部分。
                 文体类型：{mode}
                 
-                【指令】：
-                1. 严禁Markdown格式。
-                2. 严禁重复输出章节标题（标题已自动插入）。
-                3. 必须严格遵守用户指令：{instr}
-                4. 如果是演讲稿，语气要口语化；如果是论文，语气要学术。
+                【去空洞化指令 - 必须执行】：
+                1. 严禁复述标题。不要写“关于本章节...”、“我的初衷是...”，直接写实质内容。
+                2. 严禁车轱辘话。不要反复说“提高能力”、“构建网络”，请换成具体的例子。
+                3. 【强制填充】：必须包含事实、数据或案例。
+                   - 如果是反思，必须写具体的失败案例。
+                   - 如果是计划，必须写具体的时间和措施。
+                4. 严格遵守用户指令：{instr}
+                5. 严禁 Markdown 格式。
                 """
                 
                 user_prompt = f"""
-                标题：{topic}
+                文章标题：{topic}
                 当前章节：{section_title}
-                字数要求：约 {avg_words} 字
-                请直接写正文。
+                参考字数：约 {avg_words} 字
+                
+                【本章写作提示】：{specific_prompt}
+                
+                请直接输出正文。
                 """
 
                 resp = client.chat.completions.create(
@@ -353,7 +381,7 @@ class UniversalWriterApp(ctk.CTk):
                         {"role": "user", "content": user_prompt}
                     ],
                     stream=True,
-                    temperature=0.8
+                    temperature=0.75 # 稍微降低随机性，保证内容扎实
                 )
 
                 for chunk in resp:
@@ -366,7 +394,7 @@ class UniversalWriterApp(ctk.CTk):
                 time.sleep(0.5) 
 
             if not self.stop_event.is_set():
-                self.status_label.configure(text="撰写完成！", text_color="green")
+                self.status_label.configure(text="撰写完成！内容已优化。", text_color="green")
                 self.progressbar.set(1)
 
         except Exception as e:
@@ -428,8 +456,6 @@ class UniversalWriterApp(ctk.CTk):
         self.api_config["model"] = self.entry_model.get().strip()
         with open("config.json", "w") as f: json.dump(self.api_config, f)
 
-# === 修正的核心 ===
 if __name__ == "__main__":
-    # 使用正确的类名进行实例化
-    app = UniversalWriterApp()
+    app = InteractiveWriterApp()
     app.mainloop()
