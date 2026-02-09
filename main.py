@@ -12,7 +12,7 @@ import json
 import time
 import re
 
-# --- 新增库用于处理 PDF 和 Excel ---
+# --- 依赖库检测 ---
 try:
     import pypdf
 except ImportError:
@@ -33,7 +33,7 @@ if sys.platform.startswith('linux'):
             os.environ.__setitem__('DISPLAY', ':0')
 
 # --- 配置区域 ---
-APP_VERSION = "v29.0.0 (Multi-Format Support)"
+APP_VERSION = "v31.0.0 (Excel Filtering + Data Analysis)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 
@@ -118,6 +118,7 @@ class MasterWriterApp(ctk.CTk):
         t.grid_columnconfigure(1, weight=1)
         t.grid_rowconfigure(6, weight=1) 
 
+        # 顶部控制区
         ctrl_frame = ctk.CTkFrame(t, fg_color="transparent")
         ctrl_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
         
@@ -135,15 +136,18 @@ class MasterWriterApp(ctk.CTk):
         self.entry_topic = ctk.CTkEntry(t, width=600)
         self.entry_topic.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
-        # --- 升级版参考资料上传区 ---
+        # --- 参考文档区 ---
         ctk.CTkLabel(t, text="参考资料:", font=("bold", 12)).grid(row=2, column=0, padx=10, sticky="e")
         ref_frame = ctk.CTkFrame(t, fg_color="transparent")
         ref_frame.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
         
-        self.btn_upload = ctk.CTkButton(ref_frame, text="📂 上传资料 (PDF/Word/Excel...)", command=self.load_reference_file, width=220, fg_color="#E67E22")
+        self.btn_upload = ctk.CTkButton(ref_frame, text="📂 上传/筛选资料", command=self.load_reference_file, width=140, fg_color="#E67E22")
         self.btn_upload.pack(side="left", padx=5)
         
-        self.lbl_ref_status = ctk.CTkLabel(ref_frame, text="支持 .pdf .docx .xlsx .txt .md .csv 等", text_color="gray")
+        self.btn_clear_ref = ctk.CTkButton(ref_frame, text="❌ 清除", command=self.clear_reference_file, width=60, fg_color="#C0392B")
+        self.btn_clear_ref.pack(side="left", padx=5)
+        
+        self.lbl_ref_status = ctk.CTkLabel(ref_frame, text="未上传 (AI将基于通用知识写作)", text_color="gray")
         self.lbl_ref_status.pack(side="left", padx=10)
 
         ctk.CTkLabel(t, text="具体指令:", font=("bold", 12)).grid(row=3, column=0, padx=10, sticky="ne")
@@ -152,6 +156,7 @@ class MasterWriterApp(ctk.CTk):
 
         ctk.CTkFrame(t, height=2, fg_color="gray").grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
 
+        # 双面板
         self.paned_frame = ctk.CTkFrame(t, fg_color="transparent")
         self.paned_frame.grid(row=6, column=0, columnspan=2, sticky="nsew", padx=5)
         self.paned_frame.grid_columnconfigure(0, weight=1) 
@@ -173,7 +178,7 @@ class MasterWriterApp(ctk.CTk):
 
         content_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         content_frame.grid(row=0, column=1, sticky="ew")
-        ctk.CTkLabel(content_frame, text="Step 2: 正文撰写 (参考资料已挂载)", text_color="#2CC985", font=("bold", 13)).pack(side="left")
+        ctk.CTkLabel(content_frame, text="Step 2: 正文撰写", text_color="#2CC985", font=("bold", 13)).pack(side="left")
         self.status_label = ctk.CTkLabel(content_frame, text="就绪", text_color="gray")
         self.status_label.pack(side="right")
 
@@ -213,13 +218,13 @@ class MasterWriterApp(ctk.CTk):
         self.entry_model.pack(pady=5)
         ctk.CTkButton(t, text="保存配置", command=self.save_config).pack(pady=20)
 
-    # --- 核心功能：多格式文件读取 ---
+    # --- 核心升级：多格式文件读取与预筛选 ---
     def load_reference_file(self):
         filetypes = [
             ("All Supported", "*.docx *.pdf *.xlsx *.txt *.md *.csv *.py *.json"),
+            ("Excel Data", "*.xlsx *.xls"),
             ("Word", "*.docx"),
             ("PDF", "*.pdf"),
-            ("Excel", "*.xlsx"),
             ("Text", "*.txt *.md")
         ]
         filepath = filedialog.askopenfilename(filetypes=filetypes)
@@ -230,57 +235,77 @@ class MasterWriterApp(ctk.CTk):
         content = ""
         
         try:
-            # 1. Word (.docx)
-            if ext == ".docx":
+            # 1. Excel (.xlsx) - 新增预筛选功能
+            if ext in [".xlsx", ".xls"]:
+                if openpyxl is None: raise ImportError("缺少 openpyxl")
+                
+                # 弹出筛选对话框
+                filter_dialog = ctk.CTkInputDialog(text="【Excel数据预筛选】\n若需提取特定班级(如'高二1班')，请输入关键词。\n若分析全部数据，请直接点击OK。", title="数据筛选")
+                filter_key = filter_dialog.get_input()
+                if filter_key is None: filter_key = "" # 用户点击Cancel算空
+                filter_key = filter_key.strip()
+
+                wb = openpyxl.load_workbook(filepath, data_only=True)
+                for sheet in wb:
+                    content += f"\n--- Sheet: {sheet.title} ---\n"
+                    rows = list(sheet.iter_rows(values_only=True))
+                    if not rows: continue
+                    
+                    # 总是保留表头(第一行)
+                    header = rows[0]
+                    content += ",".join([str(c) if c else "" for c in header]) + "\n"
+                    
+                    # 遍历数据行
+                    match_count = 0
+                    for row in rows[1:]:
+                        row_text = ",".join([str(c) if c else "" for c in row])
+                        # 如果没有筛选词，或者筛选词在行中，则保留
+                        if not filter_key or (filter_key in row_text):
+                            content += row_text + "\n"
+                            match_count += 1
+                    
+                    if filter_key:
+                        print(f"Sheet {sheet.title}: 筛选 '{filter_key}' 匹配到 {match_count} 行")
+
+            # 2. Word (.docx)
+            elif ext == ".docx":
                 doc = Document(filepath)
                 content = "\n".join([p.text for p in doc.paragraphs])
             
-            # 2. PDF (.pdf)
+            # 3. PDF (.pdf)
             elif ext == ".pdf":
-                if pypdf is None:
-                    raise ImportError("缺少 pypdf 库，无法读取PDF")
+                if pypdf is None: raise ImportError("缺少 pypdf")
                 reader = pypdf.PdfReader(filepath)
-                for page in reader.pages:
-                    content += page.extract_text() + "\n"
+                for page in reader.pages: content += page.extract_text() + "\n"
             
-            # 3. Excel (.xlsx)
-            elif ext in [".xlsx", ".xls"]:
-                if openpyxl is None:
-                    raise ImportError("缺少 openpyxl 库，无法读取Excel")
-                wb = openpyxl.load_workbook(filepath, data_only=True)
-                # 遍历所有Sheet，把数据展平为文本
-                for sheet in wb:
-                    content += f"--- Sheet: {sheet.title} ---\n"
-                    for row in sheet.iter_rows(values_only=True):
-                        # 过滤None值，将一行转为字符串
-                        row_text = " ".join([str(cell) for cell in row if cell is not None])
-                        if row_text.strip():
-                            content += row_text + "\n"
-            
-            # 4. 纯文本/代码 (.txt, .md, .py, .csv, .json)
+            # 4. 纯文本
             else:
                 try:
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        content = f.read()
+                    with open(filepath, "r", encoding="utf-8") as f: content = f.read()
                 except UnicodeDecodeError:
-                    # 尝试用 GBK 读取 (针对旧的中文文档)
-                    with open(filepath, "r", encoding="gbk") as f:
-                        content = f.read()
+                    with open(filepath, "r", encoding="gbk") as f: content = f.read()
 
-            # 处理内容长度
             content = content.strip()
-            if not content:
-                raise ValueError("文件内容为空或无法识别")
+            if not content: raise ValueError("文件内容为空或筛选后无数据")
                 
-            self.reference_content = content[:10000] # 限制1万字上下文
-            if len(content) > 10000:
-                self.reference_content += "\n...(内容过长，截取前10000字)"
+            self.reference_content = content[:15000] # 放宽到1.5万字
+            if len(content) > 15000: self.reference_content += "\n...(内容过长，已截取)"
             
-            self.lbl_ref_status.configure(text=f"已挂载: {filename} ({len(self.reference_content)}字)", text_color="green")
-            messagebox.showinfo("成功", f"文件《{filename}》解析成功！\n内容已存入AI大脑，将在撰写时自动引用。")
+            status_msg = f"已挂载: {filename}"
+            if "xlsx" in ext and filter_key:
+                status_msg += f" (筛选: {filter_key})"
+            
+            self.lbl_ref_status.configure(text=status_msg, text_color="green")
+            self.btn_clear_ref.configure(state="normal")
+            messagebox.showinfo("成功", f"文件解析成功！\n共读取 {len(content)} 字符。\nAI将基于此数据进行分析。")
             
         except Exception as e:
-            messagebox.showerror("读取失败", f"无法读取文件: {str(e)}\n如果是特殊格式，请先转为TXT。")
+            messagebox.showerror("读取失败", f"无法读取: {str(e)}")
+
+    def clear_reference_file(self):
+        self.reference_content = ""
+        self.lbl_ref_status.configure(text="未上传 (AI将基于通用知识写作)", text_color="gray")
+        messagebox.showinfo("已清除", "参考资料已清空。")
 
     def on_mode_change(self, choice):
         config = STYLE_GUIDE.get(choice, STYLE_GUIDE["自由定制"])
@@ -290,7 +315,6 @@ class MasterWriterApp(ctk.CTk):
         self.txt_instructions.insert("0.0", config.get("default_instruction", ""))
         self.entry_words.delete(0, "end")
         self.entry_words.insert(0, config.get("default_words", "3000"))
-        
         self.txt_outline.delete("0.0", "end")
         self.txt_outline.insert("0.0", f"（已切换至【{choice}】模式，请点击“生成/重置大纲”...）")
 
@@ -329,10 +353,9 @@ class MasterWriterApp(ctk.CTk):
         self.status_label.configure(text="正在分析题目并构建大纲...", text_color="#1F6AA5")
         
         style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
-        
         ref_hint = ""
         if self.reference_content:
-            ref_hint = f"【参考资料背景】：用户上传了文档，包含关键词：{self.reference_content[:200]}... 请尝试结合这些内容设计大纲。"
+            ref_hint = f"【数据/资料背景】：用户上传了详细资料（包含数据/案例），请务必在构建大纲时考虑如何展示这些数据。"
 
         prompt = f"""
         任务：为《{topic}》写一份【{mode}】的详细大纲。
@@ -341,10 +364,10 @@ class MasterWriterApp(ctk.CTk):
         {ref_hint}
         
         【要求】：
-        1. 拒绝千篇一律的模板。请根据题目《{topic}》的特定内涵定制结构。
+        1. 拒绝千篇一律。请根据题目内涵定制结构。
         2. 必须包含一级标题（如一、二、三）和二级标题（如（一）（二））。
         3. 不要包含Markdown符号。
-        4. 直接输出大纲，不要废话。
+        4. 直接输出大纲。
         """
         try:
             resp = client.chat.completions.create(
@@ -369,11 +392,10 @@ class MasterWriterApp(ctk.CTk):
         self.stop_event.clear()
         outline_raw = self.txt_outline.get("0.0", "end").strip()
         if len(outline_raw) < 5:
-            self.status_label.configure(text="请先生成或输入大纲", text_color="red")
+            self.status_label.configure(text="请先生成大纲", text_color="red")
             return
             
         lines = [l.strip() for l in outline_raw.split('\n') if l.strip()]
-        
         if len(lines) > 0:
             first_line = lines[0]
             topic = self.entry_topic.get().strip()
@@ -416,30 +438,24 @@ class MasterWriterApp(ctk.CTk):
         self.progressbar.set(0)
         
         style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
-        
         core_tasks = [t for t in tasks if "摘要" not in t[0] and "参考文献" not in t[0]]
         core_count = len(core_tasks) if len(core_tasks) > 0 else 1
         
         reserved_words = 0
         if any("摘要" in t[0] for t in tasks): reserved_words += 300
-        
         available_words = total_words - reserved_words
         if available_words < 500: available_words = 500
         avg_core_words = available_words // core_count
 
         last_paragraph = "（文章刚开始，暂无上文）"
-
-        # 构建参考资料Prompt
+        
         ref_prompt_block = ""
         if self.reference_content:
             ref_prompt_block = f"""
-            【重要参考资料】：
-            以下是用户上传的辅助材料，请在撰写时：
-            1. 积极引用其中的数据、案例或观点。
-            2. 模仿其文风或专业术语的使用。
-            3. 但不要原文照抄，要进行改写和融合。
+            【核心数据/资料库】：
+            以下是用户提供的真实数据或资料，请务必基于这些数据进行分析和写作，不要编造数据。
+            如果包含成绩或统计，请进行横向/纵向对比分析。
             
-            资料内容摘要：
             {self.reference_content}
             ------------------------------------------------
             """
@@ -453,7 +469,6 @@ class MasterWriterApp(ctk.CTk):
                 
                 header = task_lines[0]
                 sub_points = "\n".join(task_lines[1:])
-                
                 current_limit = avg_core_words
                 prompt_suffix = ""
                 
@@ -476,28 +491,16 @@ class MasterWriterApp(ctk.CTk):
                 sys_prompt = f"""
                 你是一位资深教育专家。
                 文体：{mode}
-                风格要求：{style_cfg['writing_prompt']}
-                
+                风格：{style_cfg['writing_prompt']}
                 {ref_prompt_block}
-                
                 【写作铁律】：
-                1. 严禁复述章节标题！(标题已存在)。
-                2. 严禁Markdown格式。
-                3. 内容务实，拒绝空洞套话。
+                1. 严禁复述章节标题！
+                2. 严禁Markdown（不要**加粗**，不要##标题）。
+                3. 基于提供的资料进行真实分析。
                 4. {prompt_suffix}
-                5. 严格执行字数限制。
                 """
                 
-                user_prompt = f"""
-                题目：{topic}
-                当前章节：{header}
-                要点：{sub_points}
-                
-                上下文：...{last_paragraph[-150:]}
-                
-                字数：约 {current_limit} 字。
-                请直接输出正文。
-                """
+                user_prompt = f"题目：{topic}\n章节：{header}\n要点：{sub_points}\n上下文：...{last_paragraph[-150:]}\n字数：约 {current_limit} 字。\n请输出纯文本。"
 
                 resp = client.chat.completions.create(
                     model=self.api_config.get("model"),
@@ -530,10 +533,8 @@ class MasterWriterApp(ctk.CTk):
                                 if len(current_section_text) > 0 and len(current_section_text) < 50:
                                     if header_fingerprint in get_core_text(current_section_text):
                                         parts = current_section_text.split('\n', 1)
-                                        if len(parts) > 1:
-                                            self.txt_content.insert("end", parts[1] + content)
-                                        else:
-                                            self.txt_content.insert("end", content)
+                                        if len(parts) > 1: self.txt_content.insert("end", parts[1] + content)
+                                        else: self.txt_content.insert("end", content)
                                     else:
                                         self.txt_content.insert("end", current_section_text + content)
                                     current_section_text = "SAFE" 
@@ -605,12 +606,17 @@ class MasterWriterApp(ctk.CTk):
                         p = doc.add_paragraph(header)
                         p.runs[0].bold = True
                 else:
-                    p = doc.add_paragraph(line)
+                    # 去除 Markdown 痕迹
+                    clean_line = line
+                    clean_line = re.sub(r'\*\*(.*?)\*\*', r'\1', clean_line) 
+                    clean_line = re.sub(r'#{1,6}\s?', '', clean_line)
+                    
+                    p = doc.add_paragraph(clean_line)
                     p.paragraph_format.first_line_indent = Pt(24) 
                     p.paragraph_format.line_spacing = 1.25
 
             doc.save(file_path)
-            self.status_label.configure(text=f"已导出: {os.path.basename(file_path)}", text_color="green")
+            self.status_label.configure(text=f"已导出纯净版: {os.path.basename(file_path)}", text_color="green")
 
     def load_config(self):
         try:
