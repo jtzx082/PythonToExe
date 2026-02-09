@@ -29,7 +29,6 @@ jobs:
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk tcl-dev tk-dev libx11-dev
 
-    # Windows 构建：显式添加新库的收集指令
     - name: Build Windows
       if: runner.os == 'Windows'
       shell: bash
@@ -46,7 +45,6 @@ jobs:
         --hidden-import=openpyxl \
         main.py
 
-    # Linux 构建：显式添加新库的收集指令
     - name: Build Linux
       if: runner.os == 'Linux'
       run: |
@@ -62,7 +60,6 @@ jobs:
         --hidden-import=openpyxl \
         main.py
 
-    # macOS 构建
     - name: Build macOS
       if: runner.os == 'macOS'
       run: |
