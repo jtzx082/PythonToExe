@@ -10,7 +10,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 恢复您习惯的 latest 配置
         os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
@@ -26,13 +25,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # Linux 必须装这个，否则编译出来的软件就是个空壳，运行必闪退
     - name: Install Tkinter (Linux)
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk tcl-dev tk-dev libx11-dev
 
-    # 核心修复：添加 shell: bash
-    # 这让 Windows 也能看懂 Linux 的命令，解决 "ParserError"
     - name: Build with PyInstaller
       shell: bash
       run: |
