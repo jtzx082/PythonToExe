@@ -1,495 +1,709 @@
-import customtkinter as ctk
-import threading
-from openai import OpenAI
 import os
-from docx import Document
-from docx.shared import Pt, RGBColor
-from docx.oxml.ns import qn
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from tkinter import filedialog, messagebox
+import sys
 import json
-import time
 import re
+import datetime
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
 
-# --- 配置区域 ---
-APP_VERSION = "v20.0.0 (Flexible Framework + Reference Style)"
-DEV_NAME = "俞晋全"
-DEV_ORG = "俞晋全高中化学名师工作室"
+from PySide6 import QtCore, QtGui, QtWidgets
+from docx import Document
 
-ctk.set_appearance_mode("System")
-ctk.set_default_color_theme("blue")
+APP_NAME = "PaperWriter"
+APP_ORG = "YuJinQuanLab"
+SETTINGS_FILE = "settings.json"
 
-# === 文体风格定义 (深度参照您上传的文稿) ===
-# 这里定义了不同文体的“基因”，确保写出来像您上传的范文
-STYLE_GUIDE = {
-    "期刊论文": {
-        "desc": "参照《虚拟仿真》、《热重分析》等范文。学术严谨，理实结合。",
-        "outline_prompt": "请设计一份标准的教育期刊论文大纲。必须包含：摘要、关键词、一、问题的提出；二、核心概念/理论；三、教学策略/模型建构（核心）；四、成效与反思；参考文献。",
-        "writing_prompt": "语气要学术、客观。策略部分必须结合具体的化学知识点（如氯气、氧化还原）。多用数据和案例支撑。",
-        "is_paper": True
-    },
-    "教学反思": {
-        "desc": "参照《二轮复习反思》。第一人称，深度剖析。",
-        "outline_prompt": "请设计一份深度教学反思大纲。建议结构：一、教学初衷；二、课堂实录与问题；三、原因深度剖析；四、改进措施。",
-        "writing_prompt": "使用第一人称‘我’。拒绝套话，重点描写课堂上真实的遗憾、突发状况和学生的真实反应。剖析要深刻。",
-        "is_paper": False
-    },
-    "教学案例": {
-        "desc": "叙事风格，还原课堂现场。",
-        "outline_prompt": "请设计一份教学案例大纲。建议结构：一、案例背景；二、情境描述（片段）；三、案例分析；四、教学启示。",
-        "writing_prompt": "采用‘叙事研究’风格。像写故事一样描述课堂冲突、师生对话和实验现象。",
-        "is_paper": False
-    },
-    "工作计划": {
-        "desc": "行政公文风格，条理清晰。",
-        "outline_prompt": "请设计一份工作计划大纲。包含：指导思想、工作目标、主要措施、行事历。",
-        "writing_prompt": "语言简练，多用‘一要...二要...’的句式。措施要具体，多用数据。",
-        "is_paper": False
-    },
-    "工作总结": {
-        "desc": "汇报风格，数据详实。",
-        "outline_prompt": "请设计一份工作总结大纲。包含：工作概况、主要成绩、存在不足、未来展望。",
-        "writing_prompt": "用数据说话（平均分、获奖数）。既要展示亮点，也要诚恳分析不足。",
-        "is_paper": False
-    },
-    "自由定制": {
-        "desc": "根据指令自动生成。",
-        "outline_prompt": "请根据用户的具体指令设计最合理的大纲结构。",
-        "writing_prompt": "严格遵循用户的特殊要求。",
-        "is_paper": False
-    }
+
+# ---------------------------
+# Utilities
+# ---------------------------
+def user_config_dir() -> str:
+    base = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.AppConfigLocation)
+    path = os.path.join(base, APP_ORG, APP_NAME)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def load_settings() -> dict:
+    path = os.path.join(user_config_dir(), SETTINGS_FILE)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_settings(data: dict):
+    path = os.path.join(user_config_dir(), SETTINGS_FILE)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def now_str() -> str:
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def clamp_text(s: str, max_len: int = 12000) -> str:
+    s = s.strip()
+    return s if len(s) <= max_len else s[:max_len] + "\n...[截断]..."
+
+
+def parse_kv_instructions(text: str) -> Dict[str, str]:
+    """
+    解析形如：体裁=论文; 语言=中文; 字数=2000
+    也兼容换行/中文分号/逗号。
+    """
+    d = {}
+    if not text.strip():
+        return d
+    parts = re.split(r"[;\n，,；]+", text.strip())
+    for p in parts:
+        if "=" in p:
+            k, v = p.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if k and v:
+                d[k] = v
+    return d
+
+
+# ---------------------------
+# LLM Client (OpenAI-compatible)
+# ---------------------------
+@dataclass
+class LLMConfig:
+    api_base: str = ""
+    api_key: str = ""
+    model: str = "gpt-4o-mini"
+    temperature: float = 0.6
+    max_tokens: int = 1800
+
+
+class OpenAICompatClient:
+    """
+    仅使用标准库 urllib 实现一个 OpenAI 兼容 Chat Completions 客户端：
+    POST {api_base}/v1/chat/completions
+    """
+    def __init__(self, cfg: LLMConfig, logger):
+        self.cfg = cfg
+        self.logger = logger
+
+    def is_ready(self) -> bool:
+        return bool(self.cfg.api_base.strip()) and bool(self.cfg.api_key.strip()) and bool(self.cfg.model.strip())
+
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        import urllib.request
+
+        base = self.cfg.api_base.rstrip("/")
+        url = base + "/v1/chat/completions"
+        payload = {
+            "model": self.cfg.model,
+            "messages": messages,
+            "temperature": self.cfg.temperature,
+            "max_tokens": self.cfg.max_tokens,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", f"Bearer {self.cfg.api_key}")
+
+        self.logger(f"[{now_str()}] 调用 LLM: {url} | model={self.cfg.model}")
+
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            obj = json.loads(raw)
+            return obj["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            self.logger(f"[{now_str()}] LLM 调用失败：{e}")
+            raise
+
+
+# ---------------------------
+# Prompt Templates & Generators
+# ---------------------------
+GENRES = ["论文", "计划", "反思", "案例", "总结", "自定义"]
+
+DEFAULT_OUTLINE_TEMPLATES = {
+    "论文": [
+        "题目",
+        "摘要",
+        "关键词",
+        "1 引言",
+        "2 研究方法",
+        "3 结果",
+        "4 讨论",
+        "5 结论与展望",
+        "参考文献（占位符）",
+    ],
+    "计划": [
+        "标题",
+        "一、背景与目标",
+        "二、现状分析",
+        "三、实施步骤",
+        "四、时间安排（里程碑）",
+        "五、风险与应对",
+        "六、评估指标",
+    ],
+    "反思": [
+        "标题",
+        "一、事件/课堂概述",
+        "二、目标与预期",
+        "三、实际发生了什么（证据）",
+        "四、问题诊断（原因分析）",
+        "五、改进策略（可操作）",
+        "六、后续跟进",
+    ],
+    "案例": [
+        "标题",
+        "一、背景",
+        "二、问题描述",
+        "三、关键决策/行动",
+        "四、过程与结果",
+        "五、经验与启示",
+        "六、可迁移做法",
+    ],
+    "总结": [
+        "标题",
+        "一、总体回顾",
+        "二、关键成果",
+        "三、问题与不足",
+        "四、经验提炼",
+        "五、下一步计划",
+    ],
+    "自定义": [
+        "标题",
+        "一、背景",
+        "二、主体内容（按需细化）",
+        "三、结语/行动项",
+    ],
 }
 
-class MasterWriterApp(ctk.CTk):
+
+def outline_to_markdown(lines: List[str]) -> str:
+    # 用 Markdown 标题表示层级：简单起见全部做二级标题
+    md = []
+    for s in lines:
+        s = s.strip()
+        if not s:
+            continue
+        if re.match(r"^\d+(\.\d+)*\s+", s):
+            md.append(f"## {s}")
+        elif s.startswith(("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、")):
+            md.append(f"## {s}")
+        else:
+            md.append(f"## {s}")
+    return "\n".join(md).strip() + "\n"
+
+
+def split_outline_markdown(md: str) -> List[str]:
+    # 从 markdown 标题提取章节列表
+    lines = []
+    for line in md.splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            title = line.lstrip("#").strip()
+            if title:
+                lines.append(title)
+    if not lines:
+        # 兜底：按非空行
+        lines = [x.strip() for x in md.splitlines() if x.strip()]
+    return lines
+
+
+def rule_based_outline(title: str, genre: str, instructions: str) -> str:
+    base = DEFAULT_OUTLINE_TEMPLATES.get(genre, DEFAULT_OUTLINE_TEMPLATES["自定义"])
+    # 把题目插入开头
+    lines = base.copy()
+    if lines and lines[0] in ("题目", "标题"):
+        lines[0] = f"{lines[0]}：{title}" if title else lines[0]
+    else:
+        if title:
+            lines.insert(0, f"标题：{title}")
+
+    # 根据指令做一点点智能扩展
+    kv = parse_kv_instructions(instructions)
+    if genre == "论文":
+        structure = kv.get("结构", "").upper()
+        if "IMRAD" in structure or "IMRaD" in structure:
+            lines = [
+                f"题目：{title}" if title else "题目",
+                "摘要",
+                "关键词",
+                "1 引言（Introduction）",
+                "2 方法（Methods）",
+                "3 结果（Results）",
+                "4 讨论（Discussion）",
+                "5 结论（Conclusion）",
+                "参考文献（占位符）",
+            ]
+    return outline_to_markdown(lines)
+
+
+def rule_based_draft(title: str, genre: str, outline_md: str, instructions: str) -> str:
+    sections = split_outline_markdown(outline_md)
+    kv = parse_kv_instructions(instructions)
+    lang = kv.get("语言", "中文")
+    word_count = kv.get("字数", "")
+    style = kv.get("风格", "清晰、结构化")
+
+    intro = f"# {title or '未命名文稿'}\n\n"
+    intro += f"> 体裁：{genre}｜语言：{lang}｜目标字数：{word_count or '未指定'}｜风格：{style}\n\n"
+    if instructions.strip():
+        intro += f"**写作要求/指令：** {instructions.strip()}\n\n"
+
+    body = []
+    for sec in sections:
+        body.append(f"## {sec}\n")
+        # 给不同体裁写一些占位内容
+        if genre == "论文":
+            if "摘要" in sec:
+                body.append("（在此用150~300字概括研究背景、方法、主要发现与结论。）\n")
+            elif "关键词" in sec:
+                body.append("关键词：___；___；___；___\n")
+            elif "引言" in sec:
+                body.append("（交代研究背景、问题、意义与研究目标，指出研究空白。）\n")
+            elif "方法" in sec:
+                body.append("（描述研究设计、对象/材料、变量、步骤、数据处理方法。）\n")
+            elif "结果" in sec:
+                body.append("（按研究问题呈现结果，可用小节：3.1、3.2…）\n")
+            elif "讨论" in sec:
+                body.append("（解释结果、与已有研究对比、指出局限与启示。）\n")
+            elif "结论" in sec:
+                body.append("（总结主要结论、贡献、应用价值与未来工作。）\n")
+            elif "参考文献" in sec:
+                body.append("（此处放置参考文献占位符：\n- [1] 作者. 题目. 期刊, 年, 卷(期): 页码.\n- [2] ...）\n")
+            else:
+                body.append("（按该小节主题展开论述，建议每节2~4段。）\n")
+        else:
+            body.append("（围绕该小节主题写1~3段，尽量给出事实、证据与可执行建议。）\n")
+
+        body.append("\n")
+
+    return intro + "".join(body)
+
+
+class WriterEngine:
+    def __init__(self, llm: Optional[OpenAICompatClient], logger):
+        self.llm = llm
+        self.logger = logger
+
+    def gen_outline(self, title: str, genre: str, instructions: str) -> str:
+        # 有 LLM 就用 LLM；否则模板
+        if self.llm and self.llm.is_ready():
+            sys_prompt = (
+                "你是一个专业写作助手。用户会给出题目、体裁与要求。"
+                "你的任务：生成可编辑的中文Markdown大纲。"
+                "要求：层级清晰，章节标题具体，不要写正文，不要写多余解释。"
+            )
+            user_prompt = (
+                f"题目：{title}\n"
+                f"体裁：{genre}\n"
+                f"写作要求：{instructions}\n\n"
+                "请输出Markdown大纲（使用 #/##/### 标题），适合直接扩写为完整文稿。"
+            )
+            try:
+                out = self.llm.chat([
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ])
+                return clamp_text(out, 12000)
+            except Exception:
+                self.logger(f"[{now_str()}] 回退到离线模板生成大纲。")
+                return rule_based_outline(title, genre, instructions)
+        else:
+            return rule_based_outline(title, genre, instructions)
+
+    def write_full(self, title: str, genre: str, outline_md: str, instructions: str) -> str:
+        if self.llm and self.llm.is_ready():
+            sys_prompt = (
+                "你是一个专业写作助手。你将根据用户的大纲生成完整文稿。"
+                "要求：结构与大纲一致，语言为中文（除非指令指定），表达严谨、连贯。"
+                "如果需要引用，用[1][2]形式做占位符，不要编造真实DOI或作者。"
+            )
+            user_prompt = (
+                f"题目：{title}\n"
+                f"体裁：{genre}\n"
+                f"写作要求：{instructions}\n\n"
+                f"大纲（Markdown）：\n{outline_md}\n\n"
+                "请生成完整文稿（Markdown格式），保持标题层级与大纲一致。"
+            )
+            try:
+                out = self.llm.chat([
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ])
+                return clamp_text(out, 45000)
+            except Exception:
+                self.logger(f"[{now_str()}] 回退到离线模板生成正文。")
+                return rule_based_draft(title, genre, outline_md, instructions)
+        else:
+            return rule_based_draft(title, genre, outline_md, instructions)
+
+
+# ---------------------------
+# Exporters
+# ---------------------------
+def export_markdown(path: str, text: str):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def export_docx(path: str, markdown_text: str):
+    doc = Document()
+    for line in markdown_text.splitlines():
+        line = line.rstrip()
+        if not line.strip():
+            continue
+        if line.startswith("### "):
+            doc.add_heading(line[4:].strip(), level=3)
+        elif line.startswith("## "):
+            doc.add_heading(line[3:].strip(), level=2)
+        elif line.startswith("# "):
+            doc.add_heading(line[2:].strip(), level=1)
+        elif line.startswith(">"):
+            doc.add_paragraph(line.lstrip(">").strip(), style="Intense Quote")
+        else:
+            doc.add_paragraph(line)
+    doc.save(path)
+
+
+# ---------------------------
+# UI Components
+# ---------------------------
+class SettingsDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None, settings=None):
+        super().__init__(parent)
+        self.setWindowTitle("设置 - LLM 接口（可选）")
+        self.setModal(True)
+        self.resize(620, 280)
+
+        self.api_base = QtWidgets.QLineEdit()
+        self.api_key = QtWidgets.QLineEdit()
+        self.api_key.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.model = QtWidgets.QLineEdit()
+        self.temperature = QtWidgets.QDoubleSpinBox()
+        self.temperature.setRange(0.0, 2.0)
+        self.temperature.setSingleStep(0.1)
+        self.max_tokens = QtWidgets.QSpinBox()
+        self.max_tokens.setRange(128, 8000)
+
+        form = QtWidgets.QFormLayout()
+        form.addRow("API Base（如 https://api.openai.com ）", self.api_base)
+        form.addRow("API Key", self.api_key)
+        form.addRow("Model（如 gpt-4o-mini）", self.model)
+        form.addRow("Temperature", self.temperature)
+        form.addRow("Max tokens", self.max_tokens)
+
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addLayout(form)
+
+        note = QtWidgets.QLabel(
+            "说明：不填写也能使用（将采用离线模板生成）。\n"
+            "若填写，将使用 OpenAI 兼容的 /v1/chat/completions 接口。"
+        )
+        note.setStyleSheet("color:#666;")
+        layout.addWidget(note)
+        layout.addWidget(btns)
+
+        if settings:
+            self.api_base.setText(settings.get("api_base", ""))
+            self.api_key.setText(settings.get("api_key", ""))
+            self.model.setText(settings.get("model", "gpt-4o-mini"))
+            self.temperature.setValue(float(settings.get("temperature", 0.6)))
+            self.max_tokens.setValue(int(settings.get("max_tokens", 1800)))
+
+    def get_data(self) -> dict:
+        return {
+            "api_base": self.api_base.text().strip(),
+            "api_key": self.api_key.text().strip(),
+            "model": self.model.text().strip() or "gpt-4o-mini",
+            "temperature": float(self.temperature.value()),
+            "max_tokens": int(self.max_tokens.value()),
+        }
+
+
+class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title(f"俞晋全名师工作室全能写作系统 - {APP_VERSION}")
-        self.geometry("1300x900")
-        
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        self.setWindowTitle(f"{APP_NAME} - 期刊论文/通用文稿写作")
+        self.resize(1200, 760)
 
-        self.api_config = {
-            "api_key": "",
-            "base_url": "https://api.deepseek.com", 
-            "model": "deepseek-chat"
-        }
-        self.load_config()
-        self.stop_event = threading.Event()
+        self.settings = load_settings()
+        self.llm_cfg = LLMConfig(
+            api_base=self.settings.get("api_base", ""),
+            api_key=self.settings.get("api_key", ""),
+            model=self.settings.get("model", "gpt-4o-mini"),
+            temperature=float(self.settings.get("temperature", 0.6)),
+            max_tokens=int(self.settings.get("max_tokens", 1800)),
+        )
 
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
-        
-        self.tab_write = self.tabview.add("写作工作台")
-        self.tab_settings = self.tabview.add("系统设置")
+        self.log_box = QtWidgets.QPlainTextEdit()
+        self.log_box.setReadOnly(True)
 
-        self.setup_write_tab()
-        self.setup_settings_tab()
+        self.title_edit = QtWidgets.QLineEdit()
+        self.title_edit.setPlaceholderText("输入题目（例如：基于探究式学习的高中化学实验教学效果研究）")
 
-    def setup_write_tab(self):
-        t = self.tab_write
-        t.grid_columnconfigure(1, weight=1)
-        t.grid_rowconfigure(5, weight=1) # 让中间的大框自动伸缩
+        self.genre_combo = QtWidgets.QComboBox()
+        self.genre_combo.addItems(GENRES)
 
-        # --- 顶部控制区 ---
-        ctrl_frame = ctk.CTkFrame(t, fg_color="transparent")
-        ctrl_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
-        
-        # 文体选择
-        ctk.CTkLabel(ctrl_frame, text="文体类型:", font=("bold", 14)).pack(side="left", padx=5)
-        self.combo_mode = ctk.CTkComboBox(ctrl_frame, values=list(STYLE_GUIDE.keys()), width=180, command=self.on_mode_change)
-        self.combo_mode.set("期刊论文")
-        self.combo_mode.pack(side="left", padx=5)
-        
-        # 预估字数
-        ctk.CTkLabel(ctrl_frame, text="目标字数:", font=("bold", 14)).pack(side="left", padx=(20, 5))
-        self.entry_words = ctk.CTkEntry(ctrl_frame, width=100)
-        self.entry_words.insert(0, "3000")
-        self.entry_words.pack(side="left", padx=5)
+        self.instruction_edit = QtWidgets.QPlainTextEdit()
+        self.instruction_edit.setPlaceholderText(
+            "输入明确指令（可选）。例如：结构=IMRaD; 语言=中文; 字数=2000; 风格=严谨; 期刊=XXX\n"
+            "也可以写自然语言要求。"
+        )
 
-        # 标题输入
-        ctk.CTkLabel(t, text="文章标题:", font=("bold", 12)).grid(row=1, column=0, padx=10, sticky="e")
-        self.entry_topic = ctk.CTkEntry(t, width=600)
-        self.entry_topic.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        self.outline_edit = QtWidgets.QPlainTextEdit()
+        self.outline_edit.setPlaceholderText("这里会生成 Markdown 大纲，你可以随意修改。")
 
-        # 指令输入
-        ctk.CTkLabel(t, text="具体指令:", font=("bold", 12)).grid(row=2, column=0, padx=10, sticky="ne")
-        self.txt_instructions = ctk.CTkTextbox(t, height=50, font=("Arial", 12))
-        self.txt_instructions.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+        self.draft_edit = QtWidgets.QPlainTextEdit()
+        self.draft_edit.setPlaceholderText("点击“撰写全文”后，这里显示完整文稿（Markdown）。")
 
-        ctk.CTkFrame(t, height=2, fg_color="gray").grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        # Buttons
+        self.btn_outline = QtWidgets.QPushButton("① 生成大纲")
+        self.btn_write = QtWidgets.QPushButton("② 撰写全文")
+        self.btn_export_md = QtWidgets.QPushButton("导出 .md")
+        self.btn_export_docx = QtWidgets.QPushButton("导出 .docx")
+        self.btn_settings = QtWidgets.QPushButton("设置（LLM 可选）")
+        self.btn_clear = QtWidgets.QPushButton("清空")
 
-        # --- 核心双面板区 (左大纲，右正文) ---
-        self.paned_frame = ctk.CTkFrame(t, fg_color="transparent")
-        self.paned_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=5)
-        self.paned_frame.grid_columnconfigure(0, weight=1) 
-        self.paned_frame.grid_columnconfigure(1, weight=2) 
-        self.paned_frame.grid_rowconfigure(1, weight=1)
+        self.btn_outline.clicked.connect(self.on_generate_outline)
+        self.btn_write.clicked.connect(self.on_write_full)
+        self.btn_export_md.clicked.connect(self.on_export_md)
+        self.btn_export_docx.clicked.connect(self.on_export_docx)
+        self.btn_settings.clicked.connect(self.on_settings)
+        self.btn_clear.clicked.connect(self.on_clear)
 
-        # 左侧：大纲编辑区
-        outline_label_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
-        outline_label_frame.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(outline_label_frame, text="第一步：生成并修改大纲", text_color="#1F6AA5", font=("bold", 13)).pack(side="left")
-        
-        self.txt_outline = ctk.CTkTextbox(self.paned_frame, font=("Microsoft YaHei UI", 12)) 
-        self.txt_outline.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        
-        btn_outline_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
-        btn_outline_frame.grid(row=2, column=0, sticky="ew")
-        self.btn_gen_outline = ctk.CTkButton(btn_outline_frame, text="生成/重置大纲", command=self.run_gen_outline, fg_color="#1F6AA5", width=120)
-        self.btn_gen_outline.pack(side="left", padx=5)
-        ctk.CTkButton(btn_outline_frame, text="清空", command=lambda: self.txt_outline.delete("0.0", "end"), fg_color="gray", width=60).pack(side="right", padx=5)
+        # Layout
+        top_bar = QtWidgets.QHBoxLayout()
+        top_bar.addWidget(QtWidgets.QLabel("题目："))
+        top_bar.addWidget(self.title_edit, 1)
+        top_bar.addWidget(QtWidgets.QLabel("体裁："))
+        top_bar.addWidget(self.genre_combo)
+        top_bar.addWidget(self.btn_outline)
+        top_bar.addWidget(self.btn_write)
+        top_bar.addWidget(self.btn_export_md)
+        top_bar.addWidget(self.btn_export_docx)
+        top_bar.addWidget(self.btn_settings)
+        top_bar.addWidget(self.btn_clear)
 
-        # 右侧：正文生成区
-        content_label_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
-        content_label_frame.grid(row=0, column=1, sticky="ew")
-        ctk.CTkLabel(content_label_frame, text="第二步：按大纲分段撰写", text_color="#2CC985", font=("bold", 13)).pack(side="left")
-        self.status_label = ctk.CTkLabel(content_label_frame, text="就绪", text_color="gray")
-        self.status_label.pack(side="right")
+        left = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left)
+        left_layout.addWidget(QtWidgets.QLabel("写作指令/要求（可选）"))
+        left_layout.addWidget(self.instruction_edit, 1)
+        left_layout.addWidget(QtWidgets.QLabel("大纲（Markdown，可编辑）"))
+        left_layout.addWidget(self.outline_edit, 2)
 
-        self.txt_content = ctk.CTkTextbox(self.paned_frame, font=("Microsoft YaHei UI", 14))
-        self.txt_content.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
-        
-        btn_write_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
-        btn_write_frame.grid(row=2, column=1, sticky="ew")
-        
-        self.btn_run_write = ctk.CTkButton(btn_write_frame, text="开始撰写全文", command=self.run_full_write, fg_color="#2CC985", font=("bold", 14))
-        self.btn_run_write.pack(side="left", padx=5)
-        
-        self.btn_stop = ctk.CTkButton(btn_write_frame, text="🔴 紧急停止", command=self.stop_writing, fg_color="#C0392B", width=100)
-        self.btn_stop.pack(side="left", padx=5)
+        right = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right)
+        right_layout.addWidget(QtWidgets.QLabel("全文（Markdown）"))
+        right_layout.addWidget(self.draft_edit, 4)
+        right_layout.addWidget(QtWidgets.QLabel("日志"))
+        right_layout.addWidget(self.log_box, 1)
 
-        self.btn_clear_all = ctk.CTkButton(btn_write_frame, text="🧹 清空", command=self.clear_all, fg_color="gray", width=80)
-        self.btn_clear_all.pack(side="right", padx=5)
-        
-        self.btn_export = ctk.CTkButton(btn_write_frame, text="导出 Word", command=self.save_to_word, width=120)
-        self.btn_export.pack(side="right", padx=5)
+        splitter = QtWidgets.QSplitter()
+        splitter.setOrientation(QtCore.Qt.Horizontal)
+        splitter.addWidget(left)
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
 
-        self.progressbar = ctk.CTkProgressBar(t, mode="determinate", height=2)
-        self.progressbar.grid(row=6, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
-        self.progressbar.set(0)
+        central = QtWidgets.QWidget()
+        central_layout = QtWidgets.QVBoxLayout(central)
+        central_layout.addLayout(top_bar)
+        central_layout.addWidget(splitter, 1)
 
-        # 初始化默认
-        self.on_mode_change("期刊论文")
+        self.setCentralWidget(central)
 
-    def setup_settings_tab(self):
-        t = self.tab_settings
-        ctk.CTkLabel(t, text="API Key:").pack(pady=(20, 5))
-        self.entry_key = ctk.CTkEntry(t, width=400, show="*")
-        self.entry_key.insert(0, self.api_config.get("api_key", ""))
-        self.entry_key.pack(pady=5)
-        ctk.CTkLabel(t, text="Base URL:").pack(pady=5)
-        self.entry_url = ctk.CTkEntry(t, width=400)
-        self.entry_url.insert(0, self.api_config.get("base_url", ""))
-        self.entry_url.pack(pady=5)
-        ctk.CTkLabel(t, text="Model:").pack(pady=5)
-        self.entry_model = ctk.CTkEntry(t, width=400)
-        self.entry_model.insert(0, self.api_config.get("model", ""))
-        self.entry_model.pack(pady=5)
-        ctk.CTkButton(t, text="保存配置", command=self.save_config).pack(pady=20)
+        self.apply_style()
+        self.logger(f"[{now_str()}] 启动完成。未配置 LLM 也可使用离线模板。")
 
-    # --- 交互逻辑 ---
+    def apply_style(self):
+        # 简单的现代化暗灰风格（可自行再精调）
+        self.setStyleSheet("""
+            QMainWindow { background: #f6f7fb; }
+            QLabel { color: #222; font-weight: 600; }
+            QLineEdit, QPlainTextEdit {
+                background: #ffffff;
+                border: 1px solid #d7dbe7;
+                border-radius: 8px;
+                padding: 8px;
+                font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC";
+                font-size: 13px;
+            }
+            QPushButton {
+                background: #2b6ff3;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                padding: 8px 12px;
+                font-weight: 700;
+            }
+            QPushButton:hover { background: #215fda; }
+            QPushButton:pressed { background: #184db5; }
+            QComboBox {
+                background: #ffffff;
+                border: 1px solid #d7dbe7;
+                border-radius: 10px;
+                padding: 6px 10px;
+            }
+        """)
 
-    def on_mode_change(self, choice):
-        # 自动填充标题示例
-        if choice == "期刊论文":
-            self.entry_topic.delete(0, "end")
-            self.entry_topic.insert(0, "高中化学虚拟仿真实验教学的价值与策略研究")
-            self.txt_instructions.delete("0.0", "end")
-            self.txt_instructions.insert("0.0", "参照《氯气》和《热重》范文风格。内容要扎实，多举例。")
-            self.entry_words.delete(0, "end")
-            self.entry_words.insert(0, "3000")
-        elif choice == "教学反思":
-            self.entry_topic.delete(0, "end")
-            self.entry_topic.insert(0, "高三化学二轮复习课后的深刻反思")
-            self.entry_words.delete(0, "end")
-            self.entry_words.insert(0, "2000")
-        
-        # 清空大纲，提示用户重新生成
-        self.txt_outline.delete("0.0", "end")
-        self.txt_outline.insert("0.0", f"（请点击“生成大纲”按钮，AI将为您规划【{choice}】的结构...）")
+    def logger(self, msg: str):
+        self.log_box.appendPlainText(msg)
 
-    def stop_writing(self):
-        self.stop_event.set()
-        self.status_label.configure(text="已停止", text_color="red")
+    def build_engine(self) -> WriterEngine:
+        client = OpenAICompatClient(self.llm_cfg, self.logger)
+        return WriterEngine(client, self.logger)
 
-    def clear_all(self):
-        self.txt_outline.delete("0.0", "end")
-        self.txt_content.delete("0.0", "end")
-        self.progressbar.set(0)
-        self.status_label.configure(text="已清空")
+    def collect_inputs(self):
+        title = self.title_edit.text().strip()
+        genre = self.genre_combo.currentText().strip()
+        instructions = self.instruction_edit.toPlainText().strip()
+        return title, genre, instructions
 
-    def get_client(self):
-        key = self.api_config.get("api_key")
-        base = self.api_config.get("base_url")
-        if not key:
-            self.status_label.configure(text="错误：请配置API Key", text_color="red")
-            return None
-        return OpenAI(api_key=key, base_url=base)
+    def on_generate_outline(self):
+        title, genre, instructions = self.collect_inputs()
+        if not title:
+            QtWidgets.QMessageBox.warning(self, "提示", "请先输入题目。")
+            return
+        self.logger(f"[{now_str()}] 开始生成大纲：{genre} | {title}")
+        engine = self.build_engine()
 
-    # --- 核心功能 1：大纲生成 (恢复互动性) ---
-    def run_gen_outline(self):
-        self.stop_event.clear()
-        topic = self.entry_topic.get().strip()
-        mode = self.combo_mode.get()
-        instr = self.txt_instructions.get("0.0", "end").strip()
-        
-        if not topic:
-            self.status_label.configure(text="请输入标题！", text_color="red")
+        self.btn_outline.setEnabled(False)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            outline = engine.gen_outline(title, genre, instructions)
+            self.outline_edit.setPlainText(outline)
+            self.logger(f"[{now_str()}] 大纲生成完成。")
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self.btn_outline.setEnabled(True)
+
+    def on_write_full(self):
+        title, genre, instructions = self.collect_inputs()
+        outline_md = self.outline_edit.toPlainText().strip()
+
+        if not title:
+            QtWidgets.QMessageBox.warning(self, "提示", "请先输入题目。")
+            return
+        if not outline_md:
+            QtWidgets.QMessageBox.warning(self, "提示", "请先生成或填写大纲。")
             return
 
-        threading.Thread(target=self.thread_outline, args=(mode, topic, instr), daemon=True).start()
+        self.logger(f"[{now_str()}] 开始撰写全文：{genre} | {title}")
+        engine = self.build_engine()
 
-    def thread_outline(self, mode, topic, instr):
-        client = self.get_client()
-        if not client: return
-
-        self.btn_gen_outline.configure(state="disabled")
-        self.status_label.configure(text="正在规划结构...", text_color="#1F6AA5")
-        
-        style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
-        
-        prompt = f"""
-        任务：为《{topic}》写一份【{mode}】的详细大纲。
-        
-        【参考风格】：{style_cfg['desc']}
-        【结构建议】：{style_cfg['outline_prompt']}
-        【用户指令】：{instr}
-        
-        【要求】：
-        1. 必须包含一级标题（如一、二、三）和二级标题（如（一）（二））。
-        2. 不要包含Markdown符号。
-        3. 直接输出大纲，不要废话。
-        """
-        
+        self.btn_write.setEnabled(False)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
-            resp = client.chat.completions.create(
-                model=self.api_config.get("model"),
-                messages=[{"role": "user", "content": prompt}],
-                stream=True
-            )
-            
-            self.txt_outline.delete("0.0", "end")
-            for chunk in resp:
-                if self.stop_event.is_set(): break
-                if chunk.choices[0].delta.content:
-                    c = chunk.choices[0].delta.content
-                    self.txt_outline.insert("end", c)
-                    self.txt_outline.see("end")
-            
-            self.status_label.configure(text="大纲生成完毕，请手动修改。", text_color="green")
-
-        except Exception as e:
-            self.status_label.configure(text=f"API错误: {str(e)}", text_color="red")
+            draft = engine.write_full(title, genre, outline_md, instructions)
+            self.draft_edit.setPlainText(draft)
+            self.logger(f"[{now_str()}] 全文生成完成。")
         finally:
-            self.btn_gen_outline.configure(state="normal")
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self.btn_write.setEnabled(True)
 
-    # --- 核心功能 2：分段撰写 (恢复逐段控制) ---
-    def run_full_write(self):
-        self.stop_event.clear()
-        
-        # 1. 抓取用户修改后的大纲
-        outline_raw = self.txt_outline.get("0.0", "end").strip()
-        if len(outline_raw) < 5:
-            self.status_label.configure(text="请先生成或输入大纲", text_color="red")
+    def on_export_md(self):
+        text = self.draft_edit.toPlainText().strip() or self.outline_edit.toPlainText().strip()
+        if not text:
+            QtWidgets.QMessageBox.information(self, "提示", "没有可导出的内容（请先生成大纲或全文）。")
             return
-            
-        # 2. 智能切分大纲
-        # 为了防止字数爆炸，我们按“一级标题”进行打包
-        lines = [l.strip() for l in outline_raw.split('\n') if l.strip()]
-        tasks = []
-        current_task = []
-        
-        for line in lines:
-            # 识别大标题的特征 (一、二、三、摘要、参考文献)
-            is_header = False
-            if re.match(r'^[一二三四五六七八九十]+、', line): is_header = True
-            if "摘要" in line or "参考文献" in line: is_header = True
-            
-            if is_header:
-                if current_task: tasks.append(current_task)
-                current_task = [line]
-            else:
-                current_task.append(line)
-        if current_task: tasks.append(current_task)
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "导出 Markdown", f"{APP_NAME}.md", "Markdown (*.md)")
+        if not path:
+            return
+        export_markdown(path, text)
+        self.logger(f"[{now_str()}] 已导出 Markdown：{path}")
 
-        # 3. 准备参数
-        topic = self.entry_topic.get()
-        mode = self.combo_mode.get()
-        instr = self.txt_instructions.get("0.0", "end").strip()
-        try: total_words = int(self.entry_words.get())
-        except: total_words = 3000
-        
-        # 4. 计算每段字数
-        # 摘要/参考文献给固定字数，剩下分给正文
-        core_tasks_count = sum(1 for t in tasks if "摘要" not in t[0] and "参考文献" not in t[0])
-        if core_tasks_count == 0: core_tasks_count = 1
-        avg_words = (total_words - 500) // core_tasks_count 
-        if avg_words < 300: avg_words = 300 # 保底
+    def on_export_docx(self):
+        text = self.draft_edit.toPlainText().strip()
+        if not text:
+            QtWidgets.QMessageBox.information(self, "提示", "请先生成全文，再导出 Word。")
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "导出 Word", f"{APP_NAME}.docx", "Word (*.docx)")
+        if not path:
+            return
+        export_docx(path, text)
+        self.logger(f"[{now_str()}] 已导出 Word：{path}")
 
-        threading.Thread(target=self.thread_write, args=(tasks, mode, topic, instr, avg_words), daemon=True).start()
+    def on_settings(self):
+        dlg = SettingsDialog(self, settings={
+            "api_base": self.llm_cfg.api_base,
+            "api_key": self.llm_cfg.api_key,
+            "model": self.llm_cfg.model,
+            "temperature": self.llm_cfg.temperature,
+            "max_tokens": self.llm_cfg.max_tokens,
+        })
+        if dlg.exec() == QtWidgets.QDialog.Accepted:
+            data = dlg.get_data()
+            self.llm_cfg = LLMConfig(**data)
+            save_settings(data)
+            self.logger(f"[{now_str()}] 设置已保存。LLM {'已启用' if OpenAICompatClient(self.llm_cfg, self.logger).is_ready() else '未启用（将使用离线模板）'}。")
 
-    def thread_write(self, tasks, mode, topic, instr, avg_words):
-        client = self.get_client()
-        if not client: return
+    def on_clear(self):
+        self.title_edit.clear()
+        self.instruction_edit.clear()
+        self.outline_edit.clear()
+        self.draft_edit.clear()
+        self.logger(f"[{now_str()}] 已清空。")
 
-        self.btn_run_write.configure(state="disabled")
-        self.txt_content.delete("0.0", "end")
-        self.progressbar.set(0)
-        
-        style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
 
-        try:
-            for i, task_lines in enumerate(tasks):
-                if self.stop_event.is_set(): break
-                
-                header = task_lines[0]
-                sub_points = "\n".join(task_lines[1:])
-                
-                # 动态调整字数
-                current_limit = avg_words
-                if "摘要" in header: current_limit = 300
-                if "参考文献" in header: current_limit = 0 # 让AI列几条就行
-                
-                self.status_label.configure(text=f"正在撰写: {header}...", text_color="#1F6AA5")
-                self.progressbar.set(i / len(tasks))
+# ---------------------------
+# CLI (optional)
+# ---------------------------
+def run_cli_if_requested():
+    import argparse
+    parser = argparse.ArgumentParser(description="PaperWriter CLI")
+    parser.add_argument("--title", type=str, default="")
+    parser.add_argument("--genre", type=str, default="论文", choices=GENRES)
+    parser.add_argument("--instructions", type=str, default="")
+    parser.add_argument("--outline-only", action="store_true")
+    args, _ = parser.parse_known_args()
 
-                # 插入标题标记
-                self.txt_content.insert("end", f"\n\n【{header}】\n")
-                self.txt_content.see("end")
+    if args.title:
+        # CLI 输出到 stdout
+        settings = load_settings()
+        cfg = LLMConfig(
+            api_base=settings.get("api_base", ""),
+            api_key=settings.get("api_key", ""),
+            model=settings.get("model", "gpt-4o-mini"),
+            temperature=float(settings.get("temperature", 0.6)),
+            max_tokens=int(settings.get("max_tokens", 1800)),
+        )
 
-                # Prompt 工程
-                sys_prompt = f"""
-                你是一位资深教育专家，正在辅助俞晋全老师撰写文稿。
-                文体：{mode}
-                风格要求：{style_cfg['writing_prompt']}
-                
-                【写作铁律】：
-                1. 严禁复述章节标题（标题已自动插入）。
-                2. 严禁Markdown格式。
-                3. 内容务实，拒绝空洞套话。必须结合具体案例。
-                4. 用户指令：{instr}
-                """
-                
-                user_prompt = f"""
-                题目：{topic}
-                当前章节：{header}
-                包含要点：
-                {sub_points}
-                
-                字数控制：约 {current_limit} 字。
-                请直接输出正文。
-                """
+        def _log(msg):  # CLI 简化日志
+            print(msg, file=sys.stderr)
 
-                # 使用非流式请求以确保稳定性
-                resp = client.chat.completions.create(
-                    model=self.api_config.get("model"),
-                    messages=[{"role":"system","content":sys_prompt}, {"role":"user","content":user_prompt}],
-                    temperature=0.7
-                )
-                
-                raw = resp.choices[0].message.content
-                
-                # 清洗标题重复
-                clean_text = raw.strip()
-                # 简单去除第一行如果它是标题
-                lines = clean_text.split('\n')
-                if len(lines) > 0 and (header[:4] in lines[0] or "摘要" in lines[0]):
-                    clean_text = "\n".join(lines[1:]).strip()
+        client = OpenAICompatClient(cfg, _log)
+        engine = WriterEngine(client, _log)
+        outline = engine.gen_outline(args.title, args.genre, args.instructions)
+        if args.outline_only:
+            print(outline)
+        else:
+            draft = engine.write_full(args.title, args.genre, outline, args.instructions)
+            print(draft)
+        sys.exit(0)
 
-                self.txt_content.insert("end", clean_text)
-                self.txt_content.see("end")
-                time.sleep(0.5)
 
-            if not self.stop_event.is_set():
-                self.status_label.configure(text="撰写完成！", text_color="green")
-                self.progressbar.set(1)
+def main():
+    run_cli_if_requested()
 
-        except Exception as e:
-            self.status_label.configure(text=f"API错误: {str(e)}", text_color="red")
-        finally:
-            self.btn_run_write.configure(state="normal")
+    app = QtWidgets.QApplication(sys.argv)
+    # 高DPI适配
+    QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+    QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
 
-    # --- 核心功能 3：格式化导出 (参照范文) ---
-    def save_to_word(self):
-        content = self.txt_content.get("0.0", "end").strip()
-        if not content: return
-        
-        file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word Document", "*.docx")])
-        if file_path:
-            doc = Document()
-            # 全局字体设置：中文字体
-            doc.styles['Normal'].font.name = u'Times New Roman'
-            doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
-            
-            # 1. 标题 (仿照范文：黑体，居中，二号)
-            p_title = doc.add_paragraph()
-            p_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            run_t = p_title.add_run(self.entry_topic.get())
-            run_t.font.name = u'黑体'
-            run_t._element.rPr.rFonts.set(qn('w:eastAsia'), u'黑体')
-            run_t.font.size = Pt(18)
-            run_t.bold = True
-            
-            # 2. 作者信息 (仿照范文：楷体，居中，小四)
-            p_auth = doc.add_paragraph()
-            p_auth.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            run_a = p_auth.add_run(f"{DEV_NAME}\n({DEV_ORG})")
-            run_a.font.name = u'楷体'
-            run_a._element.rPr.rFonts.set(qn('w:eastAsia'), u'楷体')
-            run_a.font.size = Pt(12)
-            
-            doc.add_paragraph() # 空行
+    w = MainWindow()
+    w.show()
+    sys.exit(app.exec())
 
-            # 3. 正文解析与排版
-            lines = content.split('\n')
-            for line in lines:
-                line = line.strip()
-                if not line: continue
-
-                # 识别一级标题 【XXX】
-                if line.startswith("【") and line.endswith("】"):
-                    header = line.replace("【", "").replace("】", "")
-                    
-                    # 期刊论文格式特殊处理
-                    is_paper = STYLE_GUIDE[self.combo_mode.get()]["is_paper"]
-                    
-                    if "摘要" in header or "关键词" in header:
-                        p = doc.add_paragraph()
-                        run = p.add_run(header)
-                        run.bold = True
-                        run.font.name = u'黑体' # 摘要标题用黑体
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), u'黑体')
-                    elif re.match(r'^[一二三四五六七八九十]+、', header):
-                        p = doc.add_paragraph()
-                        p.paragraph_format.space_before = Pt(12)
-                        run = p.add_run(header)
-                        run.bold = True
-                        run.font.size = Pt(14) # 一级标题四号
-                        run.font.name = u'黑体'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), u'黑体')
-                    else:
-                        p = doc.add_paragraph(header)
-                        p.runs[0].bold = True
-                else:
-                    # 正文内容
-                    p = doc.add_paragraph(line)
-                    p.paragraph_format.first_line_indent = Pt(24) # 首行缩进
-                    p.paragraph_format.line_spacing = 1.25 # 行距
-
-            doc.save(file_path)
-            self.status_label.configure(text=f"已导出: {os.path.basename(file_path)}", text_color="green")
-
-    def load_config(self):
-        try:
-            with open("config.json", "r") as f: self.api_config = json.load(f)
-        except: pass
-    def save_config(self):
-        self.api_config["api_key"] = self.entry_key.get().strip()
-        self.api_config["base_url"] = self.entry_url.get().strip()
-        self.api_config["model"] = self.entry_model.get().strip()
-        with open("config.json", "w") as f: json.dump(self.api_config, f)
 
 if __name__ == "__main__":
-    app = MasterWriterApp()
-    app.mainloop()
+    main()
