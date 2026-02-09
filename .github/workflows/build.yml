@@ -23,8 +23,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      # ---- Linux: install runtime deps required by Qt xcb plugin ----
-      - name: Install Linux runtime deps for Qt (Ubuntu)
+      # -----------------------------
+      # Linux runtime deps for Qt GUI
+      # Qt 6.5+ needs libxcb-cursor0 to load xcb platform plugin
+      # -----------------------------
+      - name: Install Linux runtime deps (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -42,27 +45,59 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # ---- Linux: add fcitx5 input method plugin into PySide6 ----
-      - name: Detect PySide6 Qt plugins path (Linux)
+      # ------------------------------------------------------------
+      # Linux: enable Chinese input for Qt apps under fcitx5
+      # Why: PySide6/Qt often lacks fcitx platforminputcontexts plugin
+      # so Chinese input fails under fcitx5. Copy plugin into PySide6 Qt plugins.
+      # ------------------------------------------------------------
+      - name: Install fcitx5 Qt6 frontend (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fcitx5-frontend-qt6
+
+      - name: Patch PySide6 with fcitx5 plugin (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          echo "PYSIDE_QT_PLUGINS=$(python -c 'import PySide6, os; print(os.path.join(os.path.dirname(PySide6.__file__), \"Qt\", \"plugins\"))')" >> $GITHUB_ENV
-          echo "PySide6 Qt plugins path: $PYSIDE_QT_PLUGINS"
+          set -euxo pipefail
 
-      - name: Add fcitx5 Support to PySide6 (Linux)
-        if: runner.os == 'Linux'
-        # ✅ 修复点：不要用 @master。该仓库默认分支是 main 且有 v1.0.0 release。[1](https://github.com/chenmozhijin/fcitx5-pyside)[2](https://awesome.ecosyste.ms/api/v1/projects/github.com/chenmozhijin/fcitx5-pyside)
-        uses: chenmozhijin/fcitx5-pyside@v1.0.0
-        with:
-          plugins-path: ${{ env.PYSIDE_QT_PLUGINS }}
+          # 1) Find PySide6 Qt plugins path
+          PYSIDE_QT_PLUGINS="$(python - <<'PY'
+import os, PySide6
+base = os.path.dirname(PySide6.__file__)
+print(os.path.join(base, "Qt", "plugins"))
+PY
+)"
+          echo "PySide6 Qt plugins: $PYSIDE_QT_PLUGINS"
+          mkdir -p "$PYSIDE_QT_PLUGINS/platforminputcontexts"
 
+          # 2) Locate fcitx5 Qt6 plugin .so from system package
+          FCITX_SO="$(dpkg -L fcitx5-frontend-qt6 | grep -E 'libfcitx5platforminputcontextplugin\.so$' || true)"
+          if [[ -z "$FCITX_SO" ]]; then
+            FCITX_SO="$(find /usr -type f -name 'libfcitx5platforminputcontextplugin.so' 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [[ -z "$FCITX_SO" ]]; then
+            echo "ERROR: Cannot find libfcitx5platforminputcontextplugin.so after installing fcitx5-frontend-qt6"
+            exit 1
+          fi
+
+          echo "Found fcitx5 plugin: $FCITX_SO"
+          cp -v "$FCITX_SO" "$PYSIDE_QT_PLUGINS/platforminputcontexts/"
+
+          # 3) Verify
+          ls -la "$PYSIDE_QT_PLUGINS/platforminputcontexts" | sed -n '1,200p'
+
+      # -----------------------------
+      # Build with PyInstaller
+      # Linux: onedir is more robust for Qt plugin deployment
+      # -----------------------------
       - name: Build with PyInstaller
         shell: bash
         run: |
           rm -rf build dist || true
 
-          # Linux: use onedir (more robust for Qt plugin deployment)
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             pyinstaller --noconfirm --clean --onedir --name PaperWriter main.py
           else
@@ -71,7 +106,9 @@ jobs:
 
           ls -R dist
 
-      # ---- Linux: quick self-test (headless) to catch startup issues early ----
+      # -----------------------------
+      # Linux: quick self-test (headless)
+      # -----------------------------
       - name: Self-test (Linux, offscreen)
         if: runner.os == 'Linux'
         shell: bash
