@@ -9,7 +9,7 @@ import re
 import uuid
 import time
 from datetime import datetime
-import traceback # 用于捕获错误
+import traceback
 
 # --- 基础库 ---
 try:
@@ -22,22 +22,19 @@ from duckduckgo_search import DDGS
 import pypdf
 from docx import Document
 
-# --- 重型库安全导入 (防闪退核心) ---
+# --- 重型库安全导入 ---
 try:
     import pandas as pd
 except ImportError:
     pd = None
-    print("Warning: Pandas not loaded")
-
 try:
     from pptx import Presentation
 except ImportError:
     Presentation = None
-    print("Warning: Python-PPTX not loaded")
 
 # --- 配置区域 ---
 APP_NAME = "DeepSeek Pro"
-APP_VERSION = "v2.4.1 (Linux Stable)"
+APP_VERSION = "v2.4.2 (Layout Fixed)"
 DEV_NAME = "Yu Jinquan"
 
 DEFAULT_CONFIG = {
@@ -57,9 +54,8 @@ COLOR_SIDEBAR = ("#EBEBEB", "#212121")
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-# --- 辅助函数：获取真实路径 ---
+# --- 辅助函数 ---
 def get_base_path():
-    """ 获取可执行文件所在的真实目录，防止在Linux下路径错误 """
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
@@ -131,13 +127,9 @@ class ChatBubble(ctk.CTkFrame):
         try:
             content = self.raw_text
             if not content: return
-            
-            # Linux 剪贴板兼容性处理
             if pyperclip:
-                try:
-                    pyperclip.copy(content)
-                except Exception:
-                    # 如果缺少 xclip，尝试使用 tkinter 原生方法
+                try: pyperclip.copy(content)
+                except:
                     self.master.clipboard_clear()
                     self.master.clipboard_append(content)
                     self.master.update()
@@ -148,8 +140,7 @@ class ChatBubble(ctk.CTkFrame):
 
             self.btn_copy.configure(text="✅ 成功", text_color="green")
             self.after(1500, lambda: self.btn_copy.configure(text="📋 复制", text_color="gray"))
-        except Exception as e:
-            print(f"Copy Error: {e}")
+        except Exception:
             self.btn_copy.configure(text="❌ 失败", text_color="red")
 
     def render_content(self, text, text_color):
@@ -168,7 +159,6 @@ class ChatBubble(ctk.CTkFrame):
                 t.configure(state="disabled")
                 t.pack(fill="x", padx=5, pady=5)
                 
-                # 代码复制
                 def copy_code(c=code):
                     if pyperclip: pyperclip.copy(c)
                     else: 
@@ -190,9 +180,7 @@ class DeepSeekApp(ctk.CTk):
         self.title(f"{APP_NAME} {APP_VERSION}")
         self.geometry("1300x850")
         
-        self.base_dir = get_base_path() # 获取真实运行目录
-        
-        # 路径修复：确保读取的是 executable 同级目录的文件
+        self.base_dir = get_base_path()
         self.config_path = os.path.join(self.base_dir, "config.json")
         self.history_path = os.path.join(self.base_dir, "sessions.json")
 
@@ -223,31 +211,30 @@ class DeepSeekApp(ctk.CTk):
         return default
 
     def save_config(self):
-        try:
-            json.dump(self.config, open(self.config_path, "w", encoding="utf-8"), indent=2)
-        except Exception as e:
-            messagebox.showerror("保存失败", f"无法写入配置文件:\n{e}")
+        try: json.dump(self.config, open(self.config_path, "w", encoding="utf-8"), indent=2)
+        except: pass
 
     def save_sessions(self):
-        try:
-            json.dump(self.sessions, open(self.history_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"Save sessions error: {e}")
+        try: json.dump(self.sessions, open(self.history_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        except: pass
 
     def init_client(self):
         if not self.config["api_key"]: return
         self.client = OpenAI(api_key=self.config["api_key"], base_url="https://api.deepseek.com")
 
-    # --- UI 构建 ---
+    # --- UI 构建 (布局修复核心) ---
     def setup_ui(self):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
+        # === 左侧 ===
         self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0, fg_color=COLOR_SIDEBAR)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(3, weight=1) 
+        
+        # 关键修改：让第4行（历史记录列表）可伸缩，其他行固定
+        self.sidebar.grid_rowconfigure(4, weight=1) 
 
-        # 1. Header
+        # 1. Header (Row 0)
         top_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         top_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(25, 15))
         ctk.CTkLabel(top_frame, text=APP_NAME, font=("Arial", 22, "bold")).pack(anchor="w")
@@ -257,26 +244,28 @@ class DeepSeekApp(ctk.CTk):
         ctk.CTkLabel(dev_frame, text=DEV_NAME, font=("Arial", 11, "bold"), text_color="#3498DB").pack(side="left", padx=5)
         ctk.CTkLabel(top_frame, text=APP_VERSION, font=("Arial", 10), text_color="gray50").pack(anchor="w", pady=(2,0))
 
-        # 2. New Chat
+        # 2. New Chat (Row 1)
         self.btn_new = ctk.CTkButton(self.sidebar, text="+ 开启新对话", height=40, font=("Arial", 14), 
                                      fg_color="#3498DB", hover_color="#2980B9",
                                      command=lambda: self.create_new_session(save=True))
         self.btn_new.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="ew")
 
-        # 3. Status
+        # 3. Status (Row 2)
         self.status_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#333333"), corner_radius=8)
         self.status_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=5)
         ctk.CTkLabel(self.status_frame, text="当前模型状态", font=("Arial", 10, "bold"), text_color="gray").pack(pady=(5,0))
         self.lbl_model_status = ctk.CTkLabel(self.status_frame, text="初始化中...", font=("Arial", 12), text_color="#3498DB")
         self.lbl_model_status.pack(pady=(0,5))
 
-        # 4. History
+        # 4. History Title (Row 3)
         ctk.CTkLabel(self.sidebar, text="历史记录", font=("Arial", 12), text_color="gray").grid(row=3, column=0, sticky="nw", padx=15, pady=(10,0))
+        
+        # 5. History List (Row 4 - Expandable)
         self.history_list = ctk.CTkScrollableFrame(self.sidebar, fg_color="transparent")
         self.history_list.grid(row=4, column=0, sticky="nsew", padx=5, pady=5)
         self.render_history_list()
 
-        # 5. Settings
+        # 6. Settings (Row 5)
         setting_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#2B2B2B"), corner_radius=10)
         setting_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=20)
         
@@ -288,12 +277,14 @@ class DeepSeekApp(ctk.CTk):
         self.entry_key = ctk.CTkEntry(setting_frame, placeholder_text="API Key", show="*")
         self.entry_key.insert(0, self.config["api_key"])
         self.entry_key.pack(pady=5, padx=10, fill="x")
+        
         ctk.CTkButton(setting_frame, text="保存配置", height=24, command=self.save_key).pack(pady=10)
 
-        # 6. Clear
-        ctk.CTkButton(self.sidebar, text="🗑️ 清空所有", fg_color="transparent", text_color="#C0392B", hover_color=("#FADBD8", "#522"), command=self.clear_all_history).pack(side="bottom", padx=15, pady=10, fill="x")
+        # 7. Clear Button (Row 6) - 修复点：改用 Grid
+        self.btn_clear = ctk.CTkButton(self.sidebar, text="🗑️ 清空所有", fg_color="transparent", text_color="#C0392B", hover_color=("#FADBD8", "#522"), command=self.clear_all_history)
+        self.btn_clear.grid(row=6, column=0, sticky="ew", padx=15, pady=10)
 
-        # === Right Side ===
+        # === 右侧 ===
         self.main_area = ctk.CTkFrame(self, fg_color=COLOR_BG)
         self.main_area.grid(row=0, column=1, sticky="nsew")
         self.main_area.grid_rowconfigure(0, weight=1)
@@ -324,7 +315,7 @@ class DeepSeekApp(ctk.CTk):
         
         self.btn_stop = ctk.CTkButton(btn_box, text="⏹", width=40, fg_color="#C0392B", command=self.stop_generation)
 
-    # --- Logic ---
+    # --- 逻辑功能 (保持不变) ---
     def update_settings(self):
         self.config["use_search"] = self.search_var.get()
         self.config["is_r1"] = self.r1_var.get()
@@ -582,7 +573,6 @@ class DeepSeekApp(ctk.CTk):
         self.reset_ui()
 
 if __name__ == "__main__":
-    # 全局异常捕获，防止闪退无痕
     try:
         app = DeepSeekApp()
         app.mainloop()
