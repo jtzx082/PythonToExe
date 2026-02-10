@@ -1,6 +1,8 @@
-pandas
-numpy
-openpyxl
 customtkinter
+openai
 packaging
+pillow
+duckduckgo-search
+pypdf
+python-docx
 pyinstaller
