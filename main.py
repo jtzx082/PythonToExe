@@ -3,27 +3,41 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
 import os
+import sys
 import json
 import re
 import uuid
 import time
 from datetime import datetime
-import pyperclip
-from openai import OpenAI
+import traceback # 用于捕获错误
 
-# --- 扩展功能库 ---
+# --- 基础库 ---
+try:
+    import pyperclip
+except ImportError:
+    pyperclip = None
+
+from openai import OpenAI
 from duckduckgo_search import DDGS
 import pypdf
 from docx import Document
-import pandas as pd
+
+# --- 重型库安全导入 (防闪退核心) ---
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+    print("Warning: Pandas not loaded")
+
 try:
     from pptx import Presentation
 except ImportError:
     Presentation = None
+    print("Warning: Python-PPTX not loaded")
 
 # --- 配置区域 ---
 APP_NAME = "DeepSeek Pro"
-APP_VERSION = "v2.4.0 (Dev Header)"
+APP_VERSION = "v2.4.1 (Linux Stable)"
 DEV_NAME = "Yu Jinquan"
 
 DEFAULT_CONFIG = {
@@ -42,6 +56,13 @@ COLOR_SIDEBAR = ("#EBEBEB", "#212121")
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
+
+# --- 辅助函数：获取真实路径 ---
+def get_base_path():
+    """ 获取可执行文件所在的真实目录，防止在Linux下路径错误 """
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
 
 class AttachmentChip(ctk.CTkFrame):
     def __init__(self, master, filename, command_delete, **kwargs):
@@ -80,22 +101,17 @@ class ChatBubble(ctk.CTkFrame):
         else:
             self.prefix = ""
 
-        # 气泡实体
         self.bubble_inner = ctk.CTkFrame(self, fg_color=bubble_color, corner_radius=12)
         self.bubble_inner.grid(row=0, column=1 if role == "user" else 0, padx=10, pady=5, sticky=anchor)
 
-        # 内容容器
         self.content_frame = ctk.CTkFrame(self.bubble_inner, fg_color="transparent")
         self.content_frame.pack(fill="both", padx=10, pady=10)
 
-        # 初始渲染
         self.render_content(self.prefix + text, text_color)
 
-        # 底部栏
         self.bottom_bar = ctk.CTkFrame(self.bubble_inner, fg_color="transparent", height=20)
         self.bottom_bar.pack(fill="x", padx=10, pady=(0, 5))
         
-        # 复制按钮
         self.btn_copy = ctk.CTkButton(self.bottom_bar, text="📋 复制", width=50, height=20,
                                       fg_color="transparent", hover_color=("gray80", "gray40"),
                                       text_color="gray", font=("Arial", 10),
@@ -113,19 +129,28 @@ class ChatBubble(ctk.CTkFrame):
 
     def copy_content(self):
         try:
-            content_to_copy = self.raw_text
-            if not content_to_copy: return
-            pyperclip.copy(content_to_copy)
+            content = self.raw_text
+            if not content: return
+            
+            # Linux 剪贴板兼容性处理
+            if pyperclip:
+                try:
+                    pyperclip.copy(content)
+                except Exception:
+                    # 如果缺少 xclip，尝试使用 tkinter 原生方法
+                    self.master.clipboard_clear()
+                    self.master.clipboard_append(content)
+                    self.master.update()
+            else:
+                self.master.clipboard_clear()
+                self.master.clipboard_append(content)
+                self.master.update()
+
             self.btn_copy.configure(text="✅ 成功", text_color="green")
             self.after(1500, lambda: self.btn_copy.configure(text="📋 复制", text_color="gray"))
         except Exception as e:
             print(f"Copy Error: {e}")
             self.btn_copy.configure(text="❌ 失败", text_color="red")
-            try:
-                self.master.clipboard_clear()
-                self.master.clipboard_append(content_to_copy)
-                self.master.update()
-            except: pass
 
     def render_content(self, text, text_color):
         parts = re.split(r'(```[\s\S]*?```)', text)
@@ -143,9 +168,17 @@ class ChatBubble(ctk.CTkFrame):
                 t.configure(state="disabled")
                 t.pack(fill="x", padx=5, pady=5)
                 
+                # 代码复制
+                def copy_code(c=code):
+                    if pyperclip: pyperclip.copy(c)
+                    else: 
+                        self.master.clipboard_clear()
+                        self.master.clipboard_append(c)
+                        self.master.update()
+                
                 ctk.CTkButton(f, text="复制代码", height=20, width=60, font=("Arial", 10),
                               fg_color="#333333", hover_color="#444444",
-                              command=lambda c=code: pyperclip.copy(c)).pack(anchor="ne", padx=5, pady=2)
+                              command=copy_code).pack(anchor="ne", padx=5, pady=2)
             else:
                 if part:
                     ctk.CTkLabel(self.content_frame, text=part, text_color=text_color, justify="left", 
@@ -157,8 +190,14 @@ class DeepSeekApp(ctk.CTk):
         self.title(f"{APP_NAME} {APP_VERSION}")
         self.geometry("1300x850")
         
-        self.config = self.load_json("config.json", DEFAULT_CONFIG)
-        self.sessions = self.load_json("sessions.json", [])
+        self.base_dir = get_base_path() # 获取真实运行目录
+        
+        # 路径修复：确保读取的是 executable 同级目录的文件
+        self.config_path = os.path.join(self.base_dir, "config.json")
+        self.history_path = os.path.join(self.base_dir, "sessions.json")
+
+        self.config = self.load_json(self.config_path, DEFAULT_CONFIG)
+        self.sessions = self.load_json(self.history_path, [])
         
         if not self.sessions:
             self.create_new_session(save=False)
@@ -184,10 +223,16 @@ class DeepSeekApp(ctk.CTk):
         return default
 
     def save_config(self):
-        json.dump(self.config, open("config.json", "w", encoding="utf-8"), indent=2)
+        try:
+            json.dump(self.config, open(self.config_path, "w", encoding="utf-8"), indent=2)
+        except Exception as e:
+            messagebox.showerror("保存失败", f"无法写入配置文件:\n{e}")
 
     def save_sessions(self):
-        json.dump(self.sessions, open("sessions.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        try:
+            json.dump(self.sessions, open(self.history_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Save sessions error: {e}")
 
     def init_client(self):
         if not self.config["api_key"]: return
@@ -198,66 +243,57 @@ class DeepSeekApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # === 左侧 ===
         self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0, fg_color=COLOR_SIDEBAR)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(3, weight=1) 
 
-        # 1. 顶部信息区 (包含开发者信息)
+        # 1. Header
         top_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         top_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(25, 15))
-        
-        # 软件名
         ctk.CTkLabel(top_frame, text=APP_NAME, font=("Arial", 22, "bold")).pack(anchor="w")
-        
-        # 开发者信息行
         dev_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         dev_frame.pack(anchor="w", pady=(3, 0))
         ctk.CTkLabel(dev_frame, text="Developer:", font=("Arial", 11, "bold"), text_color="gray60").pack(side="left")
         ctk.CTkLabel(dev_frame, text=DEV_NAME, font=("Arial", 11, "bold"), text_color="#3498DB").pack(side="left", padx=5)
-        
-        # 版本号
         ctk.CTkLabel(top_frame, text=APP_VERSION, font=("Arial", 10), text_color="gray50").pack(anchor="w", pady=(2,0))
 
-        # 2. 新对话按钮
+        # 2. New Chat
         self.btn_new = ctk.CTkButton(self.sidebar, text="+ 开启新对话", height=40, font=("Arial", 14), 
                                      fg_color="#3498DB", hover_color="#2980B9",
                                      command=lambda: self.create_new_session(save=True))
         self.btn_new.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="ew")
 
-        # 3. 状态面板
+        # 3. Status
         self.status_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#333333"), corner_radius=8)
         self.status_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=5)
         ctk.CTkLabel(self.status_frame, text="当前模型状态", font=("Arial", 10, "bold"), text_color="gray").pack(pady=(5,0))
         self.lbl_model_status = ctk.CTkLabel(self.status_frame, text="初始化中...", font=("Arial", 12), text_color="#3498DB")
         self.lbl_model_status.pack(pady=(0,5))
 
-        # 4. 历史记录列表
+        # 4. History
         ctk.CTkLabel(self.sidebar, text="历史记录", font=("Arial", 12), text_color="gray").grid(row=3, column=0, sticky="nw", padx=15, pady=(10,0))
         self.history_list = ctk.CTkScrollableFrame(self.sidebar, fg_color="transparent")
         self.history_list.grid(row=4, column=0, sticky="nsew", padx=5, pady=5)
         self.render_history_list()
 
-        # 5. 设置区
+        # 5. Settings
         setting_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#2B2B2B"), corner_radius=10)
         setting_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=20)
         
         self.r1_var = ctk.BooleanVar(value=self.config["is_r1"])
         ctk.CTkSwitch(setting_frame, text="深度思考 (R1)", variable=self.r1_var, command=self.update_settings).pack(pady=5, padx=10, anchor="w")
-        
         self.search_var = ctk.BooleanVar(value=self.config["use_search"])
         ctk.CTkSwitch(setting_frame, text="联网搜索", variable=self.search_var, command=self.update_settings).pack(pady=5, padx=10, anchor="w")
 
         self.entry_key = ctk.CTkEntry(setting_frame, placeholder_text="API Key", show="*")
         self.entry_key.insert(0, self.config["api_key"])
         self.entry_key.pack(pady=5, padx=10, fill="x")
-        
         ctk.CTkButton(setting_frame, text="保存配置", height=24, command=self.save_key).pack(pady=10)
 
-        # 6. 底部清空
+        # 6. Clear
         ctk.CTkButton(self.sidebar, text="🗑️ 清空所有", fg_color="transparent", text_color="#C0392B", hover_color=("#FADBD8", "#522"), command=self.clear_all_history).pack(side="bottom", padx=15, pady=10, fill="x")
 
-        # === 右侧 ===
+        # === Right Side ===
         self.main_area = ctk.CTkFrame(self, fg_color=COLOR_BG)
         self.main_area.grid(row=0, column=1, sticky="nsew")
         self.main_area.grid_rowconfigure(0, weight=1)
@@ -288,7 +324,7 @@ class DeepSeekApp(ctk.CTk):
         
         self.btn_stop = ctk.CTkButton(btn_box, text="⏹", width=40, fg_color="#C0392B", command=self.stop_generation)
 
-    # --- 逻辑功能 (保持不变) ---
+    # --- Logic ---
     def update_settings(self):
         self.config["use_search"] = self.search_var.get()
         self.config["is_r1"] = self.r1_var.get()
@@ -416,7 +452,6 @@ class DeepSeekApp(ctk.CTk):
             self.after(0, self.reset_ui)
             self.after(0, self.force_scroll_to_bottom)
 
-    # ... (其余辅助方法保持不变，如 upload_files, extract_text 等) ...
     def create_new_session(self, save=True):
         new_session = {"id": str(uuid.uuid4()), "title": "新对话", "time": datetime.now().strftime("%m-%d"), "messages": []}
         self.sessions.insert(0, new_session)
@@ -497,11 +532,22 @@ class DeepSeekApp(ctk.CTk):
                 doc = Document(filepath)
                 return "\n".join([p.text for p in doc.paragraphs])
             elif ext in ['.xlsx', '.xls', '.csv']:
-                df = pd.read_excel(filepath) if 'xls' in ext else pd.read_csv(filepath)
-                return df.to_string()
+                if pd:
+                    df = pd.read_excel(filepath) if 'xls' in ext else pd.read_csv(filepath)
+                    return df.to_string()
+                else: return "[Error: Pandas not installed]"
+            elif ext == '.pptx':
+                if Presentation:
+                    prs = Presentation(filepath)
+                    txt = []
+                    for slide in prs.slides:
+                        for shape in slide.shapes:
+                            if hasattr(shape, "text"): txt.append(shape.text)
+                    return "\n".join(txt)
+                else: return "[Error: python-pptx not installed]"
             else:
                 with open(filepath, 'r', encoding='utf-8', errors='ignore') as f: return f.read()[:30000]
-        except: return "[Binary/Unreadable]"
+        except Exception as e: return f"[Read Error: {e}]"
 
     def clear_all_history(self):
         if messagebox.askyesno("Confirm", "Delete ALL history?"):
@@ -536,5 +582,10 @@ class DeepSeekApp(ctk.CTk):
         self.reset_ui()
 
 if __name__ == "__main__":
-    app = DeepSeekApp()
-    app.mainloop()
+    # 全局异常捕获，防止闪退无痕
+    try:
+        app = DeepSeekApp()
+        app.mainloop()
+    except Exception as e:
+        with open("crash_log.txt", "w") as f:
+            f.write(traceback.format_exc())
