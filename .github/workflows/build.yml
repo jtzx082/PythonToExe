@@ -1,19 +1,22 @@
-name: Build Gansu Gaokao Scorer EXE
+name: Build DeepSeek Desktop
 
-# 触发机制：仅保留 workflow_dispatch (手动触发)
-# 删除了 push 触发器，因此代码更新时不会自动运行
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
@@ -22,15 +25,34 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Build with PyInstaller
-      run: |
-        # --onefile: 打包成单文件
-        # --noconsole: 运行时不显示黑框命令行
-        # --name: 指定生成的exe名字
-        pyinstaller --onefile --noconsole --name Gansu_Gaokao_Scorer main.py
+    - name: Install Tkinter (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y python3-tk
 
-    - name: Upload Artifact
+    - name: Build with PyInstaller
+      shell: bash
+      run: |
+        pyinstaller --name="DeepSeek_Desktop" --onefile --windowed --clean \
+        --collect-all customtkinter \
+        --collect-all duckduckgo_search \
+        --collect-all openai \
+        --hidden-import=pypdf \
+        --hidden-import=docx \
+        main.py
+
+    - name: Rename Output
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" == "Windows" ]; then
+          mv dist/DeepSeek_Desktop.exe dist/DeepSeek_Desktop_Windows.exe
+        elif [ "${{ runner.os }}" == "macOS" ]; then
+          mv dist/DeepSeek_Desktop dist/DeepSeek_Desktop_Mac
+        else
+          mv dist/DeepSeek_Desktop dist/DeepSeek_Desktop_Linux
+        fi
+
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: Gansu_Gaokao_Scorer_EXE
-        path: dist/Gansu_Gaokao_Scorer.exe
+        name: DeepSeek_Desktop_${{ matrix.os }}
+        path: dist/
