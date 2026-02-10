@@ -5,4 +5,7 @@ pillow
 duckduckgo-search
 pypdf
 python-docx
-pyinstaller
+pandas
+openpyxl
+python-pptx
+pyperclip
