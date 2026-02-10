@@ -14,24 +14,28 @@ from docx.oxml import OxmlElement
 
 # --- 全局配置 ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v1.0.9 (Smart Header)"
+APP_VERSION = "v2.0.0 (Smart Structure AI)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
     "margins": {"top": 3.7, "bottom": 3.5, "left": 2.8, "right": 2.6},
-    "line_spacing": 28,
+    "line_spacing": 28,  # 固定值 28磅
     "fonts": {
         "title": "方正小标宋简体",
-        "subtitle": "楷体_GB2312", # 副标题通常用楷体
+        "subtitle": "楷体_GB2312",
+        "author": "楷体_GB2312",
+        "abstract": "楷体_GB2312",
         "h1": "黑体",
         "h2": "楷体_GB2312",
         "h3": "仿宋_GB2312",
         "body": "仿宋_GB2312"
     },
     "sizes": {
-        "title": 22, # 二号
+        "title": 22,    # 二号
         "subtitle": 16, # 三号
-        "h1": 16,    # 三号
+        "author": 14,   # 四号
+        "abstract": 14, # 四号
+        "h1": 16,       # 三号
         "h2": 16,
         "h3": 16,
         "body": 16
@@ -42,7 +46,7 @@ class GongWenFormatterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(f"{APP_NAME} {APP_VERSION}")
-        self.geometry("950x700")
+        self.geometry("1000x750")
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
 
@@ -73,7 +77,7 @@ class GongWenFormatterApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = ctk.CTkFrame(self, width=160, corner_radius=0)
+        self.sidebar = ctk.CTkFrame(self, width=180, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         ctk.CTkLabel(self.sidebar, text=APP_NAME, font=ctk.CTkFont(size=18, weight="bold")).pack(pady=20)
         
@@ -115,7 +119,7 @@ class GongWenFormatterApp(ctk.CTk):
 
         self.log_box = ctk.CTkTextbox(f)
         self.log_box.grid(row=1, column=0, sticky="nsew", pady=10)
-        self.log_box.insert("0.0", ">>> 欢迎使用！请先上传 Word 文档。\n")
+        self.log_box.insert("0.0", ">>> 欢迎使用 v2.0.0 智能版！请上传文档。\n")
         self.log_box.configure(state="disabled")
 
         self.progressbar = ctk.CTkProgressBar(f)
@@ -125,7 +129,7 @@ class GongWenFormatterApp(ctk.CTk):
     def create_settings_frame(self):
         f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.frames["settings"] = f
-        ctk.CTkLabel(f, text="排版参数设置", font=("Arial", 20)).pack(pady=20)
+        ctk.CTkLabel(f, text="排版参数设置 (重启软件生效)", font=("Arial", 20)).pack(pady=20)
         
         self.entries = {}
         settings = [
@@ -153,7 +157,18 @@ class GongWenFormatterApp(ctk.CTk):
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
         
-        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【排版原理】\n程序会自动识别大标题、副标题、署名和正文。\n\n【识别规则】\n1. 大标题：第一行，字数少。\n2. 副标题：以——开头。\n3. 称谓（如‘尊敬的’）：强制识别为正文。\n\n【常见问题】\n如果排版无反应，请检查文档是否被加密。"
+        info = f"""{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n
+【v2.0.0 核心升级】
+1. 智能结构分析：准确识别 标题/副标题/作者/摘要/正文。
+2. 告别误判：不再把“尊敬的领导”误认为大标题。
+3. 纯净排版：自动清理原有格式，应用国标样式。
+
+【排版规范】
+- 大标题：方正小标宋简体，二号，居中。
+- 正文：仿宋_GB2312，三号，首行缩进2字符。
+- 一级标题：黑体，三号。
+- 页面：上3.7 下3.5 左2.8 右2.6 (cm)。
+"""
         lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word", width=600, height=500)
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
@@ -193,7 +208,7 @@ class GongWenFormatterApp(ctk.CTk):
 
     # --- 流程控制 ---
     def start_processing(self):
-        self.log(">>> 正在初始化排版引擎...")
+        self.log(">>> 正在启动智能分析引擎...")
         self.btn_process.configure(state="disabled")
         self.btn_upload.configure(state="disabled")
         self.processed_docs = []
@@ -211,7 +226,7 @@ class GongWenFormatterApp(ctk.CTk):
         index, file_path = self.process_queue.pop(0)
         filename = os.path.basename(file_path)
         self.progressbar.set(index / self.total_files)
-        self.log(f"正在读取: {filename} ...")
+        self.log(f"正在分析: {filename} ...")
         self.update() 
 
         try:
@@ -243,7 +258,7 @@ class GongWenFormatterApp(ctk.CTk):
         if not save_dir: return
         
         count = 0
-        self.log(">>> 开始写入文件...")
+        self.log(">>> 开始导出...")
         for original_path, doc in self.processed_docs:
             try:
                 base_name = os.path.basename(original_path)
@@ -261,7 +276,49 @@ class GongWenFormatterApp(ctk.CTk):
             try: os.startfile(save_dir)
             except: pass
 
-    # --- 核心排版逻辑 (智能标题识别) ---
+    # =========================================================
+    #  核心排版逻辑 v2.0 (智能结构分析)
+    # =========================================================
+    
+    def analyze_paragraph_type(self, text, index, is_body_started):
+        """ 
+        智能判断段落类型 
+        返回: 'TITLE', 'SUBTITLE', 'AUTHOR', 'ABSTRACT', 'KEYWORD', 'H1', 'H2', 'H3', 'BODY'
+        """
+        text = text.strip()
+        
+        # 1. 强制正文标记（一旦出现，后续全是正文）
+        if re.match(r"^(尊敬的|各位|亲爱的|大家好)", text):
+            return 'BODY', True
+        
+        # 2. 如果已经进入正文区域，直接按正文逻辑处理
+        if is_body_started:
+            if re.match(r"^[一二三四五六七八九十]+、", text): return 'H1', True
+            if re.match(r"^（[一二三四五六七八九十]+）", text): return 'H2', True
+            if re.match(r"^\d+\.", text): return 'H3', True
+            return 'BODY', True
+
+        # 3. 尚未进入正文，分析头部信息
+        
+        # 关键词/摘要
+        if re.match(r"^(摘要|【摘要】)", text): return 'ABSTRACT', False
+        if re.match(r"^(关键词|【关键词】)", text): return 'KEYWORD', False
+
+        # 副标题 (破折号开头，或被括号包围)
+        if text.startswith("——") or text.startswith("--") or (text.startswith("（") and text.endswith("）")):
+            return 'SUBTITLE', False
+
+        # 主标题 (必须在最前面，且字数较少，且不含句号)
+        if index < 3 and len(text) < 40 and ("。" not in text):
+            return 'TITLE', False
+        
+        # 作者/单位信息 (字数极少，且不是标题)
+        if len(text) < 25 and ("。" not in text):
+            return 'AUTHOR', False
+
+        # 默认兜底为正文（只要出现长难句，就视为正文开始）
+        return 'BODY', True
+
     def format_document(self, file_path):
         if not os.path.exists(file_path): raise FileNotFoundError("文件不存在")
         try: doc = Document(file_path)
@@ -278,94 +335,80 @@ class GongWenFormatterApp(ctk.CTk):
                 section.right_margin = Cm(cfg["margins"]["right"])
                 section.page_width = Cm(21)
                 section.page_height = Cm(29.7)
-        except Exception: pass
+        except: pass
 
-        # 2. 基础样式
-        try:
-            style = doc.styles['Normal']
-            style.font.name = 'Times New Roman'
-            style.font.size = Pt(cfg["sizes"]["body"])
-            style._element.rPr.rFonts.set(qn('w:eastAsia'), cfg["fonts"]["body"])
-        except Exception: pass
-
-        # 3. 遍历段落
-        # 增加一个标志位，标记是否已经进入正文区域
+        # 2. 遍历并排版
         is_body_started = False
-
+        
         for i, paragraph in enumerate(doc.paragraphs):
             text = paragraph.text.strip()
             if not text: continue
 
+            # --- 步骤A: 智能识别类型 ---
+            p_type, is_body_now = self.analyze_paragraph_type(text, i, is_body_started)
+            if is_body_now: is_body_started = True
+
+            print(f"Debug: Line {i} [{p_type}] : {text[:10]}...") # 终端调试用
+
+            # --- 步骤B: 清除旧格式 (重要！) ---
             try:
-                # 通用设置：固定行距 + 网格对齐 + 自动右缩进
-                paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-                paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
+                paragraph.paragraph_format.first_line_indent = None
+                paragraph.paragraph_format.left_indent = None
                 paragraph.paragraph_format.space_before = Pt(0)
                 paragraph.paragraph_format.space_after = Pt(0)
-                self.set_paragraph_grid_props(paragraph)
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
             except: pass
-            
+
+            # --- 步骤C: 应用新样式 ---
             try:
-                # --- 智能特征识别 ---
+                # 设定固定行距 (所有段落通用)
+                paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+                paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
                 
-                # 特征1：显式正文标记（称谓、问候语）
-                # 只要遇到“尊敬的”、“各位”、“大家好”，直接判定为正文开始
-                if re.match(r"^(尊敬的|各位|亲爱的|大家好)", text):
-                    is_body_started = True
+                # 网格对齐
+                self.set_paragraph_grid_props(paragraph)
 
-                # 如果已经进入正文区域，或者是长段落，直接应用正文样式
-                if is_body_started or len(text) > 50:
-                    self.apply_body_style(paragraph, cfg)
-                    # 检查是否是各级标题 (即使在正文区也可能有标题)
-                    if re.match(r"^[一二三四五六七八九十]+、", text):
-                        self.safe_set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
-                        self.set_indent_xml(paragraph, chars=2) # 一级标题也要缩进吗？公文通常不缩进或缩进2字符，按截图看来需要缩进
-                    elif re.match(r"^（[一二三四五六七八九十]+）", text):
-                        self.safe_set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
-                        self.set_indent_xml(paragraph, chars=2)
-                    elif re.match(r"^\d+\.", text):
-                        self.safe_set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
-                        self.set_indent_xml(paragraph, chars=2)
-                    else:
-                        # 纯正文
-                        self.apply_body_style(paragraph, cfg)
-                    continue
-
-                # --- 此时尚未进入正文，判断是否为版头标题 ---
-
-                # 特征2：副标题 (破折号开头)
-                if text.startswith("——") or text.startswith("--"):
-                    self.safe_set_font(paragraph, cfg["fonts"]["subtitle"], cfg["sizes"]["subtitle"], bold=False)
-                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                    self.set_indent_xml(paragraph, chars=0)
-                    continue
-
-                # 特征3：大标题 (通常是前几行，字数少，居中)
-                # 假设前3段内的短文本才可能是标题
-                if i < 3 and len(text) < 40 and not is_body_started:
+                if p_type == 'TITLE':
                     self.safe_set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
                     paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                    self.set_indent_xml(paragraph, chars=0)
-                    # 标题下留一点空隙
-                    try: paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"] * 0.5)
-                    except: pass
-                    continue
-                
-                # 特征4：署名/单位 (短文本，在正文前，居中)
-                if len(text) < 20 and not is_body_started:
+                    paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"]) # 标题下空一行
+                    self.set_indent_xml(paragraph, 0)
+
+                elif p_type == 'SUBTITLE':
                     self.safe_set_font(paragraph, cfg["fonts"]["subtitle"], cfg["sizes"]["subtitle"], bold=False)
                     paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                    self.set_indent_xml(paragraph, chars=0)
-                    continue
+                    self.set_indent_xml(paragraph, 0)
 
-                # 兜底：如果都不符合，默认为正文
-                is_body_started = True
-                self.apply_body_style(paragraph, cfg)
-                
+                elif p_type == 'AUTHOR':
+                    self.safe_set_font(paragraph, cfg["fonts"]["author"], cfg["sizes"]["author"], bold=False)
+                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    self.set_indent_xml(paragraph, 0)
+
+                elif p_type == 'ABSTRACT' or p_type == 'KEYWORD':
+                    self.safe_set_font(paragraph, cfg["fonts"]["abstract"], cfg["sizes"]["abstract"], bold=False)
+                    self.set_indent_xml(paragraph, 2) # 摘要缩进
+
+                elif p_type == 'H1':
+                    self.safe_set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False) # 黑体
+                    self.set_indent_xml(paragraph, 2)
+
+                elif p_type == 'H2':
+                    self.safe_set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False) # 楷体
+                    self.set_indent_xml(paragraph, 2)
+
+                elif p_type == 'H3':
+                    self.safe_set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True) # 仿宋加粗
+                    self.set_indent_xml(paragraph, 2)
+
+                else: # BODY
+                    self.safe_set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"], bold=False)
+                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+                    self.set_indent_xml(paragraph, 2) # 核心：正文首行缩进2字符
+
             except Exception as e:
-                print(f"段落处理警告: {e}")
+                print(f"Warning: 段落排版出错 {e}")
 
-        # 4. 表格处理
+        # 3. 表格处理
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
@@ -373,7 +416,7 @@ class GongWenFormatterApp(ctk.CTk):
                         self.safe_set_font(p, "仿宋_GB2312", 14)
                         self.set_paragraph_grid_props(p)
 
-        # 5. 页码
+        # 4. 页码
         try:
             footer = doc.sections[0].footer
             p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
@@ -382,27 +425,19 @@ class GongWenFormatterApp(ctk.CTk):
 
         return doc
 
-    def apply_body_style(self, paragraph, cfg):
-        """ 应用标准正文样式 """
-        self.safe_set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
-        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-        self.set_indent_xml(paragraph, chars=2) # 强制首行缩进2字符
-
+    # --- XML 辅助函数 ---
     def set_indent_xml(self, paragraph, chars=2):
-        """ 使用 OXML 设置精确的字符级缩进 """
         try:
             pPr = paragraph._p.get_or_add_pPr()
             ind = pPr.get_or_add_ind()
             if chars == 0:
                 if 'w:firstLineChars' in ind.attrib: del ind.attrib['w:firstLineChars']
-                if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
             else:
                 ind.set(qn('w:firstLineChars'), str(int(chars * 100)))
-                if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
-        except Exception: pass
+                if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine'] # 清除冲突
+        except: pass
 
     def set_paragraph_grid_props(self, paragraph):
-        """ 设置与网格对齐、自动调整右缩进 """
         try:
             pPr = paragraph._p.get_or_add_pPr()
             snap = pPr.find(qn('w:snapToGrid'))
@@ -416,7 +451,7 @@ class GongWenFormatterApp(ctk.CTk):
                 adj = OxmlElement('w:adjustRightInd')
                 pPr.append(adj)
             adj.set(qn('w:val'), '1')
-        except Exception: pass
+        except: pass
 
     def safe_set_font(self, paragraph, font_name, font_size, bold=False):
         try:
