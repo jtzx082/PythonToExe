@@ -14,22 +14,24 @@ from docx.oxml import OxmlElement
 
 # --- 全局配置 ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v1.0.8 (Pixel Perfect)"
+APP_VERSION = "v1.0.9 (Smart Header)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
     "margins": {"top": 3.7, "bottom": 3.5, "left": 2.8, "right": 2.6},
     "line_spacing": 28,  # 固定值 28磅
     "fonts": {
-        "title": "方正小标宋简体",
-        "h1": "黑体",
-        "h2": "楷体_GB2312",
-        "h3": "仿宋_GB2312",
-        "body": "仿宋_GB2312"
+        "title": "方正小标宋简体", # 大标题
+        "subtitle": "楷体_GB2312", # 副标题/署名
+        "h1": "黑体",             # 一级标题
+        "h2": "楷体_GB2312",      # 二级标题
+        "h3": "仿宋_GB2312",      # 三级标题
+        "body": "仿宋_GB2312"     # 正文
     },
     "sizes": {
-        "title": 22, # 二号
-        "h1": 16,    # 三号
+        "title": 22,   # 二号
+        "subtitle": 16,# 三号
+        "h1": 16,      # 三号
         "h2": 16,
         "h3": 16,
         "body": 16
@@ -84,7 +86,6 @@ class GongWenFormatterApp(ctk.CTk):
 
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-        # 强制设置主区域权重，确保子Frame能撑开
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
 
@@ -149,12 +150,10 @@ class GongWenFormatterApp(ctk.CTk):
     def create_about_frame(self):
         f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.frames["about"] = f
-        # 关键修复：确保权重设置正确
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
         
-        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【最新特性】\n1. 首行缩进已升级为国标“2字符” (XML级控制)。\n2. 默认勾选“与网格对齐”和“自动调整右缩进”。\n\n【常见问题】\n如果排版无反应，请检查文档是否被加密。"
-        # 关键修复：指定 width 和 height 初始值，防止在 Linux 上被压缩
+        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【v1.0.9 更新】\n1. 智能识别主副标题。\n2. 在“一、”出现前的行，自动居中且不缩进。\n3. 作者/单位行自动使用楷体。"
         lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word", width=600, height=500)
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
@@ -262,7 +261,7 @@ class GongWenFormatterApp(ctk.CTk):
             try: os.startfile(save_dir)
             except: pass
 
-    # --- 核心排版逻辑 (OXML深度定制版) ---
+    # --- 核心排版逻辑 (v1.0.9 智能版头识别) ---
     def format_document(self, file_path):
         if not os.path.exists(file_path): raise FileNotFoundError("文件不存在")
         try: doc = Document(file_path)
@@ -279,8 +278,6 @@ class GongWenFormatterApp(ctk.CTk):
                 section.right_margin = Cm(cfg["margins"]["right"])
                 section.page_width = Cm(21)
                 section.page_height = Cm(29.7)
-                # 设置文档网格 (尽可能接近Word行为)
-                # python-docx对网格支持有限，主要靠段落属性 "snapToGrid" 配合
         except Exception: pass
 
         # 2. 基础样式
@@ -291,37 +288,58 @@ class GongWenFormatterApp(ctk.CTk):
             style._element.rPr.rFonts.set(qn('w:eastAsia'), cfg["fonts"]["body"])
         except Exception: pass
 
+        # --- 核心升级：智能探测“正文起始点” ---
+        # 寻找第一个 "一、" 出现的位置
+        body_start_index = len(doc.paragraphs) # 默认全是版头（如果没有正文）
+        for i, p in enumerate(doc.paragraphs):
+            text = p.text.strip()
+            if re.match(r"^[一二三四五六七八九十]+、", text):
+                body_start_index = i
+                break
+        
+        # 如果找不到“一、”，则假设第3段开始是正文（兜底策略）
+        if body_start_index == len(doc.paragraphs) and len(doc.paragraphs) > 3:
+            body_start_index = 2
+
         # 3. 遍历段落
         for i, paragraph in enumerate(doc.paragraphs):
             text = paragraph.text.strip()
             if not text: continue
 
-            # --- 通用设置：固定行距 + 网格对齐 (核心需求) ---
+            # 通用设置：固定行距 + 网格对齐
             try:
                 paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                 paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
                 paragraph.paragraph_format.space_before = Pt(0)
                 paragraph.paragraph_format.space_after = Pt(0)
-                
-                # 核心升级：设置 "与网格对齐" 和 "自动调整右缩进"
                 self.set_paragraph_grid_props(paragraph)
             except: pass
             
-            # --- 标题识别与字体应用 ---
+            # --- 智能分流逻辑 ---
             try:
-                # 大标题
-                if i == 0 and len(text) < 50:
-                    self.safe_set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
-                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                    # 大标题一般不需要首行缩进，但需要下空一行
-                    paragraph.paragraph_format.first_line_indent = Pt(0)
-                    paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"]) 
+                # A. 版头区域 (Header Zone)
+                if i < body_start_index:
+                    # 第一行：大标题
+                    if i == 0:
+                        self.safe_set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
+                        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                        # 大标题下空一行
+                        try: paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"])
+                        except: pass
+                    else:
+                        # 中间行：副标题/署名 (楷体，三号，居中，无缩进)
+                        self.safe_set_font(paragraph, cfg["fonts"]["subtitle"], cfg["sizes"]["subtitle"], bold=False)
+                        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    
+                    # 关键：版头区域强制取消首行缩进
+                    self.set_indent_xml(paragraph, chars=0)
                     continue
 
+                # B. 正文区域 (Body Zone)
                 # 一级标题 (一、)
                 if re.match(r"^[一二三四五六七八九十]+、", text):
                     self.safe_set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
-                    # 标题通常不需要首行缩进，或者用字符级缩进，这里暂且取消缩进
+                    # 标题通常不需要缩进，或特殊缩进，此处暂定不缩进
                     self.set_indent_xml(paragraph, chars=0)
                     continue
 
@@ -337,10 +355,10 @@ class GongWenFormatterApp(ctk.CTk):
                     self.set_indent_xml(paragraph, chars=0)
                     continue
 
-                # 正文
+                # 普通正文
                 self.safe_set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
                 paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-                # 核心升级：设置 XML 级 "首行缩进 2 字符"
+                # 正文强制 2 字符缩进
                 self.set_indent_xml(paragraph, chars=2)
                 
             except Exception as e:
@@ -363,23 +381,19 @@ class GongWenFormatterApp(ctk.CTk):
 
         return doc
 
-    # --- XML 底层操作辅助函数 ---
-
+    # --- XML 底层操作 ---
     def set_indent_xml(self, paragraph, chars=2):
-        """ 使用 OXML 设置精确的字符级缩进 (首行缩进 2 字符) """
+        """ 使用 OXML 设置精确的字符级缩进 """
         try:
             pPr = paragraph._p.get_or_add_pPr()
             ind = pPr.get_or_add_ind()
-            
             if chars == 0:
-                # 清除缩进
                 if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
                 if 'w:firstLineChars' in ind.attrib: del ind.attrib['w:firstLineChars']
                 if 'w:left' in ind.attrib: del ind.attrib['w:left']
             else:
-                # 设置 200 (即 2.00 字符)
+                # 200 = 2.00 字符
                 ind.set(qn('w:firstLineChars'), str(int(chars * 100)))
-                # 清除可能冲突的磅值设置
                 if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
         except Exception: pass
 
@@ -387,15 +401,12 @@ class GongWenFormatterApp(ctk.CTk):
         """ 设置与网格对齐、自动调整右缩进 """
         try:
             pPr = paragraph._p.get_or_add_pPr()
-            
-            # snapToGrid (与网格对齐)
             snap = pPr.find(qn('w:snapToGrid'))
             if snap is None:
                 snap = OxmlElement('w:snapToGrid')
                 pPr.append(snap)
             snap.set(qn('w:val'), '1')
             
-            # adjustRightInd (自动调整右缩进)
             adj = pPr.find(qn('w:adjustRightInd'))
             if adj is None:
                 adj = OxmlElement('w:adjustRightInd')
