@@ -14,7 +14,7 @@ from docx.oxml import OxmlElement
 
 # --- 全局配置 ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v1.0.1 (Fixed)"
+APP_VERSION = "v1.0.2 (Layout & Error Fix)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
@@ -51,21 +51,13 @@ class GongWenFormatterApp(ctk.CTk):
         self.setup_ui()
 
     def load_config(self):
-        # 优先读取本地配置，如果没有则使用默认并创建
         if os.path.exists("config.json"):
             try:
                 with open("config.json", "r", encoding="utf-8") as f:
                     return json.load(f)
             except:
                 return DEFAULT_CONFIG
-        else:
-            # 自动生成默认配置文件
-            try:
-                with open("config.json", "w", encoding="utf-8") as f:
-                    json.dump(DEFAULT_CONFIG, f, ensure_ascii=False, indent=4)
-            except:
-                pass
-            return DEFAULT_CONFIG
+        return DEFAULT_CONFIG
 
     def save_config(self):
         try:
@@ -94,6 +86,9 @@ class GongWenFormatterApp(ctk.CTk):
         # 主区域
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        # 关键修复：确保主区域内的 grid 也能扩展
+        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_rowconfigure(0, weight=1)
 
         self.frames = {}
         self.create_home_frame()
@@ -154,11 +149,17 @@ class GongWenFormatterApp(ctk.CTk):
     def create_about_frame(self):
         f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.frames["about"] = f
+        
+        # 布局修复：使用 grid 并设置粘性
+        f.grid_columnconfigure(0, weight=1)
+        f.grid_rowconfigure(0, weight=1)
+        
         info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n使用说明：\n1. 确保电脑已安装方正小标宋、仿宋_GB2312等字体。\n2. 上传文档 -> 排版 -> 导出。\n3. 导出文件将自动添加“_排版后”后缀。"
         lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word")
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
-        lbl.pack(fill="both", expand=True)
+        # 关键修改：改用 grid 替代 pack，确保填满
+        lbl.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
 
     def show_frame(self, name):
         for frame in self.frames.values(): frame.grid_forget()
@@ -185,7 +186,7 @@ class GongWenFormatterApp(ctk.CTk):
         files = filedialog.askopenfilenames(filetypes=[("Word Document", "*.docx")])
         if files:
             self.file_list = list(files)
-            self.processed_docs = [] # 清空之前的处理结果
+            self.processed_docs = [] 
             self.log(f"已加载 {len(files)} 个文件。请点击“开始排版”。")
             self.btn_process.configure(state="normal")
             self.btn_export.configure(state="disabled")
@@ -202,22 +203,22 @@ class GongWenFormatterApp(ctk.CTk):
         
         for index, file_path in enumerate(self.file_list):
             filename = os.path.basename(file_path)
-            # 在主线程更新UI日志，防止线程冲突
             self.after(0, self.log, f"正在处理: {filename} ...")
             self.progressbar.set((index) / total)
             
             try:
-                # 核心排版逻辑
                 doc = self.format_document(file_path)
-                # 将处理好的对象存入内存列表
                 self.processed_docs.append((file_path, doc))
                 success_count += 1
                 self.after(0, self.log, f"✅ {filename} 排版完成")
             except Exception as e:
-                self.after(0, self.log, f"❌ {filename} 失败: {str(e)}")
+                # 关键修复：捕捉错误并打印到界面，而不是静默失败
+                error_msg = str(e)
+                self.after(0, self.log, f"❌ {filename} 失败: {error_msg}")
+                self.after(0, lambda m=error_msg: messagebox.showerror("排版出错", f"文件 {filename} 处理失败:\n{m}"))
             
             self.progressbar.set((index + 1) / total)
-            time.sleep(0.1) # 稍微暂停一下，让UI刷新
+            time.sleep(0.1)
 
         self.after(0, self.on_process_finish, success_count)
 
@@ -228,7 +229,7 @@ class GongWenFormatterApp(ctk.CTk):
             self.btn_export.configure(state="normal")
             messagebox.showinfo("完成", f"已完成 {count} 个文档的排版！\n请点击“导出结果”保存文件。")
         else:
-            messagebox.showwarning("失败", "没有文档被成功处理。")
+            messagebox.showwarning("失败", "没有文档被成功处理，请检查日志。")
 
     def export_files(self):
         if not self.processed_docs:
@@ -253,112 +254,94 @@ class GongWenFormatterApp(ctk.CTk):
                 self.log(f"导出失败 {base_name}: {e}")
 
         messagebox.showinfo("导出完成", f"成功导出 {count} 个文件到:\n{save_dir}")
-        # Windows下尝试打开文件夹
         if os.name == 'nt':
-            try:
-                os.startfile(save_dir)
-            except:
-                pass
+            try: os.startfile(save_dir)
+            except: pass
 
-    # --- 核心排版逻辑 ---
+    # --- 核心排版逻辑 (增强健壮性) ---
     def format_document(self, file_path):
         doc = Document(file_path)
         cfg = self.config
 
-        # 1. 页面设置 (应用到所有节)
         for section in doc.sections:
             section.top_margin = Cm(cfg["margins"]["top"])
             section.bottom_margin = Cm(cfg["margins"]["bottom"])
             section.left_margin = Cm(cfg["margins"]["left"])
             section.right_margin = Cm(cfg["margins"]["right"])
-            # 设置纸张为A4
             section.page_width = Cm(21)
             section.page_height = Cm(29.7)
 
-        # 2. 样式初始化
         style = doc.styles['Normal']
         style.font.name = 'Times New Roman'
         style.font.size = Pt(cfg["sizes"]["body"])
         style._element.rPr.rFonts.set(qn('w:eastAsia'), cfg["fonts"]["body"])
 
-        # 3. 遍历段落排版
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
             if not text: continue
 
-            # 行距设置
             paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
             paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
             
-            # --- 简单的特征识别策略 ---
-            
-            # 大标题：第一段且字数较少
             if paragraph == doc.paragraphs[0] and len(text) < 50:
                 self.set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
                 paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                # 大标题下空一行（简单处理：增加段后距）
                 paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"])
                 continue
 
-            # 一级标题：汉字数字+顿号 (一、)
             if re.match(r"^[一二三四五六七八九十]+、", text):
                 self.set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
                 paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h1"] * 2)
                 continue
 
-            # 二级标题：括号+汉字数字 (（一）)
             if re.match(r"^（[一二三四五六七八九十]+）", text):
                 self.set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
                 paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h2"] * 2)
                 continue
 
-            # 三级标题：阿拉伯数字+点 (1. )
             if re.match(r"^\d+\.", text):
                 self.set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
                 paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h3"] * 2)
                 continue
 
-            # 正文
             self.set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
             paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["body"] * 2)
             paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
 
-        # 4. 表格文字调整
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for p in cell.paragraphs:
                         self.set_font(p, "仿宋_GB2312", 14) 
 
-        # 5. 页码 (简易版)
-        self.add_page_number(doc.sections[0].footer.paragraphs[0])
+        # 修复：安全添加页码（防止无页脚报错）
+        try:
+            footer = doc.sections[0].footer
+            if not footer.paragraphs:
+                p = footer.add_paragraph()
+            else:
+                p = footer.paragraphs[0]
+            self.add_page_number(p)
+        except Exception:
+            pass # 页码添加失败不影响整体保存
 
         return doc
 
     def set_font(self, paragraph, font_name, font_size, bold=False):
         for run in paragraph.runs:
-            run.font.name = font_name # 设置西文
+            run.font.name = font_name
             run.font.size = Pt(font_size)
             run.bold = bold
-            run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name) # 设置中文
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
 
     def add_page_number(self, paragraph):
         paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         run = paragraph.add_run()
-        # Word域代码：PAGE
-        fldChar1 = OxmlElement('w:fldChar')
-        fldChar1.set(qn('w:fldCharType'), 'begin')
-        instrText = OxmlElement('w:instrText')
-        instrText.set(qn('xml:space'), 'preserve')
-        instrText.text = "PAGE"
-        fldChar2 = OxmlElement('w:fldChar')
-        fldChar2.set(qn('w:fldCharType'), 'end')
-        
-        run._r.append(fldChar1)
-        run._r.append(instrText)
-        run._r.append(fldChar2)
-        run.font.name = "宋体"
-        run.font.size = Pt(14)
+        fldChar1 = OxmlElement('w:fldChar'); fldChar1.set(qn('w:fldCharType'), 'begin')
+        instrText = OxmlElement('w:instrText'); instrText.set(qn('xml:space'), 'preserve'); instrText.text = "PAGE"
+        fldChar2 = OxmlElement('w:fldChar'); fldChar2.set(qn('w:fldCharType'), 'end')
+        run._r.append(fldChar1); run._r.append(instrText); run._r.append(fldChar2)
+        run.font.name = "宋体"; run.font.size = Pt(14)
 
 if __name__ == "__main__":
     app = GongWenFormatterApp()
