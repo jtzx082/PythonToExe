@@ -4,7 +4,6 @@ from tkinter import filedialog, messagebox
 import os
 import json
 import re
-import threading
 import time
 import traceback
 from docx import Document
@@ -15,7 +14,7 @@ from docx.oxml import OxmlElement
 
 # --- 全局配置 ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v1.0.4 (Debug Mode)"
+APP_VERSION = "v1.0.5 (Stable Loop)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
@@ -48,6 +47,8 @@ class GongWenFormatterApp(ctk.CTk):
         self.config = self.load_config()
         self.file_list = []
         self.processed_docs = [] 
+        self.process_queue = [] # 任务队列
+        self.is_processing = False
 
         self.setup_ui()
 
@@ -149,7 +150,7 @@ class GongWenFormatterApp(ctk.CTk):
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
         
-        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【常见问题】\n如果排版无反应，可能是因为：\n1. 文档被其他程序占用了。\n2. 文档格式损坏（请另存为新docx重试）。\n3. 系统缺失必要字体。"
+        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【常见问题】\n1. 请确保文档未被占用。\n2. 导出时会自动添加“_排版后”后缀。\n3. 如果排版失败，请检查文档是否加密。"
         lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word")
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
@@ -164,6 +165,8 @@ class GongWenFormatterApp(ctk.CTk):
         self.log_box.insert("end", f"{text}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
+        # 强制刷新UI，确保卡死前能看到最后一句话
+        self.log_box.update_idletasks()
 
     def update_config(self):
         try:
@@ -185,74 +188,61 @@ class GongWenFormatterApp(ctk.CTk):
             self.btn_process.configure(state="normal")
             self.btn_export.configure(state="disabled")
 
+    # --- 核心修改：移除 Thread，改用递归调用 ---
     def start_processing(self):
-        # 1. 立即给用户反馈
-        self.log(">>> 正在启动排版引擎...")
         self.btn_process.configure(state="disabled")
         self.btn_upload.configure(state="disabled")
-        
-        # 2. 清空旧数据
         self.processed_docs = []
         
-        # 3. 启动线程
-        t = threading.Thread(target=self.process_thread, daemon=True)
-        t.start()
+        # 准备任务队列
+        self.process_queue = list(enumerate(self.file_list))
+        self.total_files = len(self.file_list)
+        self.success_count = 0
+        
+        self.log(">>> 排版引擎已启动 (v1.0.5)")
+        
+        # 延迟100ms开始处理第一个，给UI刷新的机会
+        self.after(100, self.process_next_file)
 
-    # --- 线程安全更新 UI 的辅助方法 ---
-    def safe_log(self, text):
-        self.log(text)
+    def process_next_file(self):
+        if not self.process_queue:
+            # 队列为空，全部完成
+            self.on_process_finish(self.success_count)
+            return
 
-    def safe_progress(self, val):
-        self.progressbar.set(val)
+        # 取出下一个任务
+        index, file_path = self.process_queue.pop(0)
+        filename = os.path.basename(file_path)
+        
+        self.progressbar.set(index / self.total_files)
+        self.log(f"正在分析: {filename} ...")
+        
+        # 使用 update() 强制刷新界面，防止假死
+        self.update() 
 
-    def safe_finish(self, count):
-        self.on_process_finish(count)
-
-    def process_thread(self):
         try:
-            total = len(self.file_list)
-            success_count = 0
-            
-            # 这里的 log 确认线程确实跑起来了
-            self.after(0, self.safe_log, f"准备处理 {total} 个文件...")
-
-            for index, file_path in enumerate(self.file_list):
-                filename = os.path.basename(file_path)
-                self.after(0, self.safe_log, f"正在分析: {filename} ...")
-                self.after(0, self.safe_progress, index / total)
-                
-                try:
-                    # 核心排版逻辑
-                    doc = self.format_document(file_path)
-                    self.processed_docs.append((file_path, doc))
-                    success_count += 1
-                    self.after(0, self.safe_log, f"✅ {filename} 排版成功")
-                except Exception as e:
-                    # 捕获单个文件的错误
-                    error_msg = str(e)
-                    print(f"Error processing {filename}: {error_msg}")
-                    self.after(0, self.safe_log, f"❌ {filename} 失败: {error_msg}")
-                
-                self.after(0, self.safe_progress, (index + 1) / total)
-                time.sleep(0.1) # 防止界面卡死
-
-            self.after(0, self.safe_finish, success_count)
-
+            # 执行排版 (这是耗时操作)
+            doc = self.format_document(file_path)
+            self.processed_docs.append((file_path, doc))
+            self.success_count += 1
+            self.log(f"✅ {filename} 排版成功")
         except Exception as e:
-            # 捕获整个线程的崩溃
-            error_msg = f"排版引擎发生严重错误: {str(e)}"
-            self.after(0, self.safe_log, error_msg)
-            self.after(0, lambda: messagebox.showerror("错误", error_msg))
-            self.after(0, self.safe_finish, 0)
+            error_msg = str(e)
+            print(traceback.format_exc()) # 控制台打印详细错误
+            self.log(f"❌ {filename} 失败: {error_msg}")
+        
+        # 调度下一个任务，间隔 50ms，保证 UI 响应
+        self.after(50, self.process_next_file)
 
     def on_process_finish(self, count):
+        self.progressbar.set(1.0)
         self.btn_process.configure(state="normal")
         self.btn_upload.configure(state="normal")
         if count > 0:
             self.btn_export.configure(state="normal")
             messagebox.showinfo("完成", f"已完成 {count} 个文档的排版！\n请点击“导出结果”保存文件。")
         else:
-            self.log("⚠️ 没有生成任何结果，请检查文件是否损坏。")
+            messagebox.showwarning("失败", "没有文档被成功处理。")
 
     def export_files(self):
         if not self.processed_docs: return
@@ -260,6 +250,7 @@ class GongWenFormatterApp(ctk.CTk):
         if not save_dir: return
         
         count = 0
+        self.log(">>> 开始导出...")
         for original_path, doc in self.processed_docs:
             try:
                 base_name = os.path.basename(original_path)
@@ -277,32 +268,37 @@ class GongWenFormatterApp(ctk.CTk):
             try: os.startfile(save_dir)
             except: pass
 
-    # --- 核心排版逻辑 ---
+    # --- 核心排版逻辑 (增强健壮性) ---
     def format_document(self, file_path):
-        # 增加容错：检查文件是否存在
         if not os.path.exists(file_path):
             raise FileNotFoundError("找不到文件")
 
-        doc = Document(file_path)
+        try:
+            doc = Document(file_path)
+        except Exception as e:
+            raise ValueError(f"文档损坏或格式不支持: {e}")
+
         cfg = self.config
 
         # 1. 页面设置
         for section in doc.sections:
-            section.top_margin = Cm(cfg["margins"]["top"])
-            section.bottom_margin = Cm(cfg["margins"]["bottom"])
-            section.left_margin = Cm(cfg["margins"]["left"])
-            section.right_margin = Cm(cfg["margins"]["right"])
-            section.page_width = Cm(21)
-            section.page_height = Cm(29.7)
+            try:
+                section.top_margin = Cm(cfg["margins"]["top"])
+                section.bottom_margin = Cm(cfg["margins"]["bottom"])
+                section.left_margin = Cm(cfg["margins"]["left"])
+                section.right_margin = Cm(cfg["margins"]["right"])
+                section.page_width = Cm(21)
+                section.page_height = Cm(29.7)
+            except Exception as e:
+                print(f"页面设置警告: {e}")
 
-        # 2. 字体设置 (增加 try-except 防止 lxml 报错)
+        # 2. 字体设置
         try:
             style = doc.styles['Normal']
             style.font.name = 'Times New Roman'
             style.font.size = Pt(cfg["sizes"]["body"])
             style._element.rPr.rFonts.set(qn('w:eastAsia'), cfg["fonts"]["body"])
-        except Exception as e:
-            print(f"样式初始化警告: {e}")
+        except Exception: pass
 
         # 3. 遍历排版
         for paragraph in doc.paragraphs:
@@ -318,27 +314,33 @@ class GongWenFormatterApp(ctk.CTk):
             if paragraph == doc.paragraphs[0] and len(text) < 50:
                 self.set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
                 paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"])
+                try: paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"])
+                except: pass
                 continue
 
             if re.match(r"^[一二三四五六七八九十]+、", text):
                 self.set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
-                paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h1"] * 2)
+                try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h1"] * 2)
+                except: pass
                 continue
 
             if re.match(r"^（[一二三四五六七八九十]+）", text):
                 self.set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
-                paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h2"] * 2)
+                try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h2"] * 2)
+                except: pass
                 continue
 
             if re.match(r"^\d+\.", text):
                 self.set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
-                paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h3"] * 2)
+                try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h3"] * 2)
+                except: pass
                 continue
 
             self.set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
-            paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["body"] * 2)
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+            try:
+                paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["body"] * 2)
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+            except: pass
 
         # 4. 表格
         for table in doc.tables:
