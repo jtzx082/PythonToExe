@@ -6,6 +6,7 @@ import json
 import re
 import time
 import traceback
+import sys
 from docx import Document
 from docx.shared import Cm, Pt
 from docx.oxml.ns import qn
@@ -14,7 +15,7 @@ from docx.oxml import OxmlElement
 
 # --- 全局配置 ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v1.0.5 (Stable Loop)"
+APP_VERSION = "v1.0.6 (Debug & Font Safe)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
@@ -47,9 +48,8 @@ class GongWenFormatterApp(ctk.CTk):
         self.config = self.load_config()
         self.file_list = []
         self.processed_docs = [] 
-        self.process_queue = [] # 任务队列
-        self.is_processing = False
-
+        self.process_queue = []
+        
         self.setup_ui()
 
     def load_config(self):
@@ -57,8 +57,7 @@ class GongWenFormatterApp(ctk.CTk):
             try:
                 with open("config.json", "r", encoding="utf-8") as f:
                     return json.load(f)
-            except:
-                pass
+            except: pass
         return DEFAULT_CONFIG
 
     def save_config(self):
@@ -150,7 +149,7 @@ class GongWenFormatterApp(ctk.CTk):
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
         
-        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【常见问题】\n1. 请确保文档未被占用。\n2. 导出时会自动添加“_排版后”后缀。\n3. 如果排版失败，请检查文档是否加密。"
+        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【排版原理】\n本软件通过 Python 调用 Word 底层接口，强制修改文档的 XML 结构。\n\n【常见问题】\n如果排版无反应，通常是因为您的系统缺少中文字体支持。\nLinux 下建议安装 Windows 常用字体库。"
         lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word")
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
@@ -161,12 +160,12 @@ class GongWenFormatterApp(ctk.CTk):
         self.frames[name].grid(row=0, column=0, sticky="nsew")
 
     def log(self, text):
+        print(f"[LOG] {text}") # 同时输出到终端，方便Linux调试
         self.log_box.configure(state="normal")
         self.log_box.insert("end", f"{text}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
-        # 强制刷新UI，确保卡死前能看到最后一句话
-        self.log_box.update_idletasks()
+        self.update_idletasks() # 强制立刻刷新UI
 
     def update_config(self):
         try:
@@ -188,50 +187,49 @@ class GongWenFormatterApp(ctk.CTk):
             self.btn_process.configure(state="normal")
             self.btn_export.configure(state="disabled")
 
-    # --- 核心修改：移除 Thread，改用递归调用 ---
+    # --- 流程控制 ---
     def start_processing(self):
+        self.log(">>> 正在初始化排版引擎...")
         self.btn_process.configure(state="disabled")
         self.btn_upload.configure(state="disabled")
         self.processed_docs = []
         
-        # 准备任务队列
         self.process_queue = list(enumerate(self.file_list))
         self.total_files = len(self.file_list)
         self.success_count = 0
         
-        self.log(">>> 排版引擎已启动 (v1.0.5)")
-        
-        # 延迟100ms开始处理第一个，给UI刷新的机会
+        # 强制刷新一次界面
+        self.update()
+        # 延迟100ms启动，避免卡住按钮动画
         self.after(100, self.process_next_file)
 
     def process_next_file(self):
+        # 递归终止条件
         if not self.process_queue:
-            # 队列为空，全部完成
             self.on_process_finish(self.success_count)
             return
 
-        # 取出下一个任务
         index, file_path = self.process_queue.pop(0)
         filename = os.path.basename(file_path)
         
         self.progressbar.set(index / self.total_files)
-        self.log(f"正在分析: {filename} ...")
-        
-        # 使用 update() 强制刷新界面，防止假死
-        self.update() 
+        self.log(f"正在读取: {filename} ...")
+        self.update() # 关键：每处理一步都刷新界面
 
         try:
-            # 执行排版 (这是耗时操作)
+            print(f"DEBUG: 开始处理 {file_path}")
             doc = self.format_document(file_path)
             self.processed_docs.append((file_path, doc))
             self.success_count += 1
             self.log(f"✅ {filename} 排版成功")
         except Exception as e:
             error_msg = str(e)
-            print(traceback.format_exc()) # 控制台打印详细错误
+            print(f"ERROR: {traceback.format_exc()}") # 打印详细堆栈
             self.log(f"❌ {filename} 失败: {error_msg}")
+            # 弹窗提示，防止用户不知道发生了错误
+            messagebox.showerror("排版错误", f"文件：{filename}\n错误：{error_msg}\n\n建议：请检查文档是否被加密，或是否包含特殊对象。")
         
-        # 调度下一个任务，间隔 50ms，保证 UI 响应
+        # 调度下一个，间隔50ms
         self.after(50, self.process_next_file)
 
     def on_process_finish(self, count):
@@ -250,7 +248,7 @@ class GongWenFormatterApp(ctk.CTk):
         if not save_dir: return
         
         count = 0
-        self.log(">>> 开始导出...")
+        self.log(">>> 开始写入文件...")
         for original_path, doc in self.processed_docs:
             try:
                 base_name = os.path.basename(original_path)
@@ -258,98 +256,108 @@ class GongWenFormatterApp(ctk.CTk):
                 new_name = f"{name}_排版后{ext}"
                 save_path = os.path.join(save_dir, new_name)
                 doc.save(save_path)
-                self.log(f"已导出: {save_path}")
+                self.log(f"已保存: {new_name}")
                 count += 1
             except Exception as e:
-                self.log(f"导出失败 {base_name}: {e}")
+                self.log(f"保存失败 {base_name}: {e}")
 
         messagebox.showinfo("导出完成", f"成功导出 {count} 个文件。\n路径: {save_dir}")
         if os.name == 'nt':
             try: os.startfile(save_dir)
             except: pass
 
-    # --- 核心排版逻辑 (增强健壮性) ---
+    # --- 核心排版逻辑 (深度容错版) ---
     def format_document(self, file_path):
         if not os.path.exists(file_path):
-            raise FileNotFoundError("找不到文件")
+            raise FileNotFoundError("文件不存在")
 
+        # 1. 加载文档
         try:
             doc = Document(file_path)
         except Exception as e:
-            raise ValueError(f"文档损坏或格式不支持: {e}")
+            raise ValueError(f"文档损坏或格式不支持 (Error: {e})")
 
         cfg = self.config
 
-        # 1. 页面设置
-        for section in doc.sections:
-            try:
+        # 2. 页面设置 (增加保护)
+        try:
+            for section in doc.sections:
                 section.top_margin = Cm(cfg["margins"]["top"])
                 section.bottom_margin = Cm(cfg["margins"]["bottom"])
                 section.left_margin = Cm(cfg["margins"]["left"])
                 section.right_margin = Cm(cfg["margins"]["right"])
                 section.page_width = Cm(21)
                 section.page_height = Cm(29.7)
-            except Exception as e:
-                print(f"页面设置警告: {e}")
+        except Exception as e:
+            print(f"Warning: 页面设置失败 ({e})")
 
-        # 2. 字体设置
+        # 3. 基础样式设置 (在Linux上如果没有字体，这里可能会报错，所以要保护)
         try:
             style = doc.styles['Normal']
             style.font.name = 'Times New Roman'
             style.font.size = Pt(cfg["sizes"]["body"])
             style._element.rPr.rFonts.set(qn('w:eastAsia'), cfg["fonts"]["body"])
-        except Exception: pass
+        except Exception as e:
+            print(f"Warning: 基础样式设置失败，可能是缺少字体 ({e})")
 
-        # 3. 遍历排版
-        for paragraph in doc.paragraphs:
+        # 4. 遍历段落 (核心循环)
+        for i, paragraph in enumerate(doc.paragraphs):
             text = paragraph.text.strip()
             if not text: continue
 
+            # 尝试设置行距
             try:
                 paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                 paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
             except: pass
             
-            # 标题识别
-            if paragraph == doc.paragraphs[0] and len(text) < 50:
-                self.set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
-                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                try: paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"])
-                except: pass
-                continue
-
-            if re.match(r"^[一二三四五六七八九十]+、", text):
-                self.set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
-                try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h1"] * 2)
-                except: pass
-                continue
-
-            if re.match(r"^（[一二三四五六七八九十]+）", text):
-                self.set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
-                try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h2"] * 2)
-                except: pass
-                continue
-
-            if re.match(r"^\d+\.", text):
-                self.set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
-                try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h3"] * 2)
-                except: pass
-                continue
-
-            self.set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
+            # 标题识别逻辑
             try:
-                paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["body"] * 2)
-                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-            except: pass
+                # 简单判断大标题：第一段且居中或字少
+                if i == 0 and len(text) < 50:
+                    self.safe_set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
+                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    try: paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"])
+                    except: pass
+                    continue
 
-        # 4. 表格
+                if re.match(r"^[一二三四五六七八九十]+、", text):
+                    self.safe_set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
+                    try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h1"] * 2)
+                    except: pass
+                    continue
+
+                if re.match(r"^（[一二三四五六七八九十]+）", text):
+                    self.safe_set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
+                    try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h2"] * 2)
+                    except: pass
+                    continue
+
+                if re.match(r"^\d+\.", text):
+                    self.safe_set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
+                    try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h3"] * 2)
+                    except: pass
+                    continue
+
+                # 正文
+                self.safe_set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
+                try:
+                    paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["body"] * 2)
+                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+                except: pass
+                
+            except Exception as e:
+                print(f"Warning: 段落 {i} 处理出错: {e}")
+                # 继续处理下一段，不要中断整个文档
+
+        # 5. 表格处理
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for p in cell.paragraphs:
-                        self.set_font(p, "仿宋_GB2312", 14) 
+                        self.safe_set_font(p, "仿宋_GB2312", 14) 
 
-        # 5. 页码
+        # 6. 页码
         try:
             footer = doc.sections[0].footer
             p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
@@ -358,23 +366,28 @@ class GongWenFormatterApp(ctk.CTk):
 
         return doc
 
-    def set_font(self, paragraph, font_name, font_size, bold=False):
-        for run in paragraph.runs:
-            run.font.name = font_name
-            run.font.size = Pt(font_size)
-            run.bold = bold
-            try:
+    def safe_set_font(self, paragraph, font_name, font_size, bold=False):
+        """ 安全设置字体，防止因系统缺失字体而崩溃 """
+        try:
+            for run in paragraph.runs:
+                run.font.name = font_name
+                run.font.size = Pt(font_size)
+                run.bold = bold
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
-            except: pass
+        except Exception:
+            # 如果出错（例如系统没有这个字体），静默失败，保留默认字体
+            pass
 
     def add_page_number(self, paragraph):
-        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        run = paragraph.add_run()
-        fldChar1 = OxmlElement('w:fldChar'); fldChar1.set(qn('w:fldCharType'), 'begin')
-        instrText = OxmlElement('w:instrText'); instrText.set(qn('xml:space'), 'preserve'); instrText.text = "PAGE"
-        fldChar2 = OxmlElement('w:fldChar'); fldChar2.set(qn('w:fldCharType'), 'end')
-        run._r.append(fldChar1); run._r.append(instrText); run._r.append(fldChar2)
-        run.font.name = "宋体"; run.font.size = Pt(14)
+        try:
+            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            run = paragraph.add_run()
+            fldChar1 = OxmlElement('w:fldChar'); fldChar1.set(qn('w:fldCharType'), 'begin')
+            instrText = OxmlElement('w:instrText'); instrText.set(qn('xml:space'), 'preserve'); instrText.text = "PAGE"
+            fldChar2 = OxmlElement('w:fldChar'); fldChar2.set(qn('w:fldCharType'), 'end')
+            run._r.append(fldChar1); run._r.append(instrText); run._r.append(fldChar2)
+            run.font.name = "宋体"; run.font.size = Pt(14)
+        except: pass
 
 if __name__ == "__main__":
     app = GongWenFormatterApp()
