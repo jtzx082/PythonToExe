@@ -6,6 +6,7 @@ import json
 import re
 import threading
 import time
+import traceback
 from docx import Document
 from docx.shared import Cm, Pt
 from docx.oxml.ns import qn
@@ -14,12 +15,12 @@ from docx.oxml import OxmlElement
 
 # --- 全局配置 ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v1.0.2 (Layout & Error Fix)"
+APP_VERSION = "v1.0.3 (Thread Safe)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
     "margins": {"top": 3.7, "bottom": 3.5, "left": 2.8, "right": 2.6},
-    "line_spacing": 28,  # 磅值
+    "line_spacing": 28,
     "fonts": {
         "title": "方正小标宋简体",
         "h1": "黑体",
@@ -28,8 +29,8 @@ DEFAULT_CONFIG = {
         "body": "仿宋_GB2312"
     },
     "sizes": {
-        "title": 22, # 二号
-        "h1": 16,    # 三号
+        "title": 22,
+        "h1": 16,
         "h2": 16,
         "h3": 16,
         "body": 16
@@ -46,7 +47,7 @@ class GongWenFormatterApp(ctk.CTk):
 
         self.config = self.load_config()
         self.file_list = []
-        self.processed_docs = [] # 存储处理好的 (原文件名, doc对象)
+        self.processed_docs = [] 
 
         self.setup_ui()
 
@@ -56,7 +57,7 @@ class GongWenFormatterApp(ctk.CTk):
                 with open("config.json", "r", encoding="utf-8") as f:
                     return json.load(f)
             except:
-                return DEFAULT_CONFIG
+                pass
         return DEFAULT_CONFIG
 
     def save_config(self):
@@ -71,7 +72,6 @@ class GongWenFormatterApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # 侧边栏
         self.sidebar = ctk.CTkFrame(self, width=140, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         ctk.CTkLabel(self.sidebar, text=APP_NAME, font=ctk.CTkFont(size=18, weight="bold")).pack(pady=20)
@@ -83,10 +83,8 @@ class GongWenFormatterApp(ctk.CTk):
         self.btn_about = ctk.CTkButton(self.sidebar, text="使用说明", command=lambda: self.show_frame("about"))
         self.btn_about.pack(pady=10, padx=10)
 
-        # 主区域
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-        # 关键修复：确保主区域内的 grid 也能扩展
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
 
@@ -100,7 +98,6 @@ class GongWenFormatterApp(ctk.CTk):
         f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.frames["home"] = f
         
-        # 按钮栏
         btn_box = ctk.CTkFrame(f, fg_color="transparent")
         btn_box.pack(fill="x", pady=10)
         
@@ -110,13 +107,11 @@ class GongWenFormatterApp(ctk.CTk):
         self.btn_export = ctk.CTkButton(btn_box, text="💾 3. 导出结果", command=self.export_files, width=180, state="disabled")
         self.btn_export.pack(side="left", padx=10)
 
-        # 日志区
         self.log_box = ctk.CTkTextbox(f, height=400)
         self.log_box.pack(fill="both", expand=True, pady=10)
         self.log_box.insert("0.0", ">>> 欢迎使用！请先上传 Word 文档。\n")
         self.log_box.configure(state="disabled")
 
-        # 进度条
         self.progressbar = ctk.CTkProgressBar(f)
         self.progressbar.pack(fill="x", pady=10)
         self.progressbar.set(0)
@@ -149,8 +144,6 @@ class GongWenFormatterApp(ctk.CTk):
     def create_about_frame(self):
         f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.frames["about"] = f
-        
-        # 布局修复：使用 grid 并设置粘性
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
         
@@ -158,7 +151,6 @@ class GongWenFormatterApp(ctk.CTk):
         lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word")
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
-        # 关键修改：改用 grid 替代 pack，确保填满
         lbl.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
 
     def show_frame(self, name):
@@ -195,7 +187,18 @@ class GongWenFormatterApp(ctk.CTk):
         self.btn_process.configure(state="disabled")
         self.btn_upload.configure(state="disabled")
         self.processed_docs = []
+        # 开启守护线程，避免阻塞主界面
         threading.Thread(target=self.process_thread, daemon=True).start()
+
+    # --- 线程安全更新 UI 的辅助方法 ---
+    def safe_update_progress(self, val):
+        self.progressbar.set(val)
+
+    def safe_log(self, text):
+        self.log(text)
+
+    def safe_finish(self, count):
+        self.on_process_finish(count)
 
     def process_thread(self):
         total = len(self.file_list)
@@ -203,24 +206,27 @@ class GongWenFormatterApp(ctk.CTk):
         
         for index, file_path in enumerate(self.file_list):
             filename = os.path.basename(file_path)
-            self.after(0, self.log, f"正在处理: {filename} ...")
-            self.progressbar.set((index) / total)
+            
+            # 使用 after 调度 UI 更新，严禁在线程中直接操作
+            self.after(0, self.safe_log, f"正在处理: {filename} ...")
+            self.after(0, self.safe_update_progress, index / total)
             
             try:
+                # 纯数据处理，不触碰 UI
                 doc = self.format_document(file_path)
                 self.processed_docs.append((file_path, doc))
                 success_count += 1
-                self.after(0, self.log, f"✅ {filename} 排版完成")
+                self.after(0, self.safe_log, f"✅ {filename} 排版完成")
             except Exception as e:
-                # 关键修复：捕捉错误并打印到界面，而不是静默失败
+                # 捕获所有错误并打印堆栈
                 error_msg = str(e)
-                self.after(0, self.log, f"❌ {filename} 失败: {error_msg}")
-                self.after(0, lambda m=error_msg: messagebox.showerror("排版出错", f"文件 {filename} 处理失败:\n{m}"))
+                traceback.print_exc() # 在控制台打印详细错误
+                self.after(0, self.safe_log, f"❌ {filename} 失败: {error_msg}")
             
-            self.progressbar.set((index + 1) / total)
-            time.sleep(0.1)
+            self.after(0, self.safe_update_progress, (index + 1) / total)
+            time.sleep(0.1) # 给UI一点呼吸时间
 
-        self.after(0, self.on_process_finish, success_count)
+        self.after(0, self.safe_finish, success_count)
 
     def on_process_finish(self, count):
         self.btn_process.configure(state="normal")
@@ -229,14 +235,11 @@ class GongWenFormatterApp(ctk.CTk):
             self.btn_export.configure(state="normal")
             messagebox.showinfo("完成", f"已完成 {count} 个文档的排版！\n请点击“导出结果”保存文件。")
         else:
-            messagebox.showwarning("失败", "没有文档被成功处理，请检查日志。")
+            messagebox.showwarning("失败", "没有文档被成功处理。")
 
     def export_files(self):
-        if not self.processed_docs:
-            messagebox.showwarning("提示", "没有可导出的数据")
-            return
-
-        save_dir = filedialog.askdirectory(title="选择保存导出文件的文件夹")
+        if not self.processed_docs: return
+        save_dir = filedialog.askdirectory(title="选择导出文件夹")
         if not save_dir: return
         
         count = 0
@@ -246,19 +249,18 @@ class GongWenFormatterApp(ctk.CTk):
                 name, ext = os.path.splitext(base_name)
                 new_name = f"{name}_排版后{ext}"
                 save_path = os.path.join(save_dir, new_name)
-                
                 doc.save(save_path)
                 self.log(f"已导出: {save_path}")
                 count += 1
             except Exception as e:
                 self.log(f"导出失败 {base_name}: {e}")
 
-        messagebox.showinfo("导出完成", f"成功导出 {count} 个文件到:\n{save_dir}")
+        messagebox.showinfo("导出完成", f"成功导出 {count} 个文件。\n路径: {save_dir}")
         if os.name == 'nt':
             try: os.startfile(save_dir)
             except: pass
 
-    # --- 核心排版逻辑 (增强健壮性) ---
+    # --- 核心排版逻辑 ---
     def format_document(self, file_path):
         doc = Document(file_path)
         cfg = self.config
@@ -314,16 +316,12 @@ class GongWenFormatterApp(ctk.CTk):
                     for p in cell.paragraphs:
                         self.set_font(p, "仿宋_GB2312", 14) 
 
-        # 修复：安全添加页码（防止无页脚报错）
         try:
             footer = doc.sections[0].footer
-            if not footer.paragraphs:
-                p = footer.add_paragraph()
-            else:
-                p = footer.paragraphs[0]
+            if not footer.paragraphs: p = footer.add_paragraph()
+            else: p = footer.paragraphs[0]
             self.add_page_number(p)
-        except Exception:
-            pass # 页码添加失败不影响整体保存
+        except Exception: pass
 
         return doc
 
