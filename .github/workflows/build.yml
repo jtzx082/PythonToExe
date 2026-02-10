@@ -1,4 +1,4 @@
-name: Build DeepSeek Desktop
+name: Build DeepSeek Pro v2
 
 on:
   workflow_dispatch:
@@ -32,27 +32,30 @@ jobs:
     - name: Build with PyInstaller
       shell: bash
       run: |
-        pyinstaller --name="DeepSeek_Desktop" --onefile --windowed --clean \
+        pyinstaller --name="DeepSeek_Pro_v2" --onefile --windowed --clean \
         --collect-all customtkinter \
         --collect-all duckduckgo_search \
         --collect-all openai \
+        --collect-all pandas \
         --hidden-import=pypdf \
         --hidden-import=docx \
+        --hidden-import=pptx \
+        --hidden-import=pyperclip \
         main.py
 
     - name: Rename Output
       shell: bash
       run: |
         if [ "${{ runner.os }}" == "Windows" ]; then
-          mv dist/DeepSeek_Desktop.exe dist/DeepSeek_Desktop_Windows.exe
+          mv dist/DeepSeek_Pro_v2.exe dist/DeepSeek_Pro_v2_Windows.exe
         elif [ "${{ runner.os }}" == "macOS" ]; then
-          mv dist/DeepSeek_Desktop dist/DeepSeek_Desktop_Mac
+          mv dist/DeepSeek_Pro_v2 dist/DeepSeek_Pro_v2_Mac
         else
-          mv dist/DeepSeek_Desktop dist/DeepSeek_Desktop_Linux
+          mv dist/DeepSeek_Pro_v2 dist/DeepSeek_Pro_v2_Linux
         fi
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: DeepSeek_Desktop_${{ matrix.os }}
+        name: DeepSeek_Pro_v2_${{ matrix.os }}
         path: dist/
