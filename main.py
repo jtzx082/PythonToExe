@@ -6,7 +6,6 @@ import json
 import re
 import time
 import traceback
-import sys
 from docx import Document
 from docx.shared import Cm, Pt
 from docx.oxml.ns import qn
@@ -15,12 +14,12 @@ from docx.oxml import OxmlElement
 
 # --- 全局配置 ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v1.0.7 (Critical Fix)"
+APP_VERSION = "v1.0.8 (Pixel Perfect)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
     "margins": {"top": 3.7, "bottom": 3.5, "left": 2.8, "right": 2.6},
-    "line_spacing": 28,
+    "line_spacing": 28,  # 固定值 28磅
     "fonts": {
         "title": "方正小标宋简体",
         "h1": "黑体",
@@ -29,8 +28,8 @@ DEFAULT_CONFIG = {
         "body": "仿宋_GB2312"
     },
     "sizes": {
-        "title": 22,
-        "h1": 16,
+        "title": 22, # 二号
+        "h1": 16,    # 三号
         "h2": 16,
         "h3": 16,
         "body": 16
@@ -41,7 +40,7 @@ class GongWenFormatterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(f"{APP_NAME} {APP_VERSION}")
-        self.geometry("900x700")
+        self.geometry("950x700")
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
 
@@ -72,7 +71,7 @@ class GongWenFormatterApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = ctk.CTkFrame(self, width=140, corner_radius=0)
+        self.sidebar = ctk.CTkFrame(self, width=160, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         ctk.CTkLabel(self.sidebar, text=APP_NAME, font=ctk.CTkFont(size=18, weight="bold")).pack(pady=20)
         
@@ -85,6 +84,7 @@ class GongWenFormatterApp(ctk.CTk):
 
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        # 强制设置主区域权重，确保子Frame能撑开
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
 
@@ -103,7 +103,6 @@ class GongWenFormatterApp(ctk.CTk):
         btn_box = ctk.CTkFrame(f, fg_color="transparent")
         btn_box.grid(row=0, column=0, sticky="ew", pady=10)
         
-        # --- 修复点：正确赋值给 self.btn_upload ---
         self.btn_upload = ctk.CTkButton(btn_box, text="📂 1. 上传文档", command=self.upload_files, width=180)
         self.btn_upload.pack(side="left", padx=10)
         
@@ -150,11 +149,13 @@ class GongWenFormatterApp(ctk.CTk):
     def create_about_frame(self):
         f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.frames["about"] = f
+        # 关键修复：确保权重设置正确
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
         
-        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【排版原理】\n本软件通过 Python 调用 Word 底层接口，强制修改文档的 XML 结构。\n\n【常见问题】\n如果排版无反应，通常是因为您的系统缺少中文字体支持。\nLinux 下建议安装 Windows 常用字体库。"
-        lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word")
+        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【最新特性】\n1. 首行缩进已升级为国标“2字符” (XML级控制)。\n2. 默认勾选“与网格对齐”和“自动调整右缩进”。\n\n【常见问题】\n如果排版无反应，请检查文档是否被加密。"
+        # 关键修复：指定 width 和 height 初始值，防止在 Linux 上被压缩
+        lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word", width=600, height=500)
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
         lbl.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
@@ -164,12 +165,12 @@ class GongWenFormatterApp(ctk.CTk):
         self.frames[name].grid(row=0, column=0, sticky="nsew")
 
     def log(self, text):
-        print(f"[LOG] {text}") 
+        print(f"[LOG] {text}")
         self.log_box.configure(state="normal")
         self.log_box.insert("end", f"{text}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
-        self.update_idletasks() 
+        self.update_idletasks()
 
     def update_config(self):
         try:
@@ -194,16 +195,12 @@ class GongWenFormatterApp(ctk.CTk):
     # --- 流程控制 ---
     def start_processing(self):
         self.log(">>> 正在初始化排版引擎...")
-        
-        # 此时 self.btn_upload 已被正确定义，不会报错了
         self.btn_process.configure(state="disabled")
         self.btn_upload.configure(state="disabled")
         self.processed_docs = []
-        
         self.process_queue = list(enumerate(self.file_list))
         self.total_files = len(self.file_list)
         self.success_count = 0
-        
         self.update()
         self.after(100, self.process_next_file)
 
@@ -214,13 +211,11 @@ class GongWenFormatterApp(ctk.CTk):
 
         index, file_path = self.process_queue.pop(0)
         filename = os.path.basename(file_path)
-        
         self.progressbar.set(index / self.total_files)
         self.log(f"正在读取: {filename} ...")
         self.update() 
 
         try:
-            print(f"DEBUG: 开始处理 {file_path}")
             doc = self.format_document(file_path)
             self.processed_docs.append((file_path, doc))
             self.success_count += 1
@@ -267,20 +262,15 @@ class GongWenFormatterApp(ctk.CTk):
             try: os.startfile(save_dir)
             except: pass
 
-    # --- 核心排版逻辑 (深度容错版) ---
+    # --- 核心排版逻辑 (OXML深度定制版) ---
     def format_document(self, file_path):
-        if not os.path.exists(file_path):
-            raise FileNotFoundError("文件不存在")
-
-        # 1. 加载文档
-        try:
-            doc = Document(file_path)
-        except Exception as e:
-            raise ValueError(f"文档损坏或格式不支持 (Error: {e})")
+        if not os.path.exists(file_path): raise FileNotFoundError("文件不存在")
+        try: doc = Document(file_path)
+        except Exception as e: raise ValueError(f"文档损坏: {e}")
 
         cfg = self.config
 
-        # 2. 页面设置
+        # 1. 页面设置
         try:
             for section in doc.sections:
                 section.top_margin = Cm(cfg["margins"]["top"])
@@ -289,73 +279,82 @@ class GongWenFormatterApp(ctk.CTk):
                 section.right_margin = Cm(cfg["margins"]["right"])
                 section.page_width = Cm(21)
                 section.page_height = Cm(29.7)
-        except Exception as e:
-            print(f"Warning: 页面设置失败 ({e})")
+                # 设置文档网格 (尽可能接近Word行为)
+                # python-docx对网格支持有限，主要靠段落属性 "snapToGrid" 配合
+        except Exception: pass
 
-        # 3. 基础样式设置
+        # 2. 基础样式
         try:
             style = doc.styles['Normal']
             style.font.name = 'Times New Roman'
             style.font.size = Pt(cfg["sizes"]["body"])
             style._element.rPr.rFonts.set(qn('w:eastAsia'), cfg["fonts"]["body"])
-        except Exception as e:
-            print(f"Warning: 基础样式设置失败 ({e})")
+        except Exception: pass
 
-        # 4. 遍历段落
+        # 3. 遍历段落
         for i, paragraph in enumerate(doc.paragraphs):
             text = paragraph.text.strip()
             if not text: continue
 
+            # --- 通用设置：固定行距 + 网格对齐 (核心需求) ---
             try:
                 paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                 paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
+                
+                # 核心升级：设置 "与网格对齐" 和 "自动调整右缩进"
+                self.set_paragraph_grid_props(paragraph)
             except: pass
             
+            # --- 标题识别与字体应用 ---
             try:
-                # 简单判断大标题
+                # 大标题
                 if i == 0 and len(text) < 50:
                     self.safe_set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
                     paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                    try: paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"])
-                    except: pass
+                    # 大标题一般不需要首行缩进，但需要下空一行
+                    paragraph.paragraph_format.first_line_indent = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"]) 
                     continue
 
+                # 一级标题 (一、)
                 if re.match(r"^[一二三四五六七八九十]+、", text):
                     self.safe_set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
-                    try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h1"] * 2)
-                    except: pass
+                    # 标题通常不需要首行缩进，或者用字符级缩进，这里暂且取消缩进
+                    self.set_indent_xml(paragraph, chars=0)
                     continue
 
+                # 二级标题 (（一）)
                 if re.match(r"^（[一二三四五六七八九十]+）", text):
                     self.safe_set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
-                    try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h2"] * 2)
-                    except: pass
+                    self.set_indent_xml(paragraph, chars=0)
                     continue
 
+                # 三级标题 (1. )
                 if re.match(r"^\d+\.", text):
                     self.safe_set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
-                    try: paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["h3"] * 2)
-                    except: pass
+                    self.set_indent_xml(paragraph, chars=0)
                     continue
 
                 # 正文
                 self.safe_set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
-                try:
-                    paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["body"] * 2)
-                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-                except: pass
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+                # 核心升级：设置 XML 级 "首行缩进 2 字符"
+                self.set_indent_xml(paragraph, chars=2)
                 
             except Exception as e:
-                print(f"Warning: 段落 {i} 处理出错: {e}")
+                print(f"段落处理警告: {e}")
 
-        # 5. 表格处理
+        # 4. 表格处理
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for p in cell.paragraphs:
-                        self.safe_set_font(p, "仿宋_GB2312", 14) 
+                        self.safe_set_font(p, "仿宋_GB2312", 14)
+                        self.set_paragraph_grid_props(p)
 
-        # 6. 页码
+        # 5. 页码
         try:
             footer = doc.sections[0].footer
             p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
@@ -364,16 +363,54 @@ class GongWenFormatterApp(ctk.CTk):
 
         return doc
 
+    # --- XML 底层操作辅助函数 ---
+
+    def set_indent_xml(self, paragraph, chars=2):
+        """ 使用 OXML 设置精确的字符级缩进 (首行缩进 2 字符) """
+        try:
+            pPr = paragraph._p.get_or_add_pPr()
+            ind = pPr.get_or_add_ind()
+            
+            if chars == 0:
+                # 清除缩进
+                if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
+                if 'w:firstLineChars' in ind.attrib: del ind.attrib['w:firstLineChars']
+                if 'w:left' in ind.attrib: del ind.attrib['w:left']
+            else:
+                # 设置 200 (即 2.00 字符)
+                ind.set(qn('w:firstLineChars'), str(int(chars * 100)))
+                # 清除可能冲突的磅值设置
+                if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
+        except Exception: pass
+
+    def set_paragraph_grid_props(self, paragraph):
+        """ 设置与网格对齐、自动调整右缩进 """
+        try:
+            pPr = paragraph._p.get_or_add_pPr()
+            
+            # snapToGrid (与网格对齐)
+            snap = pPr.find(qn('w:snapToGrid'))
+            if snap is None:
+                snap = OxmlElement('w:snapToGrid')
+                pPr.append(snap)
+            snap.set(qn('w:val'), '1')
+            
+            # adjustRightInd (自动调整右缩进)
+            adj = pPr.find(qn('w:adjustRightInd'))
+            if adj is None:
+                adj = OxmlElement('w:adjustRightInd')
+                pPr.append(adj)
+            adj.set(qn('w:val'), '1')
+        except Exception: pass
+
     def safe_set_font(self, paragraph, font_name, font_size, bold=False):
-        """ 安全设置字体，防止因系统缺失字体而崩溃 """
         try:
             for run in paragraph.runs:
                 run.font.name = font_name
                 run.font.size = Pt(font_size)
                 run.bold = bold
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
-        except Exception:
-            pass
+        except: pass
 
     def add_page_number(self, paragraph):
         try:
