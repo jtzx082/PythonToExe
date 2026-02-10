@@ -1,393 +1,344 @@
 import customtkinter as ctk
-import pandas as pd
-import numpy as np
+import tkinter as tk
+from tkinter import filedialog, messagebox
 import threading
 import os
-import sys
-from tkinter import filedialog, messagebox
+import json
+from datetime import datetime
+from openai import OpenAI
+# --- 扩展功能库 ---
+from duckduckgo_search import DDGS
+import pypdf
+from docx import Document
 
-# --- 全局外观设置 ---
-ctk.set_appearance_mode("System")  
-ctk.set_default_color_theme("blue")  
+# --- 配置区域 ---
+APP_NAME = "DeepSeek Pro 桌面版"
+APP_VERSION = "v1.0.0"
+DEV_INFO = "开发者：Yu Jinquan\n基于 DeepSeek-V3/R1 API"
 
-class GaokaoApp(ctk.CTk):
+# 默认配置
+DEFAULT_CONFIG = {
+    "api_key": "",
+    "model": "deepseek-chat",  # deepseek-chat (V3) 或 deepseek-reasoner (R1)
+    "temperature": 1.3,
+    "use_search": False,
+    "system_prompt": "你是一个乐于助人的AI助手。"
+}
+
+ctk.set_appearance_mode("System")
+ctk.set_default_color_theme("blue")
+
+class DeepSeekApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.title(f"{APP_NAME} {APP_VERSION}")
+        self.geometry("1100x800")
+        
+        self.config = self.load_config()
+        self.chat_history = [] # 存储对话上下文
+        self.client = None
+        self.stop_generation = False
+        self.attached_content = "" # 附件内容缓存
 
-        # 1. 窗口基础设置
-        self.title("甘肃新高考赋分系统 Pro Max (自定义参数版) | 俞晋全名师工作室")
-        self.geometry("1200x850")
-        self.minsize(1000, 750)
+        self.setup_ui()
         
-        # 数据变量
-        self.file_path = None
-        self.df_raw = None
-        self.sheet_names = []
-        self.param_entries = {} # 存储参数输入框的字典
-        
-        # 布局配置
+        # 如果有Key，预初始化
+        if self.config["api_key"]:
+            self.init_client()
+
+    def load_config(self):
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r") as f:
+                    return json.load(f)
+            except: pass
+        return DEFAULT_CONFIG.copy()
+
+    def save_config(self):
+        with open("config.json", "w") as f:
+            json.dump(self.config, f)
+
+    def init_client(self):
+        if not self.config["api_key"]: return
+        self.client = OpenAI(
+            api_key=self.config["api_key"],
+            base_url="https://api.deepseek.com"
+        )
+
+    def setup_ui(self):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ==========================
-        # === 左侧边栏 (操作区) ===
-        # ==========================
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(9, weight=1) 
-
-        # Logo
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=22, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
-
-        # 1. 导入
-        self.btn_load = ctk.CTkButton(self.sidebar_frame, text="1. 导入Excel成绩表", height=40, command=self.load_file_action)
-        self.btn_load.grid(row=1, column=0, padx=20, pady=10)
-
-        # 2. Sheet选择
-        self.lbl_sheet = ctk.CTkLabel(self.sidebar_frame, text="选择工作表 (Sheet):", anchor="w")
-        self.lbl_sheet.grid(row=2, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.sheet_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_sheet_event)
-        self.sheet_dropdown.grid(row=3, column=0, padx=20, pady=(5, 10))
-        self.sheet_dropdown.set("等待导入...")
-        self.sheet_dropdown.configure(state="disabled")
-
-        # 3. 班级列
-        self.lbl_class = ctk.CTkLabel(self.sidebar_frame, text="指定班级列 (计算班排):", anchor="w")
-        self.lbl_class.grid(row=4, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.class_col_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[])
-        self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
-        self.class_col_dropdown.set("等待加载...")
-
-        # 底部按钮区
-        self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始赋分计算", height=50, fg_color="green", font=ctk.CTkFont(size=16, weight="bold"), command=self.start_calculation)
-        self.btn_calc.grid(row=10, column=0, padx=20, pady=15)
-        self.btn_calc.configure(state="disabled")
-
-        self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果 Excel", height=40, command=self.export_file)
-        self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
-        self.btn_export.configure(state="disabled")
-
-        # ==========================
-        # === 右侧主内容区 (Tab) ===
-        # ==========================
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        # === 左侧边栏 (设置与说明) ===
+        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
         
-        # 状态栏
-        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请先导入数据，然后确认【赋分标准】。", anchor="w", font=("Microsoft YaHei UI", 16))
-        self.status_label.pack(fill="x", pady=(0, 10))
-
-        # 创建选项卡
-        self.tabview = ctk.CTkTabview(self.main_frame)
-        self.tabview.pack(fill="both", expand=True)
-        self.tabview.add("科目设置")
-        self.tabview.add("赋分标准设置")
+        ctk.CTkLabel(self.sidebar, text=APP_NAME, font=("Arial", 18, "bold")).pack(pady=20)
         
-        # --- Tab 1: 科目设置 ---
-        self.setup_subject_tab()
-
-        # --- Tab 2: 赋分参数设置 ---
-        self.setup_params_tab()
-
-        # 进度条
-        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progressbar.pack(fill="x", pady=(15, 0))
-        self.progressbar.set(0)
-
-    # --------------------------
-    # 界面构建辅助函数
-    # --------------------------
-    def setup_subject_tab(self):
-        tab = self.tabview.tab("科目设置")
+        # 模型选择
+        ctk.CTkLabel(self.sidebar, text="模型选择:").pack(padx=10, anchor="w")
+        self.model_var = ctk.StringVar(value=self.config["model"])
+        self.model_combo = ctk.CTkComboBox(self.sidebar, values=["deepseek-chat", "deepseek-reasoner"], variable=self.model_var, command=self.update_settings)
+        self.model_combo.pack(padx=10, pady=5, fill="x")
         
-        # 滚动设置区
-        self.scroll_frame = ctk.CTkScrollableFrame(tab, label_text="勾选对应列名")
-        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        # 联网搜索开关
+        self.search_var = ctk.BooleanVar(value=self.config["use_search"])
+        self.search_switch = ctk.CTkSwitch(self.sidebar, text="联网搜索", variable=self.search_var, command=self.update_settings)
+        self.search_switch.pack(padx=10, pady=15, anchor="w")
 
-        # 原始计入科目区
-        self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【直接计入总分】 (语数外 + 物理/历史):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_raw.pack(fill="x", pady=(10, 5), padx=10)
-        self.raw_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.raw_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.raw_checkboxes = []
+        # API Key 设置
+        ctk.CTkLabel(self.sidebar, text="API Key:").pack(padx=10, anchor="w")
+        self.entry_key = ctk.CTkEntry(self.sidebar, show="*")
+        self.entry_key.insert(0, self.config["api_key"])
+        self.entry_key.pack(padx=10, pady=5, fill="x")
+        ctk.CTkButton(self.sidebar, text="保存 Key", command=self.save_key).pack(padx=10, pady=5)
 
-        # 赋分科目区
-        self.lbl_assign = ctk.CTkLabel(self.scroll_frame, text="【等级赋分科目】 (化生政地):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_assign.pack(fill="x", pady=(25, 5), padx=10)
-        self.assign_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.assign_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.assign_checkboxes = []
+        # 功能按钮
+        ctk.CTkButton(self.sidebar, text="🧹 新对话", fg_color="gray", command=self.clear_chat).pack(padx=10, pady=(20, 5), fill="x")
+        ctk.CTkButton(self.sidebar, text="ℹ️ 关于/说明", command=self.show_about).pack(padx=10, pady=5, fill="x")
 
-    def setup_params_tab(self):
-        tab = self.tabview.tab("赋分标准设置")
+        # 底部开发者信息
+        ctk.CTkLabel(self.sidebar, text=DEV_INFO, font=("Arial", 10), text_color="gray").pack(side="bottom", pady=20)
+
+        # === 右侧主区域 ===
+        self.main_area = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_area.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.main_area.grid_rowconfigure(0, weight=1)
+        self.main_area.grid_columnconfigure(0, weight=1)
+
+        # 1. 聊天显示区 (使用 Textbox 模拟流式输出)
+        self.chat_display = ctk.CTkTextbox(self.main_area, font=("Microsoft YaHei UI", 14), wrap="word")
+        self.chat_display.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        self.chat_display.insert("0.0", "👋 你好！我是 DeepSeek 智能助手。\n请在设置中输入 API Key 开始对话。\n支持 PDF/Word 读取和联网搜索。\n\n")
+        self.chat_display.configure(state="disabled")
+
+        # 2. 思考过程显示区 (仿网页版，默认隐藏，有深度思考时显示)
+        self.thought_frame = ctk.CTkFrame(self.main_area, fg_color=("gray85", "gray20"), height=0)
+        self.thought_display = ctk.CTkTextbox(self.thought_frame, font=("Arial", 12), text_color="gray", height=100, wrap="word")
+        self.thought_display.pack(fill="both", expand=True, padx=5, pady=5)
+        self.thought_label = ctk.CTkLabel(self.thought_frame, text="🧠 深度思考中...", font=("Arial", 12, "bold"), text_color="gray")
+        self.thought_label.pack(anchor="w", padx=5)
+        # 初始不布局，需要时 grid
+
+        # 3. 输入区
+        input_frame = ctk.CTkFrame(self.main_area, fg_color="transparent")
+        input_frame.grid(row=2, column=0, sticky="ew")
+        input_frame.grid_columnconfigure(1, weight=1)
+
+        self.btn_attach = ctk.CTkButton(input_frame, text="📎", width=40, command=self.upload_file)
+        self.btn_attach.grid(row=0, column=0, padx=(0, 5), sticky="s")
+
+        self.entry_msg = ctk.CTkTextbox(input_frame, height=60, font=("Microsoft YaHei UI", 14))
+        self.entry_msg.grid(row=0, column=1, sticky="ew")
+        # 绑定回车发送
+        self.entry_msg.bind("<Shift-Return>", lambda e: "break") # 换行
+        self.entry_msg.bind("<Return>", self.on_enter_press)
+
+        self.btn_send = ctk.CTkButton(input_frame, text="发送", width=80, command=self.send_message)
+        self.btn_send.grid(row=0, column=2, padx=(5, 0), sticky="s")
         
-        info_lbl = ctk.CTkLabel(tab, text="请根据实际需求修改参数（默认值为甘肃省标准）。\n人数比例请输入整数（如15代表15%）。", font=("Microsoft YaHei UI", 13))
-        info_lbl.pack(pady=10)
+        self.lbl_file_status = ctk.CTkLabel(input_frame, text="", text_color="green", font=("Arial", 10))
+        self.lbl_file_status.grid(row=1, column=1, sticky="w")
 
-        # 参数网格容器
-        grid_frame = ctk.CTkFrame(tab)
-        grid_frame.pack(padx=20, pady=10)
+    # --- 逻辑处理 ---
 
-        # 表头
-        headers = ["等级", "人数比例 (%)", "赋分上限 (T2)", "赋分下限 (T1)"]
-        for col, text in enumerate(headers):
-            ctk.CTkLabel(grid_frame, text=text, font=("Arial", 12, "bold")).grid(row=0, column=col, padx=15, pady=10)
+    def update_settings(self, choice=None):
+        self.config["model"] = self.model_var.get()
+        self.config["use_search"] = self.search_var.get()
+        self.save_config()
 
-        # 默认数据 (甘肃标准)
-        default_data = [
-            ('A', '15', '100', '86'),
-            ('B', '35', '85',  '71'),
-            ('C', '35', '70',  '56'),
-            ('D', '13', '55',  '41'),
-            ('E', '2',  '40',  '30')
-        ]
-
-        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
-
-        for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
-            # 等级标签
-            ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
-            
-            # 百分比输入
-            e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_pct.insert(0, pct)
-            e_pct.grid(row=row, column=1, pady=5)
-            
-            # 上限输入
-            e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_max.insert(0, tmax)
-            e_max.grid(row=row, column=2, pady=5)
-            
-            # 下限输入
-            e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_min.insert(0, tmin)
-            e_min.grid(row=row, column=3, pady=5)
-
-            # 存入字典方便调用
-            self.param_entries[f"{grade}_percent"] = e_pct
-            self.param_entries[f"{grade}_max"] = e_max
-            self.param_entries[f"{grade}_min"] = e_min
-
-    # --------------------------
-    # 文件加载与 UI 更新逻辑
-    # --------------------------
-    def load_file_action(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
-        if not file_path: return
-        
-        self.file_path = file_path
-        self.status_label.configure(text=f"正在分析文件: {os.path.basename(file_path)}...")
-        self.progressbar.start()
-        threading.Thread(target=self.read_excel_sheets).start()
-
-    def read_excel_sheets(self):
-        try:
-            excel_file = pd.ExcelFile(self.file_path)
-            self.sheet_names = excel_file.sheet_names
-            self.after(0, self.update_sheet_ui)
-        except Exception as e:
-            self.after(0, lambda: messagebox.showerror("错误", f"读取失败: {e}"))
-            self.after(0, self.progressbar.stop)
-
-    def update_sheet_ui(self):
-        self.progressbar.stop()
-        self.progressbar.set(1)
-        self.status_label.configure(text=f"已就绪: {os.path.basename(self.file_path)}")
-        self.sheet_dropdown.configure(values=self.sheet_names, state="normal")
-        self.sheet_dropdown.set(self.sheet_names[0])
-        self.change_sheet_event(self.sheet_names[0])
-
-    def change_sheet_event(self, sheet_name):
-        try:
-            self.df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name)
-            columns = self.df_raw.columns.tolist()
-            
-            self.class_col_dropdown.configure(values=columns)
-            default_class = next((c for c in columns if "班" in str(c)), columns[0] if columns else "")
-            self.class_col_dropdown.set(default_class)
-
-            self.create_subject_checkboxes(columns)
-            
-            self.btn_calc.configure(state="normal")
-            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请在【科目设置】页勾选")
-        except Exception as e:
-            messagebox.showerror("错误", f"加载工作表失败: {e}")
-
-    def create_subject_checkboxes(self, columns):
-        for cb in self.raw_checkboxes + self.assign_checkboxes: cb.destroy()
-        self.raw_checkboxes.clear()
-        self.assign_checkboxes.clear()
-        
-        common_raw = ["语文", "数学", "英语", "物理", "历史", "外语"]
-        common_assign = ["化学", "生物", "地理", "政治", "思想政治"]
-
-        def add_cb(parent, text, storage, keywords):
-            cb = ctk.CTkCheckBox(parent, text=text, font=("Microsoft YaHei UI", 12))
-            cb.grid(row=len(storage)//5, column=len(storage)%5, sticky="w", padx=10, pady=8)
-            if any(k in str(text) for k in keywords): cb.select()
-            storage.append(cb)
-
-        for col in columns:
-            add_cb(self.raw_checkboxes_frame, col, self.raw_checkboxes, common_raw)
-        for col in columns:
-            add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
-
-    # --------------------------
-    # 核心计算逻辑 (动态读取参数)
-    # --------------------------
-    def get_user_configs(self):
-        """从UI界面读取用户输入的参数"""
-        configs = []
-        grades = ['A', 'B', 'C', 'D', 'E']
-        try:
-            for g in grades:
-                pct = float(self.param_entries[f"{g}_percent"].get()) / 100.0
-                t_max = int(self.param_entries[f"{g}_max"].get())
-                t_min = int(self.param_entries[f"{g}_min"].get())
-                
-                configs.append({
-                    'grade': g,
-                    'percent': pct,
-                    't_max': t_max,
-                    't_min': t_min
-                })
-            return configs
-        except ValueError:
-            messagebox.showerror("参数错误", "赋分标准中请输入有效的数字！")
-            return None
-
-    def start_calculation(self):
-        self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
-        self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
-        self.selected_class_col = self.class_col_dropdown.get()
-
-        if not self.selected_raw and not self.selected_assign:
-            messagebox.showwarning("提示", "请至少勾选一个科目！")
+    def save_key(self):
+        key = self.entry_key.get().strip()
+        if not key:
+            messagebox.showerror("错误", "API Key 不能为空")
             return
+        self.config["api_key"] = key
+        self.save_config()
+        self.init_client()
+        messagebox.showinfo("成功", "API Key 已保存")
+
+    def upload_file(self):
+        filepath = filedialog.askopenfilename(filetypes=[("Documents", "*.pdf *.docx *.txt")])
+        if not filepath: return
         
-        # 验证并获取配置
-        self.user_configs = self.get_user_configs()
-        if not self.user_configs:
+        try:
+            text = ""
+            ext = os.path.splitext(filepath)[1].lower()
+            if ext == ".pdf":
+                reader = pypdf.PdfReader(filepath)
+                for page in reader.pages: text += page.extract_text() + "\n"
+            elif ext == ".docx":
+                doc = Document(filepath)
+                text = "\n".join([p.text for p in doc.paragraphs])
+            else:
+                with open(filepath, "r", encoding="utf-8") as f: text = f.read()
+            
+            if not text.strip(): raise ValueError("文件内容为空")
+            
+            self.attached_content = f"【附件内容】：\n{text[:10000]}\n(内容过长已截断)\n----------------\n"
+            self.lbl_file_status.configure(text=f"已加载附件: {os.path.basename(filepath)}")
+        except Exception as e:
+            messagebox.showerror("读取失败", str(e))
+
+    def perform_web_search(self, query):
+        """ 使用 DuckDuckGo 进行搜索 """
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=3))
+                if results:
+                    context = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+                    return f"【联网搜索结果】：\n{context}\n----------------\n"
+        except Exception as e:
+            print(f"搜索失败: {e}")
+        return ""
+
+    def on_enter_press(self, event):
+        if not event.state & 0x0001: # 如果没有按 Shift
+            self.send_message()
+            return "break"
+
+    def clear_chat(self):
+        self.chat_history = []
+        self.chat_display.configure(state="normal")
+        self.chat_display.delete("0.0", "end")
+        self.chat_display.configure(state="disabled")
+        self.thought_frame.grid_forget()
+        self.attached_content = ""
+        self.lbl_file_status.configure(text="")
+
+    def show_about(self):
+        info = """【DeepSeek Pro 桌面版】
+版本：v1.0.0
+开发者：Yu Jinquan
+
+【功能说明】
+1. 深度思考：选择 'deepseek-reasoner' 模型即可触发，展示思维链。
+2. 联网搜索：勾选开启，AI 会先搜索相关信息再回答（会增加等待时间）。
+3. 附件上传：支持 PDF/Word/Txt，自动提取文字作为上下文。
+4. 连续对话：软件会自动记忆上下文。
+
+【注意】
+API Key 必须开通 DeepSeek 官方服务。
+联网搜索使用 DuckDuckGo 接口，需确保网络畅通。
+"""
+        messagebox.showinfo("关于", info)
+
+    def append_chat(self, role, text, tag=None):
+        self.chat_display.configure(state="normal")
+        timestamp = datetime.now().strftime("%H:%M")
+        header = "🧑 我" if role == "user" else "🤖 DeepSeek"
+        
+        self.chat_display.insert("end", f"\n{header} ({timestamp}):\n", "header")
+        self.chat_display.insert("end", f"{text}\n", tag if tag else "body")
+        self.chat_display.see("end")
+        self.chat_display.configure(state="disabled")
+
+    def send_message(self):
+        user_input = self.entry_msg.get("0.0", "end").strip()
+        if not user_input: return
+        if not self.client:
+            messagebox.showerror("错误", "请先配置 API Key")
             return
 
-        self.btn_calc.configure(state="disabled")
-        self.status_label.configure(text="正在根据自定义参数计算...")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start()
+        # 1. UI更新
+        self.entry_msg.delete("0.0", "end")
+        self.append_chat("user", user_input)
+        self.btn_send.configure(state="disabled", text="生成中...")
         
-        threading.Thread(target=self.run_math_logic).start()
+        # 隐藏旧的思考框
+        self.thought_frame.grid_forget()
+        self.thought_display.configure(state="normal")
+        self.thought_display.delete("0.0", "end")
+        self.thought_display.configure(state="disabled")
 
-    def run_math_logic(self):
-        try:
-            df = self.df_raw.copy()
-            grade_configs = self.user_configs # 使用用户自定义的配置
+        # 2. 开启线程处理
+        threading.Thread(target=self.process_generation, args=(user_input,), daemon=True).start()
 
-            def calculate_assigned_score(series):
-                series_num = pd.to_numeric(series, errors='coerce')
-                valid = series_num.dropna()
-                if len(valid) == 0: return pd.Series(index=series.index, dtype=float)
-                
-                sorted_scores = valid.sort_values(ascending=False)
-                result = pd.Series(index=valid.index, dtype=float)
-                curr = 0
-                for cfg in grade_configs:
-                    cnt = int(np.round(len(valid) * cfg['percent']))
-                    if cfg['grade'] == 'E': cnt = len(valid) - curr
-                    if cnt <= 0: continue
-                    end = min(curr + cnt, len(valid))
-                    if curr >= end: break
-                    chunk = sorted_scores.iloc[curr:end]
-                    Y2, Y1 = chunk.max(), chunk.min()
-                    T2, T1 = cfg['t_max'], cfg['t_min']
-                    
-                    def linear(Y): return (T2+T1)/2 if Y2==Y1 else T1 + ((Y-Y1)*(T2-T1))/(Y2-Y1)
-                    
-                    result.loc[chunk.index] = chunk.apply(linear)
-                    curr = end
-                return result.round()
+    def process_generation(self, user_input):
+        full_context = ""
+        
+        # A. 处理附件
+        if self.attached_content:
+            full_context += self.attached_content
+            self.attached_content = "" # 消耗掉
+            self.after(0, lambda: self.lbl_file_status.configure(text=""))
 
-            def calc_ranks(dframe, target_col, rank_base_name):
-                yr_rk = f"{rank_base_name}年排"
-                cl_rk = f"{rank_base_name}班排"
-                dframe[yr_rk] = dframe[target_col].rank(ascending=False, method='min')
-                if self.selected_class_col in dframe.columns:
-                    dframe[cl_rk] = dframe.groupby(self.selected_class_col)[target_col].rank(ascending=False, method='min')
-                else:
-                    dframe[cl_rk] = None
-                return yr_rk, cl_rk
-
-            cols_for_raw_total = []    
-            cols_for_final_total = []  
-            output_cols_order = []     
-
-            # 1. 原始科目
-            for sub in self.selected_raw:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                yr_rk, cl_rk = calc_ranks(df, sub, sub)
-                cols_for_raw_total.append(sub)
-                cols_for_final_total.append(sub)
-                output_cols_order.extend([sub, yr_rk, cl_rk])
-
-            # 2. 赋分科目
-            for sub in self.selected_assign:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                assigned_col_name = f"{sub}赋分"
-                df[assigned_col_name] = calculate_assigned_score(df[sub])
-                
-                yr_rk, cl_rk = calc_ranks(df, assigned_col_name, assigned_col_name)
-                
-                cols_for_raw_total.append(sub)            
-                cols_for_final_total.append(assigned_col_name) 
-                output_cols_order.extend([sub, assigned_col_name, yr_rk, cl_rk])
-
-            # 3. 原始总分
-            df["原始总分"] = df[cols_for_raw_total].sum(axis=1, min_count=1)
-            raw_yr_rk, raw_cl_rk = calc_ranks(df, "原始总分", "原始总分")
-            raw_total_group = ["原始总分", raw_yr_rk, raw_cl_rk]
-
-            # 4. 最终总分
-            df["总分"] = df[cols_for_final_total].sum(axis=1, min_count=1)
-            final_yr_rk, final_cl_rk = calc_ranks(df, "总分", "总分")
-            final_total_group = ["总分", final_yr_rk, final_cl_rk]
-
-            df = df.sort_values(final_yr_rk)
-
-            all_generated_cols = set(output_cols_order + raw_total_group + final_total_group)
-            base_info_cols = [c for c in df.columns if c not in all_generated_cols]
+        # B. 处理联网搜索
+        if self.search_var.get():
+            self.after(0, lambda: self.chat_display.configure(state="normal"))
+            self.after(0, lambda: self.chat_display.insert("end", "🔍 正在联网搜索...\n"))
+            self.after(0, lambda: self.chat_display.configure(state="disabled"))
             
-            final_order = base_info_cols + output_cols_order + raw_total_group + final_total_group
-            final_order = [c for c in final_order if c in df.columns]
-            self.df_result = df[final_order]
+            search_res = self.perform_web_search(user_input)
+            if search_res:
+                full_context += search_res
 
-            self.after(0, self.finish_calculation)
+        # C. 组装消息
+        final_prompt = full_context + user_input
+        self.chat_history.append({"role": "user", "content": final_prompt})
+
+        try:
+            # D. 调用 API (流式)
+            response = self.client.chat.completions.create(
+                model=self.config["model"],
+                messages=[
+                    {"role": "system", "content": self.config["system_prompt"]},
+                    *self.chat_history
+                ],
+                stream=True
+            )
+
+            # 准备UI接收流
+            is_reasoning = False
+            ai_content = ""
+            ai_reasoning = ""
+            
+            self.after(0, lambda: self.chat_display.configure(state="normal"))
+            self.after(0, lambda: self.chat_display.insert("end", f"\n🤖 DeepSeek ({datetime.now().strftime('%H:%M')}):\n", "header"))
+            
+            for chunk in response:
+                delta = chunk.choices[0].delta
+                
+                # 1. 处理深度思考 (Reasoning)
+                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    if not is_reasoning:
+                        is_reasoning = True
+                        # 显示思考框
+                        self.after(0, lambda: self.thought_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=5))
+                    
+                    content = delta.reasoning_content
+                    ai_reasoning += content
+                    self.after(0, self.update_textbox, self.thought_display, content)
+
+                # 2. 处理正文
+                if hasattr(delta, 'content') and delta.content:
+                    content = delta.content
+                    ai_content += content
+                    self.after(0, self.update_textbox, self.chat_display, content)
+
+            # 记录历史 (去掉附件和搜索的大段文本，只存核心，或者存全部取决于Token限制)
+            # 这里为了省钱，建议只存用户原始问题，或者精简版
+            # 但为了连续对话准确，暂存全部。
+            self.chat_history.append({"role": "assistant", "content": ai_content})
 
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("计算错误", str(e)))
-            self.after(0, self.stop_loading_ui)
+            self.after(0, lambda: messagebox.showerror("API 错误", str(e)))
+        
+        finally:
+            self.after(0, self.finish_generation)
 
-    def finish_calculation(self):
-        self.stop_loading_ui()
-        self.status_label.configure(text="✅ 计算完成！数据已应用当前赋分标准。")
-        self.btn_export.configure(state="normal", fg_color="#2CC985", text="导出 Excel 结果")
-        messagebox.showinfo("成功", "计算完成！\n请注意：本次计算使用了您在【赋分标准设置】中填写的参数。")
+    def update_textbox(self, widget, text):
+        widget.configure(state="normal")
+        widget.insert("end", text)
+        widget.see("end")
+        widget.configure(state="disabled")
 
-    def stop_loading_ui(self):
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate")
-        self.progressbar.set(1)
-        self.btn_calc.configure(state="normal")
-
-    def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
-        if save_path:
-            try:
-                self.df_result.to_excel(save_path, index=False)
-                messagebox.showinfo("导出成功", f"文件已保存至:\n{save_path}")
-                os.startfile(os.path.dirname(save_path))
-            except Exception as e:
-                messagebox.showerror("保存失败", str(e))
+    def finish_generation(self):
+        self.btn_send.configure(state="normal", text="发送")
+        self.chat_display.configure(state="normal")
+        self.chat_display.insert("end", "\n------------------------------------------------\n")
+        self.chat_display.configure(state="disabled")
 
 if __name__ == "__main__":
-    app = GaokaoApp()
+    app = DeepSeekApp()
     app.mainloop()
