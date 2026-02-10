@@ -1,6 +1,8 @@
 name: Build GongWenFormatter
 
 on:
+  push:
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -8,7 +10,6 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
@@ -16,7 +17,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
@@ -30,7 +31,7 @@ jobs:
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk
 
-    # Windows 构建 (移除 add-data，因为 config.json 会在运行时生成)
+    # Windows 构建 (移除 add-data，修复找不到文件的错误)
     - name: Build Windows
       if: runner.os == 'Windows'
       shell: bash
