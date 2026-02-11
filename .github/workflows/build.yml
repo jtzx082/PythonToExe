@@ -33,8 +33,6 @@ jobs:
             libxcb-keysyms1 \
             libxcb-render-util0 \
             libxkbcommon-x11-0 \
-            fcitx5-frontend-qt6 \
-            libibus-1.0-5 \
             libqt6gui6 \
             qml-module-qtquick-controls2
 
@@ -44,22 +42,7 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Patch PySide6 with fcitx5 plugin (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          # 尝试定位并拷贝 fcitx5 插件 (如果系统有)
-          PYSIDE_QT_PLUGINS=$(python -c "import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__), 'Qt', 'plugins'))")
-          TARGET_DIR="$PYSIDE_QT_PLUGINS/platforminputcontexts"
-          mkdir -p "$TARGET_DIR"
-
-          FCITX_SO=$(find /usr/lib -name "libfcitx5platforminputcontextplugin.so" 2>/dev/null | head -n 1)
-          if [ -n "$FCITX_SO" ]; then
-            echo "Found fcitx5 plugin at: $FCITX_SO"
-            cp "$FCITX_SO" "$TARGET_DIR/"
-          else
-            echo "Warning: fcitx5 plugin not found, skipping patch."
-          fi
+      # === 注意：已删除 Patch 步骤，防止版本不兼容 ===
 
       - name: Build with PyInstaller
         shell: bash
@@ -67,7 +50,7 @@ jobs:
           rm -rf build dist || true
           
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            # Linux 使用 --onedir 模式，确保文件夹结构清晰，方便手动排查插件
+            # Linux 使用 --onedir 模式
             pyinstaller --noconfirm --clean --onedir --windowed --name PaperWriter main.py
           else
             # Windows/macOS 使用单文件模式
