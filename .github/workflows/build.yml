@@ -1,7 +1,7 @@
 name: Build Desktop App (Win/macOS/Linux)
 
 on:
-  workflow_dispatch: # 已取消自动触发，仅保留手动运行
+  workflow_dispatch: # 仅手动运行
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: 'pip' # 开启缓存加速后续运行
+          cache: 'pip'
 
       - name: Install Linux runtime deps (Ubuntu)
         if: runner.os == 'Linux'
@@ -65,12 +65,10 @@ jobs:
       - name: Build with PyInstaller
         shell: bash
         run: |
-          # 统一清理
           rm -rf build dist || true
           
-          # 根据系统执行打包
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            # Linux 环境下为了确保插件被正确包含，建议使用 --onedir 并手动检查
+            # Linux 使用 --onedir 模式以确保动态库加载正常
             pyinstaller --noconfirm --clean --onedir --windowed --name PaperWriter main.py
           else
             # Windows/macOS 使用单文件模式
