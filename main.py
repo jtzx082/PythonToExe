@@ -46,7 +46,7 @@ def md_to_plain(text: str) -> str:
 def save_as_docx(filepath: str, title: str, md_text: str):
     """将 Markdown 文本转换并保存为 Word 文档（纯文本，含标题层级）"""
     from docx import Document
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
@@ -54,14 +54,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     # ── 文档标题 ──
     title_para = doc.add_heading(title, level=0)
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    # ── 作者信息 ──
-    meta = doc.add_paragraph()
-    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = meta.add_run(f"作者：{APP_AUTHOR}    生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    run.font.size = Pt(10)
-    run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
-    doc.add_paragraph()  # 空行
+    doc.add_paragraph()  # 标题后空行
 
     # ── 逐行解析 Markdown 转为 Word 格式 ──
     for line in md_text.splitlines():
@@ -966,31 +959,41 @@ class AIWriterApp(ctk.CTk):
         if not text:
             messagebox.showinfo("提示", "暂无可保存的内容。")
             return
+        # ── 先弹出格式选择对话框 ──────────────────────────────────────────
+        fmt = self._ask_save_format()
+        if fmt is None:
+            return   # 用户取消
+
         title = self._title_entry.get().strip() or "文稿"
         ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        fmt_cfg = {
+            "docx": (".docx", "Word 文档 (*.docx)",  "*.docx"),
+            "txt":  (".txt",  "纯文本 (*.txt)",       "*.txt"),
+            "md":   (".md",   "Markdown (*.md)",      "*.md"),
+        }
+        def_ext, ftype_name, ftype_glob = fmt_cfg[fmt]
+
         fp = filedialog.asksaveasfilename(
-            defaultextension=".docx",
-            filetypes=[
-                ("Word 文档 (*.docx)",  "*.docx"),
-                ("纯文本 (*.txt)",      "*.txt"),
-                ("Markdown (*.md)",     "*.md"),
-                ("所有文件",            "*.*"),
-            ],
+            defaultextension=def_ext,
+            filetypes=[(ftype_name, ftype_glob), ("所有文件", "*.*")],
             initialfile=f"{title}_{ts}",
             title="保存文稿",
         )
         if not fp:
             return
+
+        # 确保文件扩展名正确（Linux 下 tkinter 有时不自动追加）
+        if not fp.lower().endswith(def_ext):
+            fp += def_ext
+
         try:
-            ext = os.path.splitext(fp)[1].lower()
-            if ext == ".docx":
+            if fmt == "docx":
                 save_as_docx(fp, title, text)
-            elif ext == ".txt":
-                # 纯文本：去除 Markdown 格式符号
+            elif fmt == "txt":
                 with open(fp, "w", encoding="utf-8") as f:
                     f.write(md_to_plain(text))
             else:
-                # .md 或其他：保留原始 Markdown
                 with open(fp, "w", encoding="utf-8") as f:
                     f.write(text)
             self._set_status(f"✅  已保存：{os.path.basename(fp)}")
@@ -1001,6 +1004,49 @@ class AIWriterApp(ctk.CTk):
             )
         except Exception as exc:
             messagebox.showerror("保存失败", str(exc))
+
+    def _ask_save_format(self):
+        """弹出格式选择窗口，返回 'docx'/'txt'/'md' 或 None（取消）"""
+        result = [None]
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("选择保存格式")
+        dlg.geometry("340x200")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.focus_set()
+        # 居中于主窗口
+        self.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width()  - 340) // 2
+        y = self.winfo_y() + (self.winfo_height() - 200) // 2
+        dlg.geometry(f"+{x}+{y}")
+
+        ctk.CTkLabel(dlg, text="请选择文件保存格式",
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(18, 12))
+
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=24)
+
+        for fmt, icon, label in [
+            ("docx", "📝", "Word 文档 (.docx)"),
+            ("txt",  "📄", "纯文本 (.txt)"),
+            ("md",   "🔖", "Markdown (.md)"),
+        ]:
+            ctk.CTkButton(
+                btn_frame, text=f"{icon}  {label}",
+                height=36, anchor="w",
+                font=ctk.CTkFont(size=13),
+                command=lambda f=fmt: (result.__setitem__(0, f), dlg.destroy()),
+            ).pack(fill="x", pady=3)
+
+        ctk.CTkButton(
+            dlg, text="取消", height=32,
+            fg_color="transparent", border_width=1,
+            font=ctk.CTkFont(size=12),
+            command=dlg.destroy,
+        ).pack(pady=(8, 0))
+
+        dlg.wait_window()
+        return result[0]
 
 
 # ── 入口 ────────────────────────────────────────────────────────────────────
