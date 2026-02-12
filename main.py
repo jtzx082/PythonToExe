@@ -44,17 +44,42 @@ def md_to_plain(text: str) -> str:
 
 
 def save_as_docx(filepath: str, title: str, md_text: str):
-    """将 Markdown 文本转换并保存为 Word 文档（纯文本，含标题层级）"""
+    """将 Markdown 文本转换并保存为 Word 文档（标准公文格式）"""
     from docx import Document
-    from docx.shared import Pt
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, Mm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+    from docx.oxml.ns import qn
 
     doc = Document()
 
-    # ── 文档标题 ──
-    title_para = doc.add_heading(title, level=0)
+    # ── 设置页面格式（A4纸，公文标准边距）──
+    section = doc.sections[0]
+    section.page_height = Mm(297)      # A4 高度
+    section.page_width = Mm(210)       # A4 宽度
+    section.top_margin = Mm(37)        # 上边距 37mm
+    section.bottom_margin = Mm(35)     # 下边距 35mm
+    section.left_margin = Mm(28)       # 左边距 28mm
+    section.right_margin = Mm(26)      # 右边距 26mm
+
+    # ── 文档标题（2号小标宋，居中，无下划线）──
+    title_para = doc.add_paragraph()
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    doc.add_paragraph()  # 标题后空行
+    title_run = title_para.add_run(title)
+    
+    # 设置标题字体：2号小标宋（22磅）
+    title_run.font.size = Pt(22)
+    title_run.font.name = '小标宋体'
+    title_run._element.rPr.rFonts.set(qn('w:eastAsia'), '小标宋体')
+    title_run.font.bold = False
+    title_run.font.color.rgb = RGBColor(0, 0, 0)
+    
+    # 设置标题段落格式（28磅行距）
+    title_para.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    title_para.paragraph_format.line_spacing = Pt(28)
+    
+    # 标题后空两行
+    doc.add_paragraph()
+    doc.add_paragraph()
 
     # ── 逐行解析 Markdown 转为 Word 格式 ──
     for line in md_text.splitlines():
@@ -62,46 +87,82 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
         # 水平线
         if re.match(r"^[-*_]{3,}\s*$", stripped):
-            doc.add_paragraph("─" * 40)
+            p = doc.add_paragraph("─" * 40)
+            _set_paragraph_format(p, font_name='仿宋_GB2312', font_size=Pt(16))
             continue
 
-        # 标题级别
+        # 公文层级标题识别
+        official_heading = _match_official_heading(stripped)
+        if official_heading:
+            level, heading_text = official_heading
+            p = doc.add_paragraph()
+            run = p.add_run(heading_text)
+            
+            # 根据层级设置字体（3号 = 16磅）
+            if level == 1:  # 一、 → 3号黑体
+                _set_run_format(run, font_name='黑体', font_size=Pt(16), bold=True)
+            elif level == 2:  # （一） → 3号楷体_GB2312
+                _set_run_format(run, font_name='楷体_GB2312', font_size=Pt(16))
+            else:  # 1. 或 （1） → 3号仿宋
+                _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
+            
+            _set_paragraph_format(p, font_name='仿宋_GB2312', font_size=Pt(16))
+            continue
+
+        # Markdown 标题级别（#）
         heading_match = re.match(r"^(#{1,6})\s+(.*)", stripped)
         if heading_match:
             level = len(heading_match.group(1))
             heading_text = _strip_inline(heading_match.group(2))
-            doc.add_heading(heading_text, level=min(level, 4))
+            p = doc.add_paragraph()
+            run = p.add_run(heading_text)
+            
+            # 一级标题用黑体，其他用仿宋
+            if level == 1:
+                _set_run_format(run, font_name='黑体', font_size=Pt(16), bold=True)
+            else:
+                _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16), bold=True)
+            
+            _set_paragraph_format(p, font_name='仿宋_GB2312', font_size=Pt(16))
             continue
 
         # 有序列表
         ol_match = re.match(r"^\s*\d+\.\s+(.*)", stripped)
         if ol_match:
             p = doc.add_paragraph(style="List Number")
-            p.add_run(_strip_inline(ol_match.group(1)))
+            run = p.add_run(_strip_inline(ol_match.group(1)))
+            _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋_GB2312', font_size=Pt(16))
             continue
 
         # 无序列表
         ul_match = re.match(r"^\s*[-*+]\s+(.*)", stripped)
         if ul_match:
             p = doc.add_paragraph(style="List Bullet")
-            p.add_run(_strip_inline(ul_match.group(1)))
+            run = p.add_run(_strip_inline(ul_match.group(1)))
+            _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋_GB2312', font_size=Pt(16))
             continue
 
         # 引用块
         if stripped.startswith(">"):
             p = doc.add_paragraph()
             p.paragraph_format.left_indent = Pt(24)
-            p.add_run(_strip_inline(re.sub(r"^>+\s?", "", stripped)))
+            run = p.add_run(_strip_inline(re.sub(r"^>+\s?", "", stripped)))
+            _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋_GB2312', font_size=Pt(16))
             continue
 
         # 空行
         if not stripped:
-            doc.add_paragraph()
+            p = doc.add_paragraph()
+            _set_paragraph_format(p, font_name='仿宋_GB2312', font_size=Pt(16))
             continue
 
-        # 普通段落（处理行内格式）
+        # 普通段落（3号仿宋，处理行内格式）
         p = doc.add_paragraph()
         _add_inline_runs(p, stripped)
+        _set_paragraph_format(p, font_name='仿宋_GB2312', font_size=Pt(16))
 
     doc.save(filepath)
 
@@ -117,28 +178,87 @@ def _strip_inline(text: str) -> str:
 
 def _add_inline_runs(paragraph, text: str):
     """解析行内粗体/斜体，为 Word 段落添加格式化 run"""
+    from docx.shared import Pt
+    from docx.oxml.ns import qn
+    
     # 简单状态机：识别 **bold** 和 *italic*
     pattern = re.compile(r"(\*{1,3}[^*]+\*{1,3}|_{1,3}[^_]+_{1,3}|`[^`]+`)")
     last = 0
     for m in pattern.finditer(text):
         if m.start() > last:
-            paragraph.add_run(text[last:m.start()])
+            run = paragraph.add_run(text[last:m.start()])
+            _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
         token = m.group()
         if token.startswith("***") or token.startswith("___"):
             run = paragraph.add_run(token[3:-3])
             run.bold, run.italic = True, True
+            _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
         elif token.startswith("**") or token.startswith("__"):
             run = paragraph.add_run(token[2:-2])
             run.bold = True
+            _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
         elif token.startswith("*") or token.startswith("_"):
             run = paragraph.add_run(token[1:-1])
             run.italic = True
+            _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
         elif token.startswith("`"):
             run = paragraph.add_run(token[1:-1])
             run.font.name = "Courier New"
         last = m.end()
     if last < len(text):
-        paragraph.add_run(text[last:])
+        run = paragraph.add_run(text[last:])
+        _set_run_format(run, font_name='仿宋_GB2312', font_size=Pt(16))
+
+
+def _match_official_heading(text: str):
+    """识别公文层级标题格式，返回 (level, heading_text) 或 None
+    
+    公文层级：
+    - 第一层："一、""二、""三、"等 → level 1
+    - 第二层："（一）""（二）""（三）"等 → level 2
+    - 第三层："1.""2.""3."等 → level 3
+    - 第四层："（1）""（2）""（3）"等 → level 4
+    """
+    # 第一层：一、二、三、...
+    if re.match(r"^[一二三四五六七八九十百千]+[、]\s*", text):
+        return (1, text)
+    
+    # 第二层：（一）（二）（三）...
+    if re.match(r"^[（(][一二三四五六七八九十百千]+[）)]\s*", text):
+        return (2, text)
+    
+    # 第三层：1. 2. 3. ...（已在主函数中通过有序列表处理，这里作为备用）
+    if re.match(r"^\d+[.、]\s+", text):
+        return (3, text)
+    
+    # 第四层：（1）（2）（3）...
+    if re.match(r"^[（(]\d+[）)]\s*", text):
+        return (4, text)
+    
+    return None
+
+
+def _set_run_format(run, font_name='仿宋_GB2312', font_size=None, bold=False):
+    """设置文本运行的字体格式"""
+    from docx.oxml.ns import qn
+    from docx.shared import RGBColor
+    
+    run.font.name = font_name
+    run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
+    if font_size:
+        run.font.size = font_size
+    if bold:
+        run.font.bold = True
+    run.font.color.rgb = RGBColor(0, 0, 0)
+
+
+def _set_paragraph_format(paragraph, font_name='仿宋_GB2312', font_size=None):
+    """设置段落格式：28磅固定行距"""
+    from docx.enum.text import WD_LINE_SPACING
+    from docx.shared import Pt
+    
+    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    paragraph.paragraph_format.line_spacing = Pt(28)
 
 
 # ── 主题配置 ────────────────────────────────────────────────────────────────
