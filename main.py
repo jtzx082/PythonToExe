@@ -10,7 +10,143 @@ from tkinter import filedialog, messagebox
 import threading
 import json
 import os
+import re
 from datetime import datetime
+
+
+# ── Markdown 转纯文本工具 ────────────────────────────────────────────────────
+def md_to_plain(text: str) -> str:
+    """将 Markdown 文本转换为干净的纯文本"""
+    # 删除代码块
+    text = re.sub(r"```[\s\S]*?```", lambda m: m.group().replace("```", "").strip(), text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    # 标题：去掉 # 前缀，保留文字
+    text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
+    # 粗体 / 斜体
+    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
+    text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
+    # 链接 [text](url) → text
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    # 图片 ![alt](url) → alt
+    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    # 引用块
+    text = re.sub(r"^>+\s?", "", text, flags=re.MULTILINE)
+    # 有序 / 无序列表符号
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+    # 水平分割线
+    text = re.sub(r"^[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)
+    # HTML 标签
+    text = re.sub(r"<[^>]+>", "", text)
+    # 清理多余空行（超过2个连续空行合并为1个）
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def save_as_docx(filepath: str, title: str, md_text: str):
+    """将 Markdown 文本转换并保存为 Word 文档（纯文本，含标题层级）"""
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+
+    # ── 文档标题 ──
+    title_para = doc.add_heading(title, level=0)
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # ── 作者信息 ──
+    meta = doc.add_paragraph()
+    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = meta.add_run(f"作者：{APP_AUTHOR}    生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+    doc.add_paragraph()  # 空行
+
+    # ── 逐行解析 Markdown 转为 Word 格式 ──
+    for line in md_text.splitlines():
+        stripped = line.rstrip()
+
+        # 水平线
+        if re.match(r"^[-*_]{3,}\s*$", stripped):
+            doc.add_paragraph("─" * 40)
+            continue
+
+        # 标题级别
+        heading_match = re.match(r"^(#{1,6})\s+(.*)", stripped)
+        if heading_match:
+            level = len(heading_match.group(1))
+            heading_text = _strip_inline(heading_match.group(2))
+            doc.add_heading(heading_text, level=min(level, 4))
+            continue
+
+        # 有序列表
+        ol_match = re.match(r"^\s*\d+\.\s+(.*)", stripped)
+        if ol_match:
+            p = doc.add_paragraph(style="List Number")
+            p.add_run(_strip_inline(ol_match.group(1)))
+            continue
+
+        # 无序列表
+        ul_match = re.match(r"^\s*[-*+]\s+(.*)", stripped)
+        if ul_match:
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run(_strip_inline(ul_match.group(1)))
+            continue
+
+        # 引用块
+        if stripped.startswith(">"):
+            p = doc.add_paragraph()
+            p.paragraph_format.left_indent = Pt(24)
+            p.add_run(_strip_inline(re.sub(r"^>+\s?", "", stripped)))
+            continue
+
+        # 空行
+        if not stripped:
+            doc.add_paragraph()
+            continue
+
+        # 普通段落（处理行内格式）
+        p = doc.add_paragraph()
+        _add_inline_runs(p, stripped)
+
+    doc.save(filepath)
+
+
+def _strip_inline(text: str) -> str:
+    """去掉行内 Markdown 符号，只保留文字"""
+    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
+    text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    return text
+
+
+def _add_inline_runs(paragraph, text: str):
+    """解析行内粗体/斜体，为 Word 段落添加格式化 run"""
+    # 简单状态机：识别 **bold** 和 *italic*
+    pattern = re.compile(r"(\*{1,3}[^*]+\*{1,3}|_{1,3}[^_]+_{1,3}|`[^`]+`)")
+    last = 0
+    for m in pattern.finditer(text):
+        if m.start() > last:
+            paragraph.add_run(text[last:m.start()])
+        token = m.group()
+        if token.startswith("***") or token.startswith("___"):
+            run = paragraph.add_run(token[3:-3])
+            run.bold, run.italic = True, True
+        elif token.startswith("**") or token.startswith("__"):
+            run = paragraph.add_run(token[2:-2])
+            run.bold = True
+        elif token.startswith("*") or token.startswith("_"):
+            run = paragraph.add_run(token[1:-1])
+            run.italic = True
+        elif token.startswith("`"):
+            run = paragraph.add_run(token[1:-1])
+            run.font.name = "Courier New"
+        last = m.end()
+    if last < len(text):
+        paragraph.add_run(text[last:])
+
 
 # ── 主题配置 ────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -18,7 +154,8 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.0.0"
+APP_VERSION = "v2.1.0"
+APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
 PROVIDERS = {
@@ -282,7 +419,7 @@ class AIWriterApp(ctk.CTk):
         self._doc_type = self._cfg.get("last_type", "学术论文")
         self._type_btns = {}
 
-        self.title(f"✍️  AI 写作助手  {APP_VERSION}")
+        self.title(f"✍️  AI 写作助手  {APP_VERSION}  ·  作者：{APP_AUTHOR}")
         self.geometry("1340x840")
         self.minsize(1000, 640)
 
@@ -443,7 +580,26 @@ class AIWriterApp(ctk.CTk):
             fg_color=("#1A4F8A", "#153D6F"),
             hover_color=("#2B6CB0", "#1A4F8A"),
             command=self._save_settings,
-        ).grid(row=23, column=0, padx=8, pady=(4, 24), sticky="ew")
+        ).grid(row=23, column=0, padx=8, pady=(4, 12), sticky="ew")
+
+        # ── 作者信息 ──────────────────────────────────────────────────────
+        ctk.CTkFrame(sb, height=1, fg_color="#1E2E50").grid(
+            row=24, column=0, sticky="ew", padx=12, pady=(0, 8))
+        author_frame = ctk.CTkFrame(sb, fg_color="transparent")
+        author_frame.grid(row=25, column=0, sticky="ew", padx=12, pady=(0, 20))
+        author_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            author_frame,
+            text=f"✍️  {APP_VERSION}",
+            font=ctk.CTkFont(size=10),
+            text_color="#3A5A8A",
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            author_frame,
+            text=f"© Author: {APP_AUTHOR}",
+            font=ctk.CTkFont(size=10),
+            text_color="#3A5A8A",
+        ).grid(row=1, column=0, sticky="w")
 
     # ── 主区域 ──────────────────────────────────────────────────────────────
     def _build_main(self):
@@ -813,22 +969,38 @@ class AIWriterApp(ctk.CTk):
         title = self._title_entry.get().strip() or "文稿"
         ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
         fp = filedialog.asksaveasfilename(
-            defaultextension=".md",
+            defaultextension=".docx",
             filetypes=[
-                ("Markdown 文件 (*.md)", "*.md"),
-                ("纯文本 (*.txt)",       "*.txt"),
-                ("所有文件",             "*.*"),
+                ("Word 文档 (*.docx)",  "*.docx"),
+                ("纯文本 (*.txt)",      "*.txt"),
+                ("Markdown (*.md)",     "*.md"),
+                ("所有文件",            "*.*"),
             ],
             initialfile=f"{title}_{ts}",
             title="保存文稿",
         )
-        if fp:
-            try:
+        if not fp:
+            return
+        try:
+            ext = os.path.splitext(fp)[1].lower()
+            if ext == ".docx":
+                save_as_docx(fp, title, text)
+            elif ext == ".txt":
+                # 纯文本：去除 Markdown 格式符号
+                with open(fp, "w", encoding="utf-8") as f:
+                    f.write(md_to_plain(text))
+            else:
+                # .md 或其他：保留原始 Markdown
                 with open(fp, "w", encoding="utf-8") as f:
                     f.write(text)
-                self._set_status(f"✅  已保存：{os.path.basename(fp)}")
-            except Exception as exc:
-                messagebox.showerror("保存失败", str(exc))
+            self._set_status(f"✅  已保存：{os.path.basename(fp)}")
+        except ImportError:
+            messagebox.showerror(
+                "缺少依赖",
+                "保存 Word 文档需要安装 python-docx：\n\npip install python-docx"
+            )
+        except Exception as exc:
+            messagebox.showerror("保存失败", str(exc))
 
 
 # ── 入口 ────────────────────────────────────────────────────────────────────
