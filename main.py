@@ -42,7 +42,7 @@ class WritingAssistant(ctk.CTk):
         self.model_combo.set("gpt-4o-mini")
         self.model_combo.grid(row=0, column=5, padx=5, pady=5)
 
-        ctk.CTkButton(api_frame, text=""保存 API 设置", command=self.save_api).grid(row=0, column=6, padx=10, pady=5)
+        ctk.CTkButton(api_frame, text="保存 API 设置", command=self.save_api).grid(row=0, column=6, padx=10, pady=5)
 
         # === 输入区 ===
         input_frame = ctk.CTkFrame(self)
