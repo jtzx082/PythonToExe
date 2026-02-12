@@ -5,10 +5,8 @@ import sys
 import re
 from tkinter import filedialog, messagebox
 from docx import Document
-from docx.enum.style import WD_STYLE_TYPE
-from docx.shared import Pt
 
-# Onefile 模式資源路徑修復（Linux 特別重要）
+# Onefile 模式资源路径修复（Linux 特别重要）
 if getattr(sys, 'frozen', False):
     application_path = os.path.dirname(sys.executable)
     os.chdir(application_path)
@@ -19,7 +17,7 @@ ctk.set_default_color_theme("blue")
 class WritingAssistant(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("AI 寫作助手 Pro")
+        self.title("AI 写作助手 Pro")
         self.geometry("1350x1050")
         self.client = None
         self.model = "gpt-4o-mini"
@@ -27,7 +25,7 @@ class WritingAssistant(ctk.CTk):
         self.create_widgets()
 
     def create_widgets(self):
-        # API 設置區
+        # API 设置区
         api_frame = ctk.CTkFrame(self)
         api_frame.pack(pady=12, padx=20, fill="x")
 
@@ -52,78 +50,78 @@ class WritingAssistant(ctk.CTk):
         self.model_combo.set("gpt-4o-mini")
         self.model_combo.grid(row=0, column=5, padx=6, pady=8)
 
-        ctk.CTkButton(api_frame, text="保存 API 設置", command=self.save_api).grid(row=0, column=6, padx=12, pady=8)
+        ctk.CTkButton(api_frame, text="保存 API 设置", command=self.save_api).grid(row=0, column=6, padx=12, pady=8)
 
-        ctk.CTkLabel(api_frame, text="（選擇 DeepSeek 會自動切換 Base URL）", 
+        ctk.CTkLabel(api_frame, text="（选择 DeepSeek 会自动切换 Base URL）",
                      text_color="gray").grid(row=1, column=2, columnspan=4, sticky="w", padx=6, pady=4)
 
-        # 輸入區
+        # 输入区
         input_frame = ctk.CTkFrame(self)
         input_frame.pack(pady=10, padx=20, fill="x")
 
-        ctk.CTkLabel(input_frame, text="寫作類型:").grid(row=0, column=0, padx=6, pady=8, sticky="w")
+        ctk.CTkLabel(input_frame, text="写作类型:").grid(row=0, column=0, padx=6, pady=8, sticky="w")
         self.type_combo = ctk.CTkComboBox(input_frame, values=[
-            "期刊論文", "項目計劃", "個人反思", "案例分析", "工作總結", "自定義"
+            "期刊论文", "项目计划", "个人反思", "案例分析", "工作总结", "自定义"
         ], command=self.toggle_custom_prompt)
-        self.type_combo.set("期刊論文")
+        self.type_combo.set("期刊论文")
         self.type_combo.grid(row=0, column=1, padx=6, pady=8)
 
-        ctk.CTkLabel(input_frame, text="題目/主題:").grid(row=0, column=2, padx=6, pady=8, sticky="w")
+        ctk.CTkLabel(input_frame, text="题目/主题:").grid(row=0, column=2, padx=6, pady=8, sticky="w")
         self.title_entry = ctk.CTkEntry(input_frame, width=440)
         self.title_entry.grid(row=0, column=3, padx=6, pady=8)
 
-        ctk.CTkLabel(input_frame, text="目標字數:").grid(row=0, column=4, padx=6, pady=8, sticky="w")
-        self.word_count_entry = ctk.CTkEntry(input_frame, width=130, placeholder_text="約6000字")
+        ctk.CTkLabel(input_frame, text="目标字数:").grid(row=0, column=4, padx=6, pady=8, sticky="w")
+        self.word_count_entry = ctk.CTkEntry(input_frame, width=130, placeholder_text="约6000字")
         self.word_count_entry.grid(row=0, column=5, padx=6, pady=8)
 
-        ctk.CTkButton(input_frame, text="生成大綱", command=self.generate_outline).grid(row=0, column=6, padx=12, pady=8)
+        ctk.CTkButton(input_frame, text="生成大纲", command=self.generate_outline).grid(row=0, column=6, padx=12, pady=8)
 
-        # 額外要求區
+        # 额外要求区
         extra_frame = ctk.CTkFrame(self)
         extra_frame.pack(pady=10, padx=20, fill="x")
-        ctk.CTkLabel(extra_frame, text="額外內容要求（可選）:").pack(anchor="w", padx=10, pady=4)
+        ctk.CTkLabel(extra_frame, text="额外内容要求（可选）:").pack(anchor="w", padx=10, pady=4)
         self.extra_content = ctk.CTkTextbox(extra_frame, height=65)
         self.extra_content.pack(fill="x", padx=10, pady=4)
 
-        ctk.CTkLabel(extra_frame, text="額外格式要求（可選）:").pack(anchor="w", padx=10, pady=4)
+        ctk.CTkLabel(extra_frame, text="额外格式要求（可选）:").pack(anchor="w", padx=10, pady=4)
         self.extra_format = ctk.CTkTextbox(extra_frame, height=65)
         self.extra_format.pack(fill="x", padx=10, pady=4)
 
-        # 參考文獻
+        # 参考文献
         refs_frame = ctk.CTkFrame(self)
         refs_frame.pack(pady=10, padx=20, fill="x")
-        ctk.CTkLabel(refs_frame, text="附加參考文獻或材料（可選）:").pack(anchor="w", padx=10, pady=4)
+        ctk.CTkLabel(refs_frame, text="附加参考文献或材料（可选）:").pack(anchor="w", padx=10, pady=4)
         self.refs_text = ctk.CTkTextbox(refs_frame, height=90)
         self.refs_text.pack(fill="x", padx=10, pady=4)
 
-        # 大綱區
+        # 大纲区
         outline_frame = ctk.CTkFrame(self)
         outline_frame.pack(pady=10, padx=20, fill="both", expand=True)
         btn_frame1 = ctk.CTkFrame(outline_frame)
         btn_frame1.pack(fill="x", pady=6)
-        ctk.CTkLabel(btn_frame1, text="大綱（可直接編輯）:").pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame1, text="清空大綱", command=lambda: self.outline_text.delete("1.0", "end")).pack(side="right", padx=10)
+        ctk.CTkLabel(btn_frame1, text="大纲（可直接编辑）:").pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame1, text="清空大纲", command=lambda: self.outline_text.delete("1.0", "end")).pack(side="right", padx=10)
         self.outline_text = ctk.CTkTextbox(outline_frame)
         self.outline_text.pack(fill="both", expand=True, padx=10, pady=6)
-        ctk.CTkButton(outline_frame, text="根據大綱生成全文", command=self.generate_full).pack(pady=10)
+        ctk.CTkButton(outline_frame, text="根据大纲生成全文", command=self.generate_full).pack(pady=10)
 
-        # 結果區
+        # 结果区
         result_frame = ctk.CTkFrame(self)
         result_frame.pack(pady=10, padx=20, fill="both", expand=True)
         btn_frame2 = ctk.CTkFrame(result_frame)
         btn_frame2.pack(fill="x", pady=6)
-        ctk.CTkLabel(btn_frame2, text="生成結果:").pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame2, text="清空結果", command=lambda: self.result_text.delete("1.0", "end")).pack(side="right", padx=6)
-        ctk.CTkButton(btn_frame2, text="導出 Word（純文本）", command=self.export_word).pack(side="right", padx=6)
-        ctk.CTkButton(btn_frame2, text="導出 Markdown", command=self.export_md).pack(side="right", padx=6)
-        ctk.CTkButton(btn_frame2, text="導出 TXT", command=self.export_txt).pack(side="right", padx=6)
+        ctk.CTkLabel(btn_frame2, text="生成结果:").pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame2, text="清空结果", command=lambda: self.result_text.delete("1.0", "end")).pack(side="right", padx=6)
+        ctk.CTkButton(btn_frame2, text="导出 Word（纯文本）", command=self.export_word).pack(side="right", padx=6)
+        ctk.CTkButton(btn_frame2, text="导出 Markdown", command=self.export_md).pack(side="right", padx=6)
+        ctk.CTkButton(btn_frame2, text="导出 TXT", command=self.export_txt).pack(side="right", padx=6)
 
         self.result_text = ctk.CTkTextbox(result_frame)
         self.result_text.pack(fill="both", expand=True, padx=10, pady=6)
 
-        # 自定義提示詞區
+        # 自定义提示词区
         self.custom_prompt = ctk.CTkTextbox(self, height=110)
-        self.custom_prompt.insert("1.0", "在此輸入你的詳細寫作要求與結構...")
+        self.custom_prompt.insert("1.0", "在此输入你的详细写作要求与结构...")
         self.toggle_custom_prompt(self.type_combo.get())
 
     def on_model_change(self, choice):
@@ -142,7 +140,7 @@ class WritingAssistant(ctk.CTk):
             self.url_entry.insert(0, "https://api.openai.com/v1")
 
     def toggle_custom_prompt(self, choice):
-        if choice == "自定義":
+        if choice == "自定义":
             self.custom_prompt.pack(pady=10, padx=20, fill="x")
         else:
             self.custom_prompt.pack_forget()
@@ -151,33 +149,33 @@ class WritingAssistant(ctk.CTk):
         api_key = self.key_entry.get().strip()
         base_url = self.url_entry.get().strip() or None
         if not api_key:
-            messagebox.showerror("錯誤", "請填寫 API Key")
+            messagebox.showerror("错误", "请填写 API Key")
             return
         try:
             self.client = OpenAI(api_key=api_key, base_url=base_url)
             self.model = self.model_combo.get()
-            messagebox.showinfo("成功", f"API 設置保存成功\n模型: {self.model}")
+            messagebox.showinfo("成功", f"API 设置保存成功\n模型: {self.model}")
         except Exception as e:
-            messagebox.showerror("錯誤", f"API 初始化失敗：{str(e)}")
+            messagebox.showerror("错误", f"API 初始化失败：{str(e)}")
 
     def generate_outline(self):
         if not self.client:
-            messagebox.showerror("錯誤", "請先保存 API 設置")
+            messagebox.showerror("错误", "请先保存 API 设置")
             return
         title = self.title_entry.get().strip()
         if not title:
-            messagebox.showwarning("提示", "請填寫題目/主題")
+            messagebox.showwarning("提示", "请填写题目/主题")
             return
         prompt = self.build_prompt(self.type_combo.get(), title, is_outline=True)
         self.call_api(prompt, self.outline_text, max_tokens=2500)
 
     def generate_full(self):
         if not self.client:
-            messagebox.showerror("錯誤", "請先保存 API 設置")
+            messagebox.showerror("错误", "请先保存 API 设置")
             return
         outline = self.outline_text.get("1.0", "end").strip()
         if not outline:
-            messagebox.showwarning("提示", "大綱為空")
+            messagebox.showwarning("提示", "大纲为空")
             return
 
         prompt = self.build_prompt(
@@ -189,13 +187,13 @@ class WritingAssistant(ctk.CTk):
             extra_content=self.extra_content.get("1.0", "end").strip(),
             extra_format=self.extra_format.get("1.0", "end").strip(),
             word_count=self.word_count_entry.get().strip(),
-            custom=self.custom_prompt.get("1.0", "end").strip() if self.type_combo.get() == "自定義" else None
+            custom=self.custom_prompt.get("1.0", "end").strip() if self.type_combo.get() == "自定义" else None
         )
         self.call_api(prompt, self.result_text, max_tokens=18000)
 
     def call_api(self, prompt, textbox, max_tokens=8000):
         textbox.delete("1.0", "end")
-        textbox.insert("1.0", "正在生成，請稍候...")
+        textbox.insert("1.0", "正在生成，请稍候...")
         self.update_idletasks()
 
         try:
@@ -209,28 +207,28 @@ class WritingAssistant(ctk.CTk):
             textbox.delete("1.0", "end")
             textbox.insert("1.0", content)
         except Exception as e:
-            messagebox.showerror("生成失敗", str(e))
+            messagebox.showerror("生成失败", str(e))
 
     def build_prompt(self, writing_type, title, is_outline, outline=None, refs=None,
                      extra_content=None, extra_format=None, word_count=None, custom=None):
-        refs_part = f"\n\n附加參考材料（請適當引用）：\n{refs}" if refs else ""
-        word_part = f"\n全文嚴格控制在約 {word_count} 字左右（含標點）。" if word_count and word_count.strip().isdigit() else ""
-        content_part = f"\n額外內容要求：{extra_content}" if extra_content else ""
-        format_part = f"\n額外格式要求：{extra_format}" if extra_format else ""
+        refs_part = f"\n\n附加参考材料（请适当引用）：\n{refs}" if refs else ""
+        word_part = f"\n全文严格控制在约 {word_count} 字左右（含标点）。" if word_count and word_count.strip().isdigit() else ""
+        content_part = f"\n额外内容要求：{extra_content}" if extra_content else ""
+        format_part = f"\n额外格式要求：{extra_format}" if extra_format else ""
 
         if is_outline:
-            return f"""你是一位嚴謹的學術/專業寫作助手。
-請嚴格圍繞題目《{title}》生成詳細大綱。
-要求：使用中文，層次清晰，使用 1.  1.1  1.2 等編號，每節給出簡要描述。"""
+            return f"""你是一位严谨的学术/专业写作助手。
+请严格围绕题目《{title}》生成详细大纲。
+要求：使用中文，层次清晰，使用 1.  1.1  1.2 等编号，每节给出简要描述。"""
 
         else:
-            return f"""你是一位嚴謹的學術/專業寫作助手。
-請**嚴格按照**以下要求撰寫完整內容：
+            return f"""你是一位严谨的学术/专业写作助手。
+请**严格按照**以下要求撰写完整内容：
 
-**題目**：{title}
-**寫作類型**：{writing_type}
+**题目**：{title}
+**写作类型**：{writing_type}
 
-**大綱**（必須嚴格遵守，不得增減或改變順序）：
+**大纲**（必须严格遵守，不得增减或改变顺序）：
 {outline}
 
 {word_part}
@@ -238,11 +236,11 @@ class WritingAssistant(ctk.CTk):
 {format_part}
 {refs_part}
 
-核心規則：
-1. 全文必須緊緊圍繞《{title}》展開，絕對不能跑題。
-2. 所有內容都要服務於該題目。
-3. 語言正式、專業、邏輯嚴密。
-4. 嚴格遵循上面給出的大綱結構。"""
+核心规则：
+1. 全文必须紧紧围绕《{title}》展开，绝对不能跑题。
+2. 所有内容都要服务于该题目。
+3. 语言正式、专业、逻辑严密。
+4. 严格遵循上面给出的大纲结构。"""
 
     def clean_markdown(self, text):
         if not text:
@@ -259,7 +257,7 @@ class WritingAssistant(ctk.CTk):
                 cleaned.append("")
                 continue
 
-            # 去除常見 Markdown
+            # 去除常见 Markdown
             line = re.sub(r'^#{1,6}\s*', '', line)
             line = re.sub(r'(\*\*|__)(.+?)\1', r'\2', line)
             line = re.sub(r'(\*|_)(.+?)\1', r'\2', line)
@@ -269,11 +267,11 @@ class WritingAssistant(ctk.CTk):
             if line.startswith('```'):
                 continue
 
-            # 避免連續相同行（重複標題）
+            # 避免连续相同行（重复标题）
             if line == prev:
                 continue
 
-            cleaned.append(orig)  # 保留原始縮進
+            cleaned.append(orig)  # 保留原始缩进
             prev = line
 
         return '\n'.join(cleaned)
@@ -291,9 +289,9 @@ class WritingAssistant(ctk.CTk):
             return
 
         doc = Document()
-        title = self.title_entry.get().strip() or "未命名文檔"
+        title = self.title_entry.get().strip() or "未命名文档"
 
-        # 主標題
+        # 主标题
         doc.add_heading(title, level=1)
 
         clean_text = self.clean_markdown(raw_text)
@@ -315,7 +313,7 @@ class WritingAssistant(ctk.CTk):
                 p.style = 'Normal'
 
         doc.save(file)
-        messagebox.showinfo("導出成功", f"已保存優化後的 Word 文件：\n{file}")
+        messagebox.showinfo("导出成功", f"已保存优化后的 Word 文件：\n{file}")
 
     def export_md(self):
         text = self.result_text.get("1.0", "end").strip()
@@ -324,7 +322,7 @@ class WritingAssistant(ctk.CTk):
         file = filedialog.asksaveasfilename(defaultextension=".md", filetypes=[("Markdown 文件", "*.md")])
         if file:
             with open(file, "w", encoding="utf-8") as f:
-                f.write(f"# {self.title_entry.get().strip() or '未命名文檔'}\n\n{text}")
+                f.write(f"# {self.title_entry.get().strip() or '未命名文档'}\n\n{text}")
             messagebox.showinfo("成功", f"已保存：{file}")
 
     def export_txt(self):
