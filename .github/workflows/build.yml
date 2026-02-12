@@ -1,64 +1,103 @@
-name: Build Desktop App (Win/macOS/Linux)
+name: Build Multi-Platform Application
 
 on:
-  workflow_dispatch: # 仅手动运行
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+        default: '1.0.0'
 
 jobs:
   build:
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-
-    runs-on: ${{ matrix.os }}
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            ext: ''
+          - os: windows-latest
+            platform: windows
+            ext: '.exe'
+          - os: macos-latest
+            platform: macos
+            ext: ''
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: 'pip'
+          python-version: '3.11'
 
-      - name: Install Linux runtime deps (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libxcb-cursor0 \
-            libxcb-xinerama0 \
-            libxcb-icccm4 \
-            libxcb-keysyms1 \
-            libxcb-render-util0 \
-            libxkbcommon-x11-0 \
-            libqt6gui6 \
-            qml-module-qtquick-controls2
+          sudo apt-get install -y python3-tk
+
+      - name: Install system dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install python-tk
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
 
-      # === 注意：已删除 Patch 步骤，防止版本不兼容 ===
-
-      - name: Build with PyInstaller
-        shell: bash
+      - name: Build application
         run: |
-          rm -rf build dist || true
-          
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            # Linux 使用 --onedir 模式
-            pyinstaller --noconfirm --clean --onedir --windowed --name PaperWriter main.py
-          else
-            # Windows/macOS 使用单文件模式
-            pyinstaller --noconfirm --clean --onefile --windowed --name PaperWriter main.py
-          fi
+          pyinstaller --onefile --windowed --name="PaperWriter" \
+            --icon=NONE \
+            --add-data "requirements.txt:." \
+            main.py
 
-      - name: Upload artifact
+      - name: Create release archive (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p release
+          cp dist/PaperWriter release/PaperWriter-${{ github.ref_name || 'dev' }}-linux-x64
+          tar -czf release/PaperWriter-${{ github.ref_name || 'dev' }}-linux-x64.tar.gz -C release PaperWriter-${{ github.ref_name || 'dev' }}-linux-x64
+          rm -rf release/PaperWriter-${{ github.ref_name || 'dev' }}-linux-x64
+
+      - name: Create release archive (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir release
+          copy dist\PaperWriter.exe release\PaperWriter-${{ github.ref_name || 'dev' }}-windows-x64.exe
+          powershell Compress-Archive -Path release\PaperWriter-${{ github.ref_name || 'dev' }}-windows-x64.exe -DestinationPath release\PaperWriter-${{ github.ref_name || 'dev' }}-windows-x64.zip
+          del release\PaperWriter-${{ github.ref_name || 'dev' }}-windows-x64.exe
+
+      - name: Create release archive (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p release
+          cp dist/PaperWriter release/PaperWriter-${{ github.ref_name || 'dev' }}-macos-x64
+          tar -czf release/PaperWriter-${{ github.ref_name || 'dev' }}-macos-x64.tar.gz -C release PaperWriter-${{ github.ref_name || 'dev' }}-macos-x64
+          rm -rf release/PaperWriter-${{ github.ref_name || 'dev' }}-macos-x64
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PaperWriter-${{ runner.os }}
-          path: dist/
+          name: PaperWriter-${{ matrix.platform }}-${{ github.ref_name || 'dev' }}
+          path: release/*
+          retention-days: 30
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
