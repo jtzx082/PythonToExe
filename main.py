@@ -1,406 +1,239 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-期刊论文撰写软件
-支持自动生成大纲、编辑大纲、生成完整文稿
-支持多种文稿类型：论文、计划、反思、案例、总结等
-"""
-
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, filedialog
-import json
-import os
+import customtkinter as ctk
 from openai import OpenAI
-from typing import List, Dict, Optional
-import threading
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from docx import Document
+from docx.shared import Pt
 
+ctk.set_appearance("system")
+ctk.set_default_color_theme("blue")
 
-class PaperWriterApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("智能文稿撰写助手")
-        self.root.geometry("1200x800")
-        self.root.configure(bg='#f0f0f0')
-        
-        # DeepSeek API配置
-        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        self.base_url = "https://api.deepseek.com/v1"
+class WritingAssistant(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("AI 写作助手 - 论文/计划/反思/总结/自定义")
+        self.geometry("1200x900")
         self.client = None
-        
-        # 文稿类型
-        self.document_types = {
-            "学术论文": "学术论文",
-            "工作计划": "工作计划",
-            "反思总结": "反思总结",
-            "案例分析": "案例分析",
-            "工作总结": "工作总结",
-            "自定义": "自定义"
-        }
-        
-        # 当前文稿数据
-        self.current_title = ""
-        self.current_type = "学术论文"
-        self.current_outline = []
-        self.custom_type_description = ""
-        
-        self.setup_ui()
-        self.load_config()
-        
-    def setup_ui(self):
-        """设置用户界面"""
-        # 创建主框架
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # 配置网格权重
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(2, weight=1)
-        
-        # API配置区域
-        api_frame = ttk.LabelFrame(main_frame, text="API配置", padding="10")
-        api_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        api_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(api_frame, text="DeepSeek API Key:").grid(row=0, column=0, padx=(0, 5))
-        self.api_key_entry = ttk.Entry(api_frame, width=50, show="*")
-        self.api_key_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
-        if self.api_key:
-            self.api_key_entry.insert(0, self.api_key)
-        
-        ttk.Button(api_frame, text="保存配置", command=self.save_config).grid(row=0, column=2)
-        
-        # 文稿信息区域
-        info_frame = ttk.LabelFrame(main_frame, text="文稿信息", padding="10")
-        info_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        info_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(info_frame, text="文稿类型:").grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
-        self.type_var = tk.StringVar(value=self.current_type)
-        type_combo = ttk.Combobox(info_frame, textvariable=self.type_var, 
-                                  values=list(self.document_types.keys()), 
-                                  state="readonly", width=15)
-        type_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 20))
-        type_combo.bind("<<ComboboxSelected>>", self.on_type_change)
-        
-        self.custom_type_frame = ttk.Frame(info_frame)
-        self.custom_type_frame.grid(row=0, column=2, sticky=(tk.W, tk.E))
-        ttk.Label(self.custom_type_frame, text="自定义类型描述:").pack(side=tk.LEFT, padx=(0, 5))
-        self.custom_type_entry = ttk.Entry(self.custom_type_frame, width=30)
-        self.custom_type_entry.pack(side=tk.LEFT)
-        
-        ttk.Label(info_frame, text="文稿标题:").grid(row=1, column=0, padx=(0, 5), sticky=tk.W, pady=(10, 0))
-        self.title_entry = ttk.Entry(info_frame, width=60)
-        self.title_entry.grid(row=1, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
-        
-        # 按钮区域
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        
-        ttk.Button(button_frame, text="生成大纲", command=self.generate_outline, 
-                  width=15).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="保存大纲", command=self.save_outline, 
-                  width=15).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="加载大纲", command=self.load_outline, 
-                  width=15).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="开始撰写", command=self.generate_document, 
-                  width=15).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="保存文稿", command=self.save_document, 
-                  width=15).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="清空内容", command=self.clear_all, 
-                  width=15).pack(side=tk.LEFT)
-        
-        # 内容区域（使用Notebook）
-        content_notebook = ttk.Notebook(main_frame)
-        content_notebook.grid(row=2, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(10, 0))
-        
-        # 大纲编辑标签页
-        outline_frame = ttk.Frame(content_notebook, padding="10")
-        content_notebook.add(outline_frame, text="大纲编辑")
-        outline_frame.columnconfigure(0, weight=1)
-        outline_frame.rowconfigure(0, weight=1)
-        
-        self.outline_text = scrolledtext.ScrolledText(outline_frame, wrap=tk.WORD, 
-                                                      font=("Microsoft YaHei", 11))
-        self.outline_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # 文稿预览标签页
-        document_frame = ttk.Frame(content_notebook, padding="10")
-        content_notebook.add(document_frame, text="文稿预览")
-        document_frame.columnconfigure(0, weight=1)
-        document_frame.rowconfigure(0, weight=1)
-        
-        self.document_text = scrolledtext.ScrolledText(document_frame, wrap=tk.WORD, 
-                                                        font=("Microsoft YaHei", 11))
-        self.document_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # 状态栏
-        self.status_var = tk.StringVar(value="就绪")
-        status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
-                               relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E))
-        
-    def on_type_change(self, event=None):
-        """文稿类型改变事件"""
-        self.current_type = self.type_var.get()
-        if self.current_type == "自定义":
-            self.custom_type_frame.grid()
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        # === API 设置区 ===
+        api_frame = ctk.CTkFrame(self)
+        api_frame.pack(pady=10, padx=20, fill="x")
+
+        ctk.CTkLabel(api_frame, text="API Key:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.key_entry = ctk.CTkEntry(api_frame, width=350, show="*")
+        self.key_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        ctk.CTkLabel(api_frame, text="Base URL:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        self.url_entry = ctk.CTkEntry(api_frame, width=300)
+        self.url_entry.grid(row=0, column=3, padx=5, pady=5)
+        self.url_entry.insert(0, "https://api.openai.com/v1")  # 默认 OpenAI
+
+        ctk.CTkLabel(api_frame, text="模型:").grid(row=0, column=4, padx=5, pady=5, sticky="w")
+        self.model_combo = ctk.CTkComboBox(api_frame, width=200, values=[
+            "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo",
+            "claude-3-5-sonnet-20241022", "claude-3-opus-20240229",
+            "llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768",
+            "grok-beta", "deepseek-chat"
+        ])
+        self.model_combo.set("gpt-4o-mini")
+        self.model_combo.grid(row=0, column=5, padx=5, pady=5)
+
+        ctk.CTkButton(api_frame, text=""保存 API 设置", command=self.save_api).grid(row=0, column=6, padx=10, pady=5)
+
+        # === 输入区 ===
+        input_frame = ctk.CTkFrame(self)
+        input_frame.pack(pady=10, padx=20, fill="x")
+
+        ctk.CTkLabel(input_frame, text="写作类型:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.type_combo = ctk.CTkComboBox(input_frame, values=[
+            "期刊论文", "项目计划", "个人反思", "案例分析", "工作总结", "自定义"
+        ], command=self.toggle_custom_prompt)
+        self.type_combo.set("期刊论文")
+        self.type_combo.grid(row=0, column=1, padx=5, pady=5)
+
+        ctk.CTkLabel(input_frame, text="题目/主题:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        self.title_entry = ctk.CTkEntry(input_frame, width=450)
+        self.title_entry.grid(row=0, column=3, padx=5, pady=5)
+
+        ctk.CTkButton(input_frame, text="生成大纲", command=self.generate_outline).grid(row=0, column=4, padx=10, pady=5)
+
+        # 附加参考文献区（可选）
+        refs_frame = ctk.CTkFrame(self)
+        refs_frame.pack(pady=10, padx=20, fill="x")
+        ctk.CTkLabel(refs_frame, text="附加参考文献或材料（可选，会自动引用）:").pack(anchor="w", padx=10)
+        self.refs_text = ctk.CTkTextbox(refs_frame, height=100)
+        self.refs_text.pack(fill="x", padx=10, pady=5)
+
+        # === 大纲区 ===
+        outline_frame = ctk.CTkFrame(self)
+        outline_frame.pack(pady=10, padx=20, fill="both", expand=True)
+
+        btn_frame1 = ctk.CTkFrame(outline_frame)
+        btn_frame1.pack(fill="x", pady=5)
+        ctk.CTkLabel(btn_frame1, text="大纲（可直接编辑）:").pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame1, text="清空大纲", command=lambda: self.outline_text.delete("1.0", "end")).pack(side="right", padx=10)
+
+        self.outline_text = ctk.CTkTextbox(outline_frame)
+        self.outline_text.pack(fill="both", expand=True, padx=10, pady=5)
+
+        ctk.CTkButton(outline_frame, text="根据大纲生成全文", command=self.generate_full).pack(pady=10)
+
+        # === 结果区 ===
+        result_frame = ctk.CTkFrame(self)
+        result_frame.pack(pady=10, padx=20, fill="both", expand=True)
+
+        btn_frame2 = ctk.CTkFrame(result_frame)
+        btn_frame2.pack(fill="x", pady=5)
+        ctk.CTkLabel(btn_frame2, text="生成结果:").pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame2, text="清空结果", command=lambda: self.result_text.delete("1.0", "end")).pack(side="right", padx=5)
+        ctk.CTkButton(btn_frame2, text="导出 Word", command=self.export_word).pack(side="right", padx=5)
+        ctk.CTkButton(btn_frame2, text="导出 Markdown", command=self.export_md).pack(side="right", padx=5)
+        ctk.CTkButton(btn_frame2, text="导出 TXT", command=self.export_txt).pack(side="right", padx=5)
+
+        self.result_text = ctk.CTkTextbox(result_frame)
+        self.result_text.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # 自定义提示词区
+        self.custom_prompt = ctk.CTkTextbox(self, height=120)
+        self.custom_prompt.insert("1.0", "在此输入你的详细写作要求和结构...")
+        self.toggle_custom_prompt(self.type_combo.get())
+
+    def toggle_custom_prompt(self, choice):
+        if choice == "自定义":
+            self.custom_prompt.pack(pady=10, padx=20, fill="x")
         else:
-            self.custom_type_frame.grid_remove()
-    
-    def get_client(self):
-        """获取API客户端"""
-        api_key = self.api_key_entry.get().strip()
+            self.custom_prompt.pack_forget()
+
+    def save_api(self):
+        api_key = self.key_entry.get().strip()
+        base_url = self.url_entry.get().strip() or None
         if not api_key:
-            messagebox.showerror("错误", "请先配置DeepSeek API Key")
-            return None
-        
-        if not self.client or self.api_key != api_key:
-            self.api_key = api_key
-            self.client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url
-            )
-        return self.client
-    
-    def get_document_type_description(self):
-        """获取文稿类型描述"""
-        if self.current_type == "自定义":
-            desc = self.custom_type_entry.get().strip()
-            return desc if desc else "通用文稿"
-        return self.document_types[self.current_type]
-    
+            messagebox.showerror("错误", "请填写 API Key")
+            return
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.model = self.model_combo.get()
+        messagebox.showinfo("成功", f"API 设置保存成功\n模型: {self.model}\nBase URL: {base_url or '默认 OpenAI'}")
+
     def generate_outline(self):
-        """生成大纲"""
+        if not self.client:
+            messagebox.showerror("错误", "请先保存 API 设置")
+            return
         title = self.title_entry.get().strip()
         if not title:
-            messagebox.showerror("错误", "请输入文稿标题")
+            messagebox.showwarning("提示", "请填写题目/主题")
             return
-        
-        client = self.get_client()
-        if not client:
+
+        writing_type = self.type_combo.get()
+        prompt = self.build_prompt(writing_type, title, is_outline=True)
+        self.call_api(prompt, self.outline_text)
+
+    def generate_full(self):
+        if not self.client:
+            messagebox.showerror("错误", "请先保存 API 设置")
             return
-        
-        doc_type = self.get_document_type_description()
-        self.status_var.set("正在生成大纲，请稍候...")
-        
-        def generate():
-            try:
-                prompt = f"""请为以下{doc_type}生成详细的大纲结构。
-
-标题：{title}
-
-请按照以下格式输出大纲：
-1. 一级标题
-   1.1 二级标题
-   1.2 二级标题
-2. 一级标题
-   2.1 二级标题
-   2.2 二级标题
-...
-
-请确保大纲结构清晰、完整，适合撰写{doc_type}。"""
-                
-                response = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {"role": "system", "content": f"你是一位专业的{doc_type}撰写专家，擅长构建清晰、逻辑严密的文稿结构。"},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=2000
-                )
-                
-                outline = response.choices[0].message.content
-                
-                self.root.after(0, lambda: self.update_outline(outline))
-                self.root.after(0, lambda: self.status_var.set("大纲生成完成"))
-                
-            except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror("错误", f"生成大纲失败：{str(e)}"))
-                self.root.after(0, lambda: self.status_var.set("大纲生成失败"))
-        
-        threading.Thread(target=generate, daemon=True).start()
-    
-    def update_outline(self, outline):
-        """更新大纲显示"""
-        self.outline_text.delete(1.0, tk.END)
-        self.outline_text.insert(1.0, outline)
-        self.current_title = self.title_entry.get().strip()
-    
-    def save_outline(self):
-        """保存大纲"""
-        outline = self.outline_text.get(1.0, tk.END).strip()
+        outline = self.outline_text.get("1.0", "end").strip()
         if not outline:
-            messagebox.showwarning("警告", "大纲内容为空")
+            messagebox.showwarning("提示", "大纲为空，请先生成或填写大纲")
             return
-        
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
-            initialfile=f"{self.current_title}_大纲.txt" if self.current_title else "大纲.txt"
-        )
-        
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(outline)
-                messagebox.showinfo("成功", "大纲已保存")
-            except Exception as e:
-                messagebox.showerror("错误", f"保存失败：{str(e)}")
-    
-    def load_outline(self):
-        """加载大纲"""
-        filename = filedialog.askopenfilename(
-            filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")]
-        )
-        
-        if filename:
-            try:
-                with open(filename, 'r', encoding='utf-8') as f:
-                    outline = f.read()
-                self.outline_text.delete(1.0, tk.END)
-                self.outline_text.insert(1.0, outline)
-                messagebox.showinfo("成功", "大纲已加载")
-            except Exception as e:
-                messagebox.showerror("错误", f"加载失败：{str(e)}")
-    
-    def generate_document(self):
-        """生成完整文稿"""
+
         title = self.title_entry.get().strip()
-        outline = self.outline_text.get(1.0, tk.END).strip()
-        
-        if not title:
-            messagebox.showerror("错误", "请输入文稿标题")
-            return
-        
-        if not outline:
-            messagebox.showerror("错误", "请先生成或编辑大纲")
-            return
-        
-        client = self.get_client()
-        if not client:
-            return
-        
-        doc_type = self.get_document_type_description()
-        self.status_var.set("正在生成文稿，请稍候（这可能需要几分钟）...")
-        self.document_text.delete(1.0, tk.END)
-        self.document_text.insert(1.0, "正在生成，请稍候...\n\n")
-        
-        def generate():
-            try:
-                prompt = f"""请根据以下标题和大纲，撰写一篇完整的{doc_type}。
+        writing_type = self.type_combo.get()
+        refs = self.refs_text.get("1.0", "end").strip()
+        custom = self.custom_prompt.get("1.0", "end").strip() if writing_type == "自定义" else None
 
-标题：{title}
+        prompt = self.build_prompt(writing_type, title, is_outline=False, outline=outline, refs=refs, custom=custom)
+        self.call_api(prompt, self.result_text, max_tokens=8000)
 
-大纲：
-{outline}
+    def call_api(self, prompt, textbox, max_tokens=2000):
+        textbox.delete("1.0", "end")
+        textbox.insert("1.0", "正在生成，请稍候...")
+        self.update_idletasks()
 
-要求：
-1. 严格按照提供的大纲结构撰写
-2. 内容要充实、专业、逻辑清晰
-3. 每个章节都要有详细的内容
-4. 如果是学术论文，请确保引用格式规范
-5. 字数要充足，确保每个章节都有实质性内容
-6. 使用中文撰写
-
-请直接输出完整的文稿内容，不需要额外的说明。"""
-                
-                response = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {"role": "system", "content": f"你是一位专业的{doc_type}撰写专家，擅长撰写高质量、结构清晰、内容充实的文稿。"},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.8,
-                    max_tokens=8000
-                )
-                
-                document = response.choices[0].message.content
-                
-                self.root.after(0, lambda: self.update_document(document))
-                self.root.after(0, lambda: self.status_var.set("文稿生成完成"))
-                
-            except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror("错误", f"生成文稿失败：{str(e)}"))
-                self.root.after(0, lambda: self.status_var.set("文稿生成失败"))
-        
-        threading.Thread(target=generate, daemon=True).start()
-    
-    def update_document(self, document):
-        """更新文稿显示"""
-        self.document_text.delete(1.0, tk.END)
-        self.document_text.insert(1.0, document)
-    
-    def save_document(self):
-        """保存文稿"""
-        document = self.document_text.get(1.0, tk.END).strip()
-        if not document:
-            messagebox.showwarning("警告", "文稿内容为空")
-            return
-        
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("文本文件", "*.txt"), ("Markdown文件", "*.md"), ("所有文件", "*.*")],
-            initialfile=f"{self.current_title}.txt" if self.current_title else "文稿.txt"
-        )
-        
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(document)
-                messagebox.showinfo("成功", "文稿已保存")
-            except Exception as e:
-                messagebox.showerror("错误", f"保存失败：{str(e)}")
-    
-    def clear_all(self):
-        """清空所有内容"""
-        if messagebox.askyesno("确认", "确定要清空所有内容吗？"):
-            self.title_entry.delete(0, tk.END)
-            self.outline_text.delete(1.0, tk.END)
-            self.document_text.delete(1.0, tk.END)
-            self.status_var.set("已清空")
-    
-    def save_config(self):
-        """保存配置"""
-        api_key = self.api_key_entry.get().strip()
-        config = {
-            "api_key": api_key,
-            "document_type": self.type_var.get()
-        }
-        
-        config_file = os.path.join(os.path.expanduser("~"), ".paper_writer_config.json")
         try:
-            with open(config_file, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
-            messagebox.showinfo("成功", "配置已保存")
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7 if "outline" in textbox._name else 0.8,
+                max_tokens=max_tokens
+            )
+            content = response.choices[0].message.content.strip()
+            textbox.delete("1.0", "end")
+            textbox.insert("1.0", content)
         except Exception as e:
-            messagebox.showerror("错误", f"保存配置失败：{str(e)}")
-    
-    def load_config(self):
-        """加载配置"""
-        config_file = os.path.join(os.path.expanduser("~"), ".paper_writer_config.json")
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    if "api_key" in config:
-                        self.api_key_entry.delete(0, tk.END)
-                        self.api_key_entry.insert(0, config["api_key"])
-                        self.api_key = config["api_key"]
-                    if "document_type" in config:
-                        self.type_var.set(config["document_type"])
-                        self.current_type = config["document_type"]
-            except Exception as e:
-                print(f"加载配置失败：{e}")
+            messagebox.showerror("生成失败", str(e))
 
+    def build_prompt(self, writing_type, title, is_outline, outline=None, refs=None, custom=None):
+        refs_part = f"\n\n附加参考材料（请在正文中适当位置使用规范引用，如 APA、GB/T 7714 或编号格式）:\n{refs}" if refs else ""
 
-def main():
-    root = tk.Tk()
-    app = PaperWriterApp(root)
-    root.mainloop()
+        prompts = {
+            "期刊论文": {
+                "outline": f"请为题目《{title}》生成一个详细的学术期刊论文大纲。要求使用中文，结构清晰，包括：1. 标题 2. 摘要 3. 关键词 4. 引言 5. 文献综述 6. 研究方法 7. 结果与分析 8. 讨论 9. 结论与展望 10. 参考文献。每节给出简要描述。",
+                "full": f"请为题目《{title}》撰写一篇完整的学术期刊论文，语言正式、逻辑严谨、学术规范。严格按照以下大纲撰写，每节内容充实、论证充分：\n\n{outline}{refs_part}"
+            },
+            "项目计划": {
+                "outline": f"请为项目《{title}》制定详细的项目执行计划大纲，包括：背景、目标、范围、阶段划分、时间表、资源需求、风险分析、预算等。",
+                "full": f"请为项目《{title}》撰写完整的项目执行计划书，内容专业、结构完整，严格按照以下大纲：\n\n{outline}{refs_part}"
+            },
+            "个人反思": {
+                "outline": f"请针对《{title}》写一篇个人反思的大纲，包括：事件背景、个人感受、具体经历、收获与不足、未来改进等。",
+                "full": f"请针对《{title}》撰写一篇深入、真挚的个人反思文章，情感真实、逻辑清晰，严格按照以下大纲：\n\n{outline}{refs_part}"
+            },
+            "案例分析": {
+                "outline": f"请对案例《{title}》进行全面分析的大纲，包括：案例背景、问题描述、分析框架、具体分析、结论与建议等。",
+                "full": f"请对案例《{title}》撰写完整的案例分析报告，分析深入、逻辑严密，严格按照以下大纲：\n\n{outline}{refs_part}"
+            },
+            "工作总结": {
+                "outline": f"请为《{title}》撰写工作总结的大纲，包括：工作概述、完成情况、经验教训、存在问题、改进措施等。",
+                "full": f"请为《{title}》撰写一份完整的工作总结报告，语言客观、数据详实，严格按照以下大纲：\n\n{outline}{refs_part}"
+            },
+            "自定义": {
+                "outline": custom or title,
+                "full": f"{custom}\n\n请严格按照以下大纲/要求撰写完整内容：\n\n{outline}{refs_part}"
+            }
+        }
 
+        key = "outline" if is_outline else "full"
+        return prompts[writing_type][key]
+
+    # === 导出功能 ===
+    def export_word(self):
+        text = self.result_text.get("1.0", "end").strip()
+        if not text:
+            return
+        file = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word 文件", "*.docx")])
+        if file:
+            doc = Document()
+            doc.add_heading(self.title_entry.get() or "未命名文档", 0)
+            for paragraph in text.split("\n\n"):
+                p = doc.add_paragraph(paragraph.strip())
+                p.style = 'Normal'
+            doc.save(file)
+            messagebox.showinfo("成功", f"已保存 Word 文件：{file}")
+
+    def export_md(self):
+        text = self.result_text.get("1.0", "end").strip()
+        if not text:
+            return
+        file = filedialog.asksaveasfilename(defaultextension=".md", filetypes=[("Markdown 文件", "*.md")])
+        if file:
+            with open(file, "w", encoding="utf-8") as f:
+                f.write(f"# {self.title_entry.get() or '未命名文档'}\n\n{text}")
+            messagebox.showinfo("成功", f"已保存 Markdown 文件：{file}")
+
+    def export_txt(self):
+        text = self.result_text.get("1.0", "end").strip()
+        if not text:
+            return
+        file = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("文本文件", "*.txt")])
+        if file:
+            with open(file, "w", encoding="utf-8") as f:
+                f.write(text)
+            messagebox.showinfo("成功", f"已保存 TXT 文件：{file}")
 
 if __name__ == "__main__":
-    main()
+    app = WritingAssistant()
+    app.mainloop()
