@@ -1006,44 +1006,74 @@ class AIWriterApp(ctk.CTk):
             messagebox.showerror("保存失败", str(exc))
 
     def _ask_save_format(self):
-        """弹出格式选择窗口，返回 'docx'/'txt'/'md' 或 None（取消）"""
+        """弹出格式选择窗口，返回 'docx'/'txt'/'md' 或 None（取消）
+        使用原生 tk.Toplevel 规避 CTkToplevel 在 Linux 上的黑屏渲染 Bug。
+        """
         result = [None]
-        dlg = ctk.CTkToplevel(self)
-        dlg.title("选择保存格式")
-        dlg.geometry("340x200")
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.focus_set()
-        # 居中于主窗口
+
+        # ── 颜色常量（与主题一致）─────────────────────────────────────────
+        BG       = "#1A2744"
+        FG       = "#E8F0FE"
+        BTN_BG   = "#163366"
+        BTN_HV   = "#2B6CB0"
+        CANCEL   = "#0F1A33"
+        BORDER   = "#2A4070"
+        ACCENT   = "#2B6CB0"
+
+        # ── 居中坐标 ─────────────────────────────────────────────────────
         self.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width()  - 340) // 2
-        y = self.winfo_y() + (self.winfo_height() - 200) // 2
-        dlg.geometry(f"+{x}+{y}")
+        W, H = 320, 230
+        x = self.winfo_x() + (self.winfo_width()  - W) // 2
+        y = self.winfo_y() + (self.winfo_height() - H) // 2
 
-        ctk.CTkLabel(dlg, text="请选择文件保存格式",
-                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(18, 12))
+        # ── 创建原生窗口 ──────────────────────────────────────────────────
+        dlg = tk.Toplevel(self)
+        dlg.title("选择保存格式")
+        dlg.geometry(f"{W}x{H}+{x}+{y}")
+        dlg.resizable(False, False)
+        dlg.configure(bg=BG)
+        dlg.transient(self)     # 跟随主窗口
+        dlg.lift()
+        dlg.update()            # 先渲染再 grab，避免黑屏
+        dlg.grab_set()
+        dlg.focus_force()
 
-        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=24)
+        # ── 标题标签 ─────────────────────────────────────────────────────
+        tk.Label(
+            dlg, text="请选择保存格式",
+            bg=BG, fg=FG,
+            font=("TkDefaultFont", 13, "bold"),
+        ).pack(pady=(18, 10))
 
-        for fmt, icon, label in [
-            ("docx", "📝", "Word 文档 (.docx)"),
-            ("txt",  "📄", "纯文本 (.txt)"),
-            ("md",   "🔖", "Markdown (.md)"),
-        ]:
-            ctk.CTkButton(
-                btn_frame, text=f"{icon}  {label}",
-                height=36, anchor="w",
-                font=ctk.CTkFont(size=13),
+        # ── 格式按钮 ─────────────────────────────────────────────────────
+        formats = [
+            ("docx", "📝  Word 文档  (.docx)"),
+            ("txt",  "📄  纯文本      (.txt)"),
+            ("md",   "🔖  Markdown   (.md)"),
+        ]
+        for fmt, label in formats:
+            btn = tk.Button(
+                dlg, text=label,
+                bg=BTN_BG, fg=FG, activebackground=BTN_HV, activeforeground=FG,
+                relief="flat", bd=0, pady=6,
+                font=("TkDefaultFont", 12),
+                cursor="hand2",
                 command=lambda f=fmt: (result.__setitem__(0, f), dlg.destroy()),
-            ).pack(fill="x", pady=3)
+            )
+            btn.pack(fill="x", padx=28, pady=3)
 
-        ctk.CTkButton(
-            dlg, text="取消", height=32,
-            fg_color="transparent", border_width=1,
-            font=ctk.CTkFont(size=12),
+        # ── 分隔线 ────────────────────────────────────────────────────────
+        tk.Frame(dlg, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(8, 0))
+
+        # ── 取消按钮 ─────────────────────────────────────────────────────
+        tk.Button(
+            dlg, text="取消",
+            bg=CANCEL, fg="#7FA8D4", activebackground="#1A2744",
+            relief="flat", bd=0, pady=5,
+            font=("TkDefaultFont", 11),
+            cursor="hand2",
             command=dlg.destroy,
-        ).pack(pady=(8, 0))
+        ).pack(fill="x", padx=28, pady=(4, 0))
 
         dlg.wait_window()
         return result[0]
