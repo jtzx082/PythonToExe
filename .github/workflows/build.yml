@@ -1,103 +1,36 @@
-name: Build Multi-Platform Application
+name: Build Executables
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ main ]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version number'
-        required: true
-        default: '1.0.0'
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        include:
-          - os: ubuntu-latest
-            platform: linux
-            ext: ''
-          - os: windows-latest
-            platform: windows
-            ext: '.exe'
-          - os: macos-latest
-            platform: macos
-            ext: ''
-
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-tk
-
-      - name: Install system dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install python-tk
-
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pyinstaller
 
-      - name: Build application
+      - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name="PaperWriter" \
-            --icon=NONE \
-            --add-data "requirements.txt:." \
-            main.py
-
-      - name: Create release archive (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          mkdir -p release
-          cp dist/PaperWriter release/PaperWriter-${{ github.ref_name || 'dev' }}-linux-x64
-          tar -czf release/PaperWriter-${{ github.ref_name || 'dev' }}-linux-x64.tar.gz -C release PaperWriter-${{ github.ref_name || 'dev' }}-linux-x64
-          rm -rf release/PaperWriter-${{ github.ref_name || 'dev' }}-linux-x64
-
-      - name: Create release archive (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          mkdir release
-          copy dist\PaperWriter.exe release\PaperWriter-${{ github.ref_name || 'dev' }}-windows-x64.exe
-          powershell Compress-Archive -Path release\PaperWriter-${{ github.ref_name || 'dev' }}-windows-x64.exe -DestinationPath release\PaperWriter-${{ github.ref_name || 'dev' }}-windows-x64.zip
-          del release\PaperWriter-${{ github.ref_name || 'dev' }}-windows-x64.exe
-
-      - name: Create release archive (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          mkdir -p release
-          cp dist/PaperWriter release/PaperWriter-${{ github.ref_name || 'dev' }}-macos-x64
-          tar -czf release/PaperWriter-${{ github.ref_name || 'dev' }}-macos-x64.tar.gz -C release PaperWriter-${{ github.ref_name || 'dev' }}-macos-x64
-          rm -rf release/PaperWriter-${{ github.ref_name || 'dev' }}-macos-x64
+          pyinstaller --onefile --windowed main.py
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PaperWriter-${{ matrix.platform }}-${{ github.ref_name || 'dev' }}
-          path: release/*
-          retention-days: 30
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: release/*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: ${{ matrix.os }}-build
+          path: dist/*
