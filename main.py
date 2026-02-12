@@ -1,12 +1,17 @@
 import customtkinter as ctk
 from openai import OpenAI
 import os
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from docx import Document
-from docx.shared import Pt
 
-ctk.set_appearance("system")
+# === Onefile 模式下资源路径修复（Linux 特别重要）===
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+    os.chdir(application_path)
+
+ctk.set_appearance_mode("system")        # ← 这里已修正
 ctk.set_default_color_theme("blue")
 
 class WritingAssistant(ctk.CTk):
@@ -18,6 +23,7 @@ class WritingAssistant(ctk.CTk):
 
         self.create_widgets()
 
+    # 下面所有代码保持不变（从 create_widgets 开始到文件末尾）
     def create_widgets(self):
         # === API 设置区 ===
         api_frame = ctk.CTkFrame(self)
@@ -30,7 +36,7 @@ class WritingAssistant(ctk.CTk):
         ctk.CTkLabel(api_frame, text="Base URL:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
         self.url_entry = ctk.CTkEntry(api_frame, width=300)
         self.url_entry.grid(row=0, column=3, padx=5, pady=5)
-        self.url_entry.insert(0, "https://api.openai.com/v1")  # 默认 OpenAI
+        self.url_entry.insert(0, "https://api.openai.com/v1")
 
         ctk.CTkLabel(api_frame, text="模型:").grid(row=0, column=4, padx=5, pady=5, sticky="w")
         self.model_combo = ctk.CTkComboBox(api_frame, width=200, values=[
@@ -61,14 +67,14 @@ class WritingAssistant(ctk.CTk):
 
         ctk.CTkButton(input_frame, text="生成大纲", command=self.generate_outline).grid(row=0, column=4, padx=10, pady=5)
 
-        # 附加参考文献区（可选）
+        # 附加参考文献区
         refs_frame = ctk.CTkFrame(self)
         refs_frame.pack(pady=10, padx=20, fill="x")
         ctk.CTkLabel(refs_frame, text="附加参考文献或材料（可选，会自动引用）:").pack(anchor="w", padx=10)
         self.refs_text = ctk.CTkTextbox(refs_frame, height=100)
         self.refs_text.pack(fill="x", padx=10, pady=5)
 
-        # === 大纲区 ===
+        # 大纲区
         outline_frame = ctk.CTkFrame(self)
         outline_frame.pack(pady=10, padx=20, fill="both", expand=True)
 
@@ -82,7 +88,7 @@ class WritingAssistant(ctk.CTk):
 
         ctk.CTkButton(outline_frame, text="根据大纲生成全文", command=self.generate_full).pack(pady=10)
 
-        # === 结果区 ===
+        # 结果区
         result_frame = ctk.CTkFrame(self)
         result_frame.pack(pady=10, padx=20, fill="both", expand=True)
 
@@ -116,7 +122,7 @@ class WritingAssistant(ctk.CTk):
             return
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = self.model_combo.get()
-        messagebox.showinfo("成功", f"API 设置保存成功\n模型: {self.model}\nBase URL: {base_url or '默认 OpenAI'}")
+        messagebox.showinfo("成功", f"API 设置保存成功\n模型: {self.model}")
 
     def generate_outline(self):
         if not self.client:
@@ -126,7 +132,6 @@ class WritingAssistant(ctk.CTk):
         if not title:
             messagebox.showwarning("提示", "请填写题目/主题")
             return
-
         writing_type = self.type_combo.get()
         prompt = self.build_prompt(writing_type, title, is_outline=True)
         self.call_api(prompt, self.outline_text)
@@ -157,7 +162,7 @@ class WritingAssistant(ctk.CTk):
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7 if "outline" in textbox._name else 0.8,
+                temperature=0.7 if "outline" in str(textbox) else 0.8,
                 max_tokens=max_tokens
             )
             content = response.choices[0].message.content.strip()
@@ -199,40 +204,35 @@ class WritingAssistant(ctk.CTk):
         key = "outline" if is_outline else "full"
         return prompts[writing_type][key]
 
-    # === 导出功能 ===
     def export_word(self):
         text = self.result_text.get("1.0", "end").strip()
-        if not text:
-            return
+        if not text: return
         file = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word 文件", "*.docx")])
         if file:
             doc = Document()
             doc.add_heading(self.title_entry.get() or "未命名文档", 0)
-            for paragraph in text.split("\n\n"):
-                p = doc.add_paragraph(paragraph.strip())
-                p.style = 'Normal'
+            for para in text.split("\n\n"):
+                doc.add_paragraph(para.strip())
             doc.save(file)
-            messagebox.showinfo("成功", f"已保存 Word 文件：{file}")
+            messagebox.showinfo("成功", f"已保存：{file}")
 
     def export_md(self):
         text = self.result_text.get("1.0", "end").strip()
-        if not text:
-            return
+        if not text: return
         file = filedialog.asksaveasfilename(defaultextension=".md", filetypes=[("Markdown 文件", "*.md")])
         if file:
             with open(file, "w", encoding="utf-8") as f:
                 f.write(f"# {self.title_entry.get() or '未命名文档'}\n\n{text}")
-            messagebox.showinfo("成功", f"已保存 Markdown 文件：{file}")
+            messagebox.showinfo("成功", f"已保存：{file}")
 
     def export_txt(self):
         text = self.result_text.get("1.0", "end").strip()
-        if not text:
-            return
+        if not text: return
         file = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("文本文件", "*.txt")])
         if file:
             with open(file, "w", encoding="utf-8") as f:
                 f.write(text)
-            messagebox.showinfo("成功", f"已保存 TXT 文件：{file}")
+            messagebox.showinfo("成功", f"已保存：{file}")
 
 if __name__ == "__main__":
     app = WritingAssistant()
