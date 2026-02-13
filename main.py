@@ -7,6 +7,12 @@ from tkinter import filedialog, messagebox, scrolledtext, simpledialog
 import docx
 import edge_tts
 from openai import OpenAI
+from pydub import AudioSegment
+import imageio_ffmpeg
+
+# --- 关键配置：让 pydub 使用内置的 ffmpeg ---
+# 这确保了软件打包后，用户电脑上没有安装 ffmpeg 也能转格式
+AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
 
 # 默认配置
 DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com"
@@ -14,12 +20,12 @@ DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com"
 class TTSApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("DeepSeek 智能语音合成助手 (修复版)")
+        self.root.title("DeepSeek 智能语音合成助手 (WMA版)")
         self.root.geometry("850x650")
         
         # 变量初始化
         self.is_playing = False
-        self.is_generating = False # 标记是否正在生成中
+        self.is_generating = False 
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
         
@@ -63,7 +69,7 @@ class TTSApp:
         
         # 导出控制
         tk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3")).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_bottom, text="🎬 导出 WMV视频", command=lambda: self.export_audio("wmv")).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame_bottom, text="🎵 导出 WMA", command=lambda: self.export_audio("wma")).pack(side=tk.LEFT, padx=5)
         
         # 状态栏
         self.status_label = tk.Label(self.root, text="就绪", bd=1, relief=tk.SUNKEN, anchor=tk.W, bg="#f0f0f0")
@@ -107,7 +113,7 @@ class TTSApp:
         if not api_key:
             api_key = simpledialog.askstring("API Key", "请输入 DeepSeek API Key:", show="*")
             if not api_key: return
-            os.environ["DEEPSEEK_API_KEY"] = api_key # 临时保存到环境变量
+            os.environ["DEEPSEEK_API_KEY"] = api_key 
 
         threading.Thread(target=self._deepseek_thread, args=(text, api_key)).start()
 
@@ -118,7 +124,7 @@ class TTSApp:
             response = client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
-                    {"role": "system", "content": "你是一个专业的配音文案润色专家。请将用户输入的文本修改为适合朗读的口语化文案，去除生硬的书面语，增加自然的连接词。请直接输出润色后的结果，不要包含任何解释性语言。"},
+                    {"role": "system", "content": "你是一个专业的配音文案润色专家。请将用户输入的文本修改为适合朗读的口语化文案，去除生硬的书面语。请直接输出润色后的结果。"},
                     {"role": "user", "content": text},
                 ],
                 stream=False
@@ -139,7 +145,6 @@ class TTSApp:
 
     # --- 语音处理核心 ---
     async def _generate_audio_task(self, text, output_file):
-        # 语音角色：zh-CN-XiaoxiaoNeural (女), zh-CN-YunxiNeural (男)
         voice = "zh-CN-XiaoxiaoNeural"
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_file)
@@ -157,10 +162,9 @@ class TTSApp:
                 future = asyncio.run_coroutine_threadsafe(
                     self._generate_audio_task(text, self.temp_audio_file), self.loop
                 )
-                future.result() # 等待生成完成
+                future.result()
                 
-                if not self.is_generating: # 如果生成过程中被点击了停止
-                    return
+                if not self.is_generating: return
 
                 self.root.after(0, self._play_sound)
             except Exception as e:
@@ -179,10 +183,10 @@ class TTSApp:
             self.is_generating = False
             self.update_status("正在播放...")
         except Exception as e:
-            messagebox.showerror("播放错误", f"无法播放音频: {e}\n(Linux系统请确保安装了 ffmpeg 和 audio 驱动)")
+            messagebox.showerror("播放错误", f"无法播放: {e}")
 
     def stop_audio(self):
-        self.is_generating = False # 标记停止生成
+        self.is_generating = False
         try:
             import pygame
             pygame.mixer.init()
@@ -200,11 +204,11 @@ class TTSApp:
         if not text: return
 
         # 选择保存路径
-        ext = ".mp3" if fmt == "mp3" else ".wmv"
-        save_path = filedialog.asksaveasfilename(defaultextension=ext, filetypes=[(f"{fmt.upper()} File", f"*{ext}")])
+        ext = ".mp3" if fmt == "mp3" else ".wma"
+        save_path = filedialog.asksaveasfilename(defaultextension=ext, filetypes=[(f"{fmt.upper()} Audio", f"*{ext}")])
         if not save_path: return
 
-        self.update_status(f"正在导出为 {fmt}...")
+        self.update_status(f"正在转换并导出 {fmt}...")
 
         def run_export():
             try:
@@ -215,32 +219,20 @@ class TTSApp:
                 )
                 future.result()
 
-                # 2. 根据格式处理
+                # 2. 格式处理
                 if fmt == "mp3":
                     import shutil
                     shutil.move(temp_mp3, save_path)
                 
-                elif fmt == "wmv":
-                    self.root.after(0, lambda: self.update_status("正在渲染视频 (MoviePy)..."))
-                    # 延迟导入 moviepy，避免启动时报错
-                    from moviepy.editor import AudioFileClip, ColorClip
-                    
-                    audio = AudioFileClip(temp_mp3)
-                    # 创建黑底视频
-                    video = ColorClip(size=(640, 480), color=(0,0,0), duration=audio.duration)
-                    video = video.set_audio(audio)
-                    # 写入文件，使用 libx264 兼容性更好
-                    video.write_videofile(save_path, fps=1, codec="libx264", audio_codec="aac", logger=None)
-                    
-                    audio.close()
-                    video.close()
+                elif fmt == "wma":
+                    # 使用 pydub 进行转换 (依赖 imageio-ffmpeg 提供的二进制文件)
+                    audio = AudioSegment.from_mp3(temp_mp3)
+                    audio.export(save_path, format="wma")
                     os.remove(temp_mp3)
 
                 self.root.after(0, lambda: messagebox.showinfo("成功", f"导出成功！\n保存路径: {save_path}"))
                 self.root.after(0, lambda: self.update_status("导出完成"))
             
-            except ImportError:
-                 self.root.after(0, lambda: messagebox.showerror("组件缺失", "导出视频需要 moviepy 库，但在当前环境中未找到。请检查打包配置。"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("导出失败", f"错误详情:\n{str(e)}"))
                 self.root.after(0, lambda: self.update_status("导出失败"))
