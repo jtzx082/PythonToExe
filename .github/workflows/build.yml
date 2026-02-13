@@ -21,7 +21,7 @@ jobs:
       with:
         python-version: '3.10'
 
-    # Linux 系统需要安装的依赖
+    # Linux 特定依赖
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
       run: |
@@ -35,19 +35,14 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    # --- 关键修改：添加 shell: bash ---
+    # 构建步骤 (大大简化，不再需要复杂的 hidden-import)
+    # 我们使用 --collect-all imageio_ffmpeg 确保转换器被打包进去
     - name: Build with PyInstaller
       shell: bash
       run: |
         pyinstaller --onefile --windowed --name="DeepTTS" \
-          --collect-all moviepy \
-          --hidden-import=moviepy \
-          --hidden-import=moviepy.audio.fx.all \
-          --hidden-import=proglog \
-          --hidden-import=decorator \
-          --hidden-import=tqdm \
-          --hidden-import=imageio \
-          --hidden-import=imageio_ffmpeg \
+          --collect-all imageio_ffmpeg \
+          --hidden-import=pydub \
           main.py
 
     - name: Upload Artifacts
