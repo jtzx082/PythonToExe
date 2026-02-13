@@ -10,19 +10,49 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
+    # 即使某个平台失败，其他平台仍继续执行（避免一错全停）
+    continue-on-error: false
 
     steps:
-    - uses: actions/checkout@4
+    # 修复版本号：使用带v前缀的规范写法
+    - uses: actions/checkout@v4
+
     - name: 设置 Python
-      uses: actions/setup-python@5
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
-    - name: 安装依赖
-      run: pip install -r requirements.txt
-    - name: PyInstaller 打包
-      run: pyinstaller --onefile --windowed --name="PaperWriter" main.py
+        # 缓存依赖，加速打包
+        cache: 'pip'
+
+    - name: 安装依赖（Linux/Mac）
+      if: runner.os != 'Windows'
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 安装依赖（Windows）
+      if: runner.os == 'Windows'
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: PyInstaller 打包（Linux）
+      if: runner.os == 'Linux'
+      run: |
+        pyinstaller --onefile --windowed --name="PaperWriter-Linux" main.py
+
+    - name: PyInstaller 打包（macOS）
+      if: runner.os == 'macOS'
+      run: |
+        pyinstaller --onefile --windowed --name="PaperWriter-macOS" main.py
+
+    - name: PyInstaller 打包（Windows）
+      if: runner.os == 'Windows'
+      run: |
+        pyinstaller --onefile --windowed --name="PaperWriter-Windows" main.py
+
     - name: 上传打包产物
-      uses: actions/upload-artifact@4
+      uses: actions/upload-artifact@v4
       with:
-        name: build-${{ matrix.os }}
+        name: PaperWriter-${{ matrix.os }}
         path: dist/*
