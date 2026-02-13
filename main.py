@@ -57,10 +57,10 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     """
     将 Markdown 转换为严格符合《党政机关公文格式》标准的 Word 文档
     """
-    
     doc = Document()
 
     # ── 1. 页面设置 (Page Setup) ──
+    # A4纸, 上37mm, 下35mm, 左28mm, 右26mm
     section = doc.sections[0]
     section.page_width = Mm(210)
     section.page_height = Mm(297)
@@ -102,7 +102,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     set_run_font(run_title, '方正小标宋简体', size_pt=22, bold=False)
 
     # ── 4. 正文内容解析与转换 (核心逻辑) ──
-    
     h1_counter = 0
     h2_counter = 0
     h3_counter = 0
@@ -122,13 +121,11 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             continue
         
         # ── 预处理：判断是否为列表项并剥离符号 ──
-        # 解决 "* **加粗**" 导致的正则冲突
         is_list_item = False
-        # 匹配以 * 或 - 开头，后跟空格的行
         list_match = re.match(r"^[\*\-]\s+(.*)", stripped)
         if list_match:
             is_list_item = True
-            stripped = list_match.group(1) # 剥离列表符号，保留内容
+            stripped = list_match.group(1) 
         
         # ── 特殊段落拦截：摘要、关键词、参考文献、结语等 ──
         clean_check = re.sub(r"^[#\s]+", "", stripped)
@@ -136,7 +133,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
         special_keywords = ["摘要", "关键词", "参考文献", "致谢", "Abstract", "Keywords", "References"]
         is_special = False
-        
         for kw in special_keywords:
             if clean_check.startswith(kw):
                 is_special = True
@@ -146,7 +142,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = Pt(28)
             p.paragraph_format.first_line_indent = Pt(32)
-            
             if "：" in clean_check or ":" in clean_check:
                 sep = "：" if "：" in clean_check else ":"
                 parts = clean_check.split(sep, 1)
@@ -165,7 +160,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             level = len(heading_match.group(1))
             raw_text = heading_match.group(2)
             text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
-            text_content = _strip_inline(text_content) # 确保标题内无 Markdown
+            text_content = _strip_inline(text_content) 
 
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = Pt(28)
@@ -196,16 +191,8 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
         # ── 普通段落（含列表项处理） ──
         p = doc.add_paragraph()
-        
-        # 如果是列表项，处理缩进或加项目符号
         if is_list_item:
-            # 方案：使用实心圆点作为项目符号，或者仅缩进
-            # 这里采用公文常见做法：不加点，但作为普通段落处理，内容前不留符号，
-            # 或者为了区分，可以在内容前加 "• "
-            # 考虑到用户之前的文档有 "•"，我们加上它，并保持标准缩进
             stripped = "• " + stripped
-        
-        # 继承 Normal 样式
         _add_inline_runs_styled(p, stripped)
 
     # ── 5. 页码设置 ──
@@ -241,23 +228,18 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
 def _strip_inline(text: str) -> str:
     """彻底去掉行内 Markdown 符号"""
-    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text) # 去粗体斜体
+    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
     text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
-    # 强制清除残留的 ** 或 * text = text.replace("**", "").replace("__", "")
     return text
 
 
 def _add_inline_runs_styled(paragraph, text: str):
-    """
-    解析 Markdown 行内格式并应用到 Docx Run
-    优化：防止列表符号 * 与加粗符号 ** 混淆
-    """
+    """解析 Markdown 行内格式并应用到 Docx Run"""
     from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
     
-    # 辅助函数：应用样式
     def apply_style(run, bold=False, italic=False, code=False):
         run.font.name = 'Times New Roman'
         run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋_GB2312')
@@ -267,27 +249,19 @@ def _add_inline_runs_styled(paragraph, text: str):
         if italic: run.font.italic = True
         if code: run.font.name = 'Courier New'
 
-    # 1. 如果没有 Markdown 标记，直接添加
     if not re.search(r"(\*|_|`)", text):
         run = paragraph.add_run(text)
         apply_style(run)
         return
 
-    # 2. 简单的 Tokenizer 解析
-    # 匹配 **bold**, *italic*, `code`
-    # 优化正则：排除列表符号干扰，确保匹配成对
     pattern = re.compile(r"(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|`[^`]+`)")
-    
     last_end = 0
     for m in pattern.finditer(text):
         start, end = m.span()
-        # 添加前面的普通文本
         if start > last_end:
             run = paragraph.add_run(text[last_end:start])
             apply_style(run)
-        
         token = m.group()
-        # 判断类型
         if token.startswith("**") or token.startswith("__"):
             content = token[2:-2]
             run = paragraph.add_run(content)
@@ -300,10 +274,7 @@ def _add_inline_runs_styled(paragraph, text: str):
             content = token[1:-1]
             run = paragraph.add_run(content)
             apply_style(run, code=True)
-            
         last_end = end
-
-    # 添加剩余文本
     if last_end < len(text):
         run = paragraph.add_run(text[last_end:])
         apply_style(run)
@@ -315,7 +286,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.3.2"  # Updated version
+APP_VERSION = "v2.3.3"  # Updated version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -367,32 +338,59 @@ DOCUMENT_TYPES = [
     ("✨", "自定义",    "根据您的描述自由定制文稿类型与结构"),
 ]
 
-# ── 提示词系统 (Prompts) ────────────────────────────────────────────────────
-OUTLINE_SYSTEM = (
-    "你是一位资深写作顾问，擅长为各类专业文稿设计清晰、合理的结构大纲。\n\n"
-    "请根据用户提供的文稿类型、题目和要求，输出一份层次分明的大纲。\n\n"
-    "格式规范：\n"
-    "- 一级章节：1. 章节名称（简要说明本章核心内容）\n"
-    "- 二级章节：1.1 小节名称（说明）\n"
-    "- 三级要点：1.1.1 要点（如有必要）\n"
-    "- 摘要、关键词、参考文献等特殊部分，请直接使用“摘要”、“关键词”字样，不要加数字序号。\n\n"
-    "注意：\n"
-    "- 直接输出大纲正文，无需前言或解释\n"
-    "- 学术论文须包含摘要、关键词、引言、正文各节、结论、参考文献\n"
-    "- 大纲条目数量适中，一般10~20条为宜"
-)
+# ── 动态提示词系统 (Dynamic Prompts) ─────────────────────────────────────────
+def get_system_prompts(doc_type, user_req=""):
+    """
+    根据文稿类型和用户要求动态生成 System Prompt
+    """
+    # 1. 基础人设
+    if doc_type == "自定义":
+        role_desc = "你是一位全能型、适应性极强的专业写作助手。"
+    elif doc_type == "学术论文":
+        role_desc = "你是一位严谨的学术写作专家，精通学术规范和论文结构。"
+    else:
+        role_desc = f"你是一位资深的{doc_type}撰写专家，擅长该类文稿的结构与表达。"
 
-WRITING_SYSTEM = (
-    "你是一位经验丰富的专业写作专家，擅长撰写高质量、内容充实的各类文稿。\n\n"
-    "请严格依据提供的文稿类型、题目、要求和大纲，撰写完整的正文内容。\n\n"
-    "写作规范：\n"
-    "- 语言专业、准确、流畅，符合相应文体规范\n"
-    "- 内容充实，论据充分，逻辑严密\n"
-    "- 严格按照大纲结构依次展开\n"
-    "- 学术论文的“摘要”、“关键词”、“参考文献”等标题前**不要加任何序号**（如不要写 1. 摘要，直接写 # 摘要）。\n"
-    "- 使用 Markdown 格式：# 一级标题，## 二级标题，**加粗**等\n"
-    "- 直接输出正文，无需额外说明"
-)
+    # 2. 核心指令 (Outline)
+    outline_sys = f"{role_desc}\n请根据题目和要求设计清晰大纲。\n\n"
+    if doc_type == "自定义":
+        outline_sys += (
+            "【重要指令】\n"
+            "1. **完全遵循用户要求**：如果用户要求写一般文章、散文或特定结构，请严格执行，不要套用学术论文格式。\n"
+            "2. **结构灵活**：除非用户明确要求，否则**不要**自动添加“摘要”、“关键词”、“参考文献”等学术板块。\n"
+            "3. **精准响应**：根据用户的“附加要求”来决定大纲的详略和风格。\n"
+        )
+    elif doc_type == "学术论文":
+        outline_sys += (
+            "【学术规范】\n"
+            "- 必须包含：摘要、关键词、引言、正文各节、结论、参考文献。\n"
+            "- 摘要、关键词、参考文献标题前**不要加数字序号**。\n"
+        )
+    else:
+        outline_sys += "结构需符合该文体的标准规范，同时兼顾用户的特殊要求。\n"
+
+    # 3. 核心指令 (Writing)
+    writing_sys = f"{role_desc}\n请根据大纲撰写正文。\n\n"
+    writing_sys += f"【用户附加要求】：{user_req if user_req else '无'}\n\n"
+    
+    if doc_type == "自定义":
+        writing_sys += (
+            "【撰写原则】\n"
+            "1. **字数与篇幅**：如果用户指定了字数（如800字），必须严格控制在此范围内，不要长篇大论。\n"
+            "2. **风格适配**：严格采用用户要求的语体风格（如通俗、幽默、正式等）。\n"
+            "3. **非学术模式**：如果是写一般论文或文章，严禁使用学术引用格式，严禁添加无关的摘要/参考文献。\n"
+        )
+    else:
+        writing_sys += (
+            "【撰写原则】\n"
+            "1. 内容充实，逻辑严密。\n"
+            "2. **关注字数要求**：尽量贴近用户期望的篇幅。\n"
+            "3. 格式规范：使用 Markdown 标记标题 (#, ##)。\n"
+        )
+        if doc_type == "学术论文":
+            writing_sys += "4. 特别注意：摘要、关键词、参考文献部分不要加章节序号。\n"
+
+    return outline_sys, writing_sys
 
 
 # ── 配置管理器 ──────────────────────────────────────────────────────────────
@@ -852,10 +850,15 @@ class AIWriterApp(ctk.CTk):
         self._set_status(f"⏳  [{client.provider_name} · {client.model}]  正在生成大纲...")
         self._outline_editor.clear()
         self._tabs.set("📋  大纲编辑")
+        
+        # 动态获取提示词
         prompt = self._make_prompt()
+        user_req = self._req_entry.get().strip()
+        system_prompt, _ = get_system_prompts(self._doc_type, user_req)
+
         def run():
             try:
-                for chunk in client.stream(OUTLINE_SYSTEM, prompt, max_tokens=2048):
+                for chunk in client.stream(system_prompt, prompt, max_tokens=2048):
                     self.after(0, lambda c=chunk: self._outline_editor.append(c))
                 self.after(0, lambda: self._set_status("✅  大纲生成完成 · 可直接编辑后点击「开始撰写」"))
             except Exception as exc:
@@ -885,11 +888,16 @@ class AIWriterApp(ctk.CTk):
         self._output_editor.clear()
         self._wc_var.set("字数：0")
         self._tabs.set("📄  正文输出")
+        
+        # 动态获取提示词
         prompt = self._make_prompt(outline=outline)
+        user_req = self._req_entry.get().strip()
+        _, system_prompt = get_system_prompts(self._doc_type, user_req)
+
         def run():
             char_count = 0
             try:
-                for chunk in client.stream(WRITING_SYSTEM, prompt, max_tokens=8192):
+                for chunk in client.stream(system_prompt, prompt, max_tokens=8192):
                     char_count += len(chunk)
                     self.after(0, lambda c=chunk: self._output_editor.append(c))
                     self.after(0, lambda n=char_count: self._wc_var.set(f"字数：{n}"))
