@@ -7,8 +7,7 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QTextEdit, QPushButton, QComboBox,
     QFileDialog, QMessageBox, QDialog, QFormLayout
 )
-from PyQt6.QtCore import Qt, QLocale
-from PyQt6.QtGui import QFont, QInputMethod
+from PyQt6.QtCore import Qt
 from docx import Document
 from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -26,18 +25,22 @@ class ConfigManager:
             try:
                 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                     return json.load(f)
-            except:
+            except Exception as e:
+                print(f"加载配置失败: {e}")
                 return {"deepseek_api_key": ""}
         return {"deepseek_api_key": ""}
 
     @staticmethod
     def save_api_key(api_key):
         config = {"deepseek_api_key": api_key.strip()}
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            QMessageBox.critical(None, "错误", f"保存配置失败: {str(e)}")
 
 class APISettingDialog(QDialog):
-    """API Key 设置弹窗（修复中文输入）"""
+    """API Key 设置弹窗"""
     def __init__(self, current_key):
         super().__init__()
         self.setWindowTitle("API 设置")
@@ -49,60 +52,22 @@ class APISettingDialog(QDialog):
         layout = QVBoxLayout(self)
         form_layout = QFormLayout()
 
-        # API Key 输入框（修复中文输入）
+        # API Key 输入框
         self.key_input = QLineEdit()
-        self.key_input.setPlaceholderText("请输入 DeepSeek API Key（支持中文粘贴）")
+        self.key_input.setPlaceholderText("请输入 DeepSeek API Key")
         self.key_input.setText(self.api_key)
-        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        # 强制启用中文输入
-        self.key_input.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
-        self.key_input.setLocale(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)  # 密文显示
         form_layout.addRow("DeepSeek API Key：", self.key_input)
 
-        # 验证按钮 + 保存按钮
+        # 保存按钮
         btn_layout = QHBoxLayout()
-        self.check_btn = QPushButton("🔍 验证API有效性")
-        self.check_btn.clicked.connect(self.check_api_valid)
         self.save_btn = QPushButton("✅ 保存并应用")
         self.save_btn.clicked.connect(self.save_key)
-        btn_layout.addWidget(self.check_btn)
         btn_layout.addWidget(self.save_btn)
         form_layout.addRow("", btn_layout)
 
         layout.addLayout(form_layout)
         self.setLayout(layout)
-
-    def check_api_valid(self):
-        """验证API Key是否有效"""
-        key = self.key_input.text().strip()
-        if not key:
-            QMessageBox.warning(self, "提示", "API Key 不能为空")
-            return
-        
-        headers = {
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": "测试"}],
-            "temperature": 0.1
-        }
-        try:
-            resp = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                json=data,
-                headers=headers,
-                timeout=30
-            )
-            if resp.status_code == 200:
-                QMessageBox.information(self, "成功", "API Key 有效！")
-            elif resp.status_code == 401:
-                QMessageBox.critical(self, "错误", "API Key 无效或已过期！")
-            else:
-                QMessageBox.critical(self, "错误", f"验证失败：{resp.status_code}")
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"网络异常：{str(e)}")
 
     def save_key(self):
         key = self.key_input.text().strip()
@@ -121,9 +86,6 @@ class PaperWriter(QMainWindow):
         self.DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
         self.setWindowTitle("智能公文/论文撰写工具 | API可配置 | 标准Word导出")
         self.setMinimumSize(950, 780)
-        # 全局启用中文输入
-        self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
-        self.setLocale(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
         self.init_ui()
 
     def init_ui(self):
@@ -146,8 +108,6 @@ class PaperWriter(QMainWindow):
         type_layout = QHBoxLayout()
         type_label = QLabel("文稿类型：")
         self.type_combo = QComboBox()
-        # 修复ComboBox中文显示
-        self.type_combo.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         self.type_combo.addItems([
             "期刊论文", "工作计划", "工作总结", "学习反思", "教学案例", "汇报材料", "自定义"
         ])
@@ -155,14 +115,11 @@ class PaperWriter(QMainWindow):
         type_layout.addWidget(self.type_combo)
         layout.addLayout(type_layout)
 
-        # ========== 题目输入（修复中文输入） ==========
+        # ========== 题目输入 ==========
         title_layout = QHBoxLayout()
         title_label = QLabel("题目/要求：")
         self.title_input = QLineEdit()
         self.title_input.setPlaceholderText("输入完整题目或详细要求，例如：2026年度部门工作总结")
-        # 强制启用中文输入
-        self.title_input.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
-        self.title_input.setLocale(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
         title_layout.addWidget(title_label)
         title_layout.addWidget(self.title_input)
         layout.addLayout(title_layout)
@@ -172,12 +129,10 @@ class PaperWriter(QMainWindow):
         self.outline_btn.clicked.connect(self.generate_outline)
         layout.addWidget(self.outline_btn)
 
-        # ========== 大纲编辑区（修复中文输入） ==========
+        # ========== 大纲编辑区 ==========
         layout.addWidget(QLabel("📝 大纲（纯文本公文层级，可直接修改）："))
         self.outline_edit = QTextEdit()
         self.outline_edit.setPlaceholderText("大纲格式：一、 →（一）→1. →（1），禁止使用Markdown")
-        self.outline_edit.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
-        self.outline_edit.setLocale(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
         layout.addWidget(self.outline_edit)
 
         # ========== 撰写全文 ==========
@@ -188,8 +143,6 @@ class PaperWriter(QMainWindow):
         # ========== 文稿展示 ==========
         layout.addWidget(QLabel("📄 完整文稿（纯文本无格式）："))
         self.result_text = QTextEdit()
-        self.result_text.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
-        self.result_text.setLocale(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
         layout.addWidget(self.result_text)
 
         # ========== 导出Word ==========
@@ -236,7 +189,12 @@ class PaperWriter(QMainWindow):
             "temperature": 0.2
         }
         try:
-            resp = requests.post(self.DEEPSEEK_API_URL, json=data, timeout=90)
+            resp = requests.post(
+                self.DEEPSEEK_API_URL, 
+                json=data, 
+                headers=headers, 
+                timeout=90
+            )
             
             # 详细错误处理
             if resp.status_code == 401:
@@ -326,7 +284,7 @@ class PaperWriter(QMainWindow):
             title_run = title_p.add_run(title)
             title_run.font.size = Pt(22)
             title_run.font.bold = True
-            title_run.font.name = "小标宋体"
+            title_run.font.name = "SimHei" if os.name == "posix" else "小标宋体"
             title_run._element.rPr.rFonts.set(qn('w:eastAsia'), '小标宋体')
             doc.add_paragraph()
 
@@ -339,15 +297,24 @@ class PaperWriter(QMainWindow):
                 run = p.add_run(line)
                 run.font.size = Pt(16)  # 三号字
 
+                # 适配Linux字体（替换成系统存在的中文字体）
+                linux_font_map = {
+                    "黑体": "SimHei",
+                    "楷体_GB2312": "KaiTi",
+                    "仿宋_GB2312": "FangSong"
+                }
+
                 # 一级标题：一、 黑体
                 if line.startswith(("一、","二、","三、","四、","五、")):
-                    run.font.name = "黑体"
+                    font_name = linux_font_map["黑体"] if os.name == "posix" else "黑体"
+                    run.font.name = font_name
                     run._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
                     run.font.bold = True
                     p.paragraph_format.first_line_indent = Cm(0)
                 # 二级标题：（一） 楷体
                 elif line.startswith(("（一）","（二）","（三）")):
-                    run.font.name = "楷体_GB2312"
+                    font_name = linux_font_map["楷体_GB2312"] if os.name == "posix" else "楷体_GB2312"
+                    run.font.name = font_name
                     run._element.rPr.rFonts.set(qn('w:eastAsia'), '楷体_GB2312')
                     p.paragraph_format.first_line_indent = Cm(0)
                 # 三级标题：1.  加粗
@@ -356,7 +323,8 @@ class PaperWriter(QMainWindow):
                     p.paragraph_format.first_line_indent = Cm(0)
                 # 正文：仿宋_GB2312 + 首行缩进
                 else:
-                    run.font.name = "仿宋_GB2312"
+                    font_name = linux_font_map["仿宋_GB2312"] if os.name == "posix" else "仿宋_GB2312"
+                    run.font.name = font_name
                     run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋_GB2312')
                     p.paragraph_format.first_line_indent = Cm(0.74)
                 p.paragraph_format.line_spacing = 1.25
@@ -367,9 +335,13 @@ class PaperWriter(QMainWindow):
             QMessageBox.critical(self, "错误", f"导出失败：{str(e)}")
 
 if __name__ == "__main__":
-    # 全局启用中文输入
+    # 修复核心问题：移除无效的setLocale调用，简化QApplication初始化
     app = QApplication(sys.argv)
-    app.setLocale(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
+    # 适配Linux系统中文显示
+    if os.name == "posix":
+        font = app.font()
+        font.setFamily("Noto Sans CJK SC")  # Linux主流中文字体
+        app.setFont(font)
     window = PaperWriter()
     window.show()
     sys.exit(app.exec())
