@@ -20,6 +20,9 @@ from docx import Document
 from docx.shared import Cm
 from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+# --- 【本次修复】补充漏掉的时间模块 ---
+from datetime import datetime
+# ------------------------------------
 
 # --- 字体自动适配 (防止Linux乱码) ---
 DEFAULT_FONT = "Helvetica"
@@ -92,7 +95,6 @@ class LessonPlanWriter(ttk.Window):
         self.type_combo.pack(side=LEFT, padx=5)
 
         # --- 中间主体：分两栏 ---
-        # 修复：Linux下必须用 Panedwindow (小写w)
         main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=10, pady=5)
         
@@ -433,6 +435,7 @@ class LessonPlanWriter(ttk.Window):
                 table.cell(0, 0).text = "课题"
                 table.cell(0, 1).text = topic
                 table.cell(0, 2).text = "时间"
+                # 【关键修复】现在这里可以正常工作了
                 table.cell(0, 3).text = datetime.now().strftime("%Y-%m-%d")
 
                 # R2: 章节 | 课时
