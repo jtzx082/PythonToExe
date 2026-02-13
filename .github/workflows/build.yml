@@ -13,20 +13,19 @@ jobs:
           - os: windows-latest
             name: Windows
             ext: .exe
-            # Windows 不需要那个 Linux 特有的 hidden-import
-            args: --hidden-import=PIL.ImageTk
+            # Windows 下通常需要显式指定这些隐藏导入以防万一
+            args: --hidden-import=PIL._tkinter_finder --hidden-import=PIL.ImageTk
           
           - os: macos-latest
             name: macOS
             ext: ""
-            # macOS 也不需要
             args: --hidden-import=PIL.ImageTk
           
           - os: ubuntu-latest
             name: Linux
             ext: ""
-            # 【关键】只有 Linux 需要强制引入 PIL._tkinter_finder
-            args: --hidden-import=PIL._tkinter_finder --hidden-import=PIL.ImageTk
+            # Linux 下只保留 ImageTk，避免因强制查找 _tkinter_finder 导致构建失败
+            args: --hidden-import=PIL.ImageTk
 
     runs-on: ${{ matrix.os }}
 
@@ -44,7 +43,6 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
-      # 使用 ${{ matrix.args }} 动态插入不同系统需要的参数
       run: |
         pyinstaller --noconfirm --onefile --windowed ${{ matrix.args }} --name "JintaLessonWriter-${{ matrix.name }}" main.py
 
