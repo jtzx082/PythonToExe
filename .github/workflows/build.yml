@@ -9,7 +9,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     
     runs-on: ${{ matrix.os }}
 
@@ -21,22 +21,34 @@ jobs:
       with:
         python-version: '3.10'
 
-    # Linux 下需要额外的系统依赖来支持 tkinter 和 audio
+    # Linux 特定依赖
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-tk ffmpeg
+        sudo apt-get install -y python3-tk ffmpeg libsdl2-dev
 
     - name: Install Python dependencies
       run: |
+        pip install --upgrade pip
         pip install -r requirements.txt
+        # 安装 PyInstaller
         pip install pyinstaller
 
     - name: Build with PyInstaller
       run: |
-        # 使用 --onefile 打包成单文件，--windowed 隐藏控制台窗口
-        pyinstaller --onefile --windowed --name="DeepTTS" main.py
+        # 使用 --collect-all 强制收集 moviepy 及其子模块
+        # 使用 --hidden-import 补充 moviepy 可能动态调用的库
+        pyinstaller --onefile --windowed --name="DeepTTS" \
+          --collect-all moviepy \
+          --hidden-import=moviepy \
+          --hidden-import=moviepy.audio.fx.all \
+          --hidden-import=proglog \
+          --hidden-import=decorator \
+          --hidden-import=tqdm \
+          --hidden-import=imageio \
+          --hidden-import=imageio_ffmpeg \
+          main.py
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
