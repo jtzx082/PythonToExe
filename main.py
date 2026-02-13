@@ -5,7 +5,7 @@ import threading
 import subprocess
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog
-from tkinter import ttk  # 引入 ttk 用于更现代的控件（下拉列表）
+from tkinter import ttk
 import docx
 import edge_tts
 from openai import OpenAI
@@ -34,19 +34,16 @@ class TTSApp:
         self.root = root
         self.root.title("DeepSeek 智能语音合成助手 - 作者: Yu JinQuan")
         
-        # 窗口设置
-        window_width = 900  # 稍微加宽一点以容纳选项
-        window_height = 650
+        window_width = 950
+        window_height = 700
         self.center_window(window_width, window_height)
         self.root.minsize(800, 500)
         
-        # 变量初始化
         self.is_playing = False
         self.is_generating = False 
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
         
-        # 默认选中第一个
         self.selected_voice_key = tk.StringVar(value="晓晓 (女声 - 活泼/默认)")
         
         threading.Thread(target=self.start_loop, daemon=True).start()
@@ -64,52 +61,50 @@ class TTSApp:
         self.loop.run_forever()
 
     def create_ui(self):
-        # === 布局 ===
-        
-        # 1. 顶部
-        frame_top = tk.LabelFrame(self.root, text="文件操作", padx=10, pady=5)
+        # 1. 顶部操作区
+        frame_top = tk.LabelFrame(self.root, text="文件与编辑", padx=10, pady=5)
         frame_top.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 5))
         
         tk.Button(frame_top, text="📂 导入文本/Word", command=self.import_file).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_top, text="🗑️ 清空内容", command=self.clear_text, bg="#ffebee").pack(side=tk.LEFT, padx=5)
-
-        # 2. 底部 (倒序)
         
-        # 2.1 状态栏
+        # --- 新增：多音字修正按钮 ---
+        tk.Frame(frame_top, width=20).pack(side=tk.LEFT) # 占位
+        tk.Label(frame_top, text="选中文字后点击 ->", fg="gray").pack(side=tk.LEFT)
+        tk.Button(frame_top, text="📝 修正选中字读音", command=self.fix_pronunciation, bg="#fff3e0").pack(side=tk.LEFT, padx=5)
+        # -------------------------
+
+        # 2. 底部控制区 (倒序)
         frame_status = tk.Frame(self.root, bd=1, relief=tk.SUNKEN, bg="#f0f0f0")
         frame_status.pack(side=tk.BOTTOM, fill=tk.X)
         self.status_label = tk.Label(frame_status, text="状态: 就绪", anchor=tk.W, bg="#f0f0f0")
         self.status_label.pack(side=tk.LEFT, padx=5)
         tk.Label(frame_status, text="Author: Yu JinQuan", anchor=tk.E, bg="#f0f0f0", fg="#666").pack(side=tk.RIGHT, padx=10)
 
-        # 2.2 导出与控制区
         frame_bottom = tk.LabelFrame(self.root, text="语音控制与导出", padx=10, pady=5)
         frame_bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(5, 10))
         
-        # --- 新增：语音选择下拉框 ---
         tk.Label(frame_bottom, text="选择语音:").pack(side=tk.LEFT, padx=(5, 0))
         voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=25)
         voice_combo.pack(side=tk.LEFT, padx=5)
-        # -------------------------
 
-        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10) # 分隔线
+        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10)
 
         tk.Button(frame_bottom, text="▶️ 生成并播放", command=self.play_audio, bg="#e8f5e9", width=12).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_bottom, text="⏹️ 停止", command=self.stop_audio, bg="#ffcdd2", width=8).pack(side=tk.LEFT, padx=5)
         
-        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10) # 分隔线
+        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10)
         
         tk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3")).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_bottom, text="🎵 导出 WAV", command=lambda: self.export_audio("wav")).pack(side=tk.LEFT, padx=5)
 
-        # 2.3 AI 区
+        # 3. AI 润色区
         frame_ai = tk.LabelFrame(self.root, text="DeepSeek AI 润色", padx=10, pady=5)
         frame_ai.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
-        
         tk.Label(frame_ai, text="提示: 将文本改写为更自然的口语风格").pack(side=tk.LEFT)
         tk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bg="#e3f2fd", fg="#0d47a1").pack(side=tk.RIGHT, padx=5)
 
-        # 3. 中间文本
+        # 4. 中间文本区
         self.text_area = scrolledtext.ScrolledText(self.root, font=("Microsoft YaHei", 12), wrap=tk.WORD)
         self.text_area.pack(side=tk.TOP, expand=True, fill=tk.BOTH, padx=10, pady=5)
 
@@ -117,7 +112,33 @@ class TTSApp:
         self.status_label.config(text=f"状态: {text}")
         self.root.update_idletasks()
 
-    # --- 逻辑功能 ---
+    # --- 核心功能：修正读音 ---
+    def fix_pronunciation(self):
+        # 获取选中的文本
+        try:
+            selection = self.text_area.get(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            messagebox.showwarning("提示", "请先在文本框中选中需要修正读音的汉字！")
+            return
+
+        if not selection.strip():
+            return
+
+        # 弹出输入框
+        hint = f"请输入 [{selection}] 的正确拼音 (格式: 拼音+空格+声调数字)\n例如: chong 2, hang 2, shan 4"
+        pinyin = simpledialog.askstring("修正读音", hint)
+        
+        if pinyin:
+            # 构造 SSML 标签
+            # 格式: <phoneme alphabet="sapi" ph="chong 2">重</phoneme>
+            ssml_tag = f'<phoneme alphabet="sapi" ph="{pinyin.strip()}">{selection}</phoneme>'
+            
+            # 替换选中的文本
+            self.text_area.delete(tk.SEL_FIRST, tk.SEL_LAST)
+            self.text_area.insert(tk.INSERT, ssml_tag)
+            self.update_status(f"已修正: {selection} -> {pinyin}")
+
+    # --- 文件操作 ---
     def import_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text/Word", "*.txt *.docx")])
         if not file_path: return
@@ -140,6 +161,7 @@ class TTSApp:
         self.stop_audio()
         self.update_status("内容已清空")
 
+    # --- DeepSeek ---
     def run_deepseek_polish(self):
         text = self.text_area.get("1.0", tk.END).strip()
         if not text:
@@ -175,16 +197,27 @@ class TTSApp:
             self.root.after(0, lambda: messagebox.showerror("API 错误", f"请求失败: {str(e)}"))
             self.root.after(0, lambda: self.update_status("润色失败"))
 
+    # --- 语音合成核心 (含 SSML 处理) ---
     async def _generate_audio_task(self, text, output_file):
-        # === 核心修改：从下拉框获取 Voice ID ===
         selected_name = self.selected_voice_key.get()
-        # 默认为晓晓，防止出错
         voice_id = VOICE_MAP.get(selected_name, "zh-CN-XiaoxiaoNeural")
         
-        # 可以在控制台打印一下确认
-        print(f"Using Voice: {selected_name} -> {voice_id}")
-        
-        communicate = edge_tts.Communicate(text, voice_id)
+        # === 核心修改：检测并处理 SSML 标签 ===
+        # 如果文本中包含 <phoneme> 标签，说明用户进行了修正，需要封装成标准 SSML
+        if "<phoneme" in text:
+            # 简单的 SSML 封装
+            ssml_text = f"""
+            <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
+                <voice name='{voice_id}'>
+                    {text}
+                </voice>
+            </speak>
+            """
+            communicate = edge_tts.Communicate(ssml_text, voice_id)
+        else:
+            # 普通文本直接发送
+            communicate = edge_tts.Communicate(text, voice_id)
+            
         await communicate.save(output_file)
 
     def play_audio(self):
@@ -203,7 +236,7 @@ class TTSApp:
                 if not self.is_generating: return
                 self.root.after(0, self._play_sound)
             except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror("合成错误", str(e)))
+                self.root.after(0, lambda: messagebox.showerror("合成错误", f"可能原因：SSML标签格式错误或网络中断。\n详情：{str(e)}"))
                 self.root.after(0, lambda: self.update_status("合成出错"))
 
         threading.Thread(target=run_gen).start()
@@ -257,8 +290,6 @@ class TTSApp:
                     
                 elif fmt == "wav":
                     self.root.after(0, lambda: self.update_status("正在转换格式 (FFmpeg)..."))
-                    
-                    # 使用 imageio_ffmpeg
                     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
                     cmd = [
                         ffmpeg_exe, "-y",
@@ -269,13 +300,11 @@ class TTSApp:
                         save_path
                     ]
                     subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
                     if os.path.exists(temp_mp3):
                         os.remove(temp_mp3)
 
                 self.root.after(0, lambda: messagebox.showinfo("成功", f"导出成功！\n保存路径: {save_path}"))
                 self.root.after(0, lambda: self.update_status("导出完成"))
-            
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("导出失败", f"错误详情:\n{str(e)}"))
                 self.root.after(0, lambda: self.update_status("导出失败"))
