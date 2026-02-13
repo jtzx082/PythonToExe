@@ -1,6 +1,7 @@
-pandas
-numpy
-openpyxl
-customtkinter
-packaging
-pyinstaller
+tk
+edge-tts
+pygame
+python-docx
+openai
+moviepy
+imageio[ffmpeg]
