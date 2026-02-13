@@ -3,6 +3,10 @@ edge-tts
 pygame
 python-docx
 openai
-pydub
+# --- 关键修改：强制使用 2.0 以下版本 ---
+moviepy<2.0
+decorator<5.0
+# --- 关键修改结束 ---
+imageio
 imageio-ffmpeg
 pyinstaller
