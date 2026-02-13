@@ -1,3 +1,13 @@
+import sys
+import os
+
+# --- 【关键修复】针对 Linux/PyInstaller 丢失模块的强制导入 ---
+try:
+    import PIL._tkinter_finder
+except ImportError:
+    pass
+# -------------------------------------------------------
+
 import threading
 import json
 import time
@@ -16,7 +26,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
-        super().__init__(themename="superhero") # 可选 themes: cosmo, flatly, journal, superhero
+        super().__init__(themename="superhero") 
         self.title("金塔县中学教案智能生成助手 - DeepSeek驱动")
         self.geometry("1200x850")
         
@@ -38,7 +48,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Label(top_frame, text="课题名称:", width=10).pack(side=LEFT, padx=(20, 0))
         self.topic_entry = ttk.Entry(top_frame, width=30)
         self.topic_entry.pack(side=LEFT, padx=5)
-        self.topic_entry.insert(0, "离子反应") # 默认示例
+        self.topic_entry.insert(0, "离子反应") 
 
         ttk.Label(top_frame, text="教案类型:", width=10).pack(side=LEFT, padx=(20, 0))
         self.type_combo = ttk.Combobox(top_frame, values=["详案 (详细师生互动)", "简案 (提纲挈领)"], state="readonly", width=15)
@@ -46,8 +56,6 @@ class LessonPlanWriter(ttk.Window):
         self.type_combo.pack(side=LEFT, padx=5)
 
         # --- 中间：分两栏 ---
-        # 左侧：基本信息框架（可修改）
-        # 右侧：教学过程撰写（AI生成 + 人工修改）
         main_pane = ttk.PanedWindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=10, pady=5)
         
@@ -145,7 +153,6 @@ class LessonPlanWriter(ttk.Window):
             self.topic_entry.delete(0, END)
 
     def generate_framework(self):
-        """生成左侧的框架信息"""
         api_key = self.get_api_key()
         if not api_key: return
         
@@ -188,11 +195,8 @@ class LessonPlanWriter(ttk.Window):
             response = requests.post(url, headers=headers, json=data)
             if response.status_code == 200:
                 content = response.json()['choices'][0]['message']['content']
-                # 清理可能存在的代码块标记
                 content = content.replace("```json", "").replace("```", "").strip()
                 data = json.loads(content)
-                
-                # 更新UI
                 self.after(0, lambda: self._update_framework_ui(data))
                 self.status_var.set("框架生成完毕，请检查修改")
             else:
@@ -209,11 +213,9 @@ class LessonPlanWriter(ttk.Window):
                 self.fields[key].insert("1.0", value)
 
     def start_writing_process(self):
-        """生成右侧的详细教学过程"""
         api_key = self.get_api_key()
         if not api_key: return
         
-        # 收集上下文
         context = {k: v.get("1.0", END).strip() for k, v in self.fields.items()}
         topic = self.topic_entry.get()
         instruction = self.instruction_entry.get()
@@ -272,84 +274,55 @@ class LessonPlanWriter(ttk.Window):
             self.is_generating = False
 
     def export_word(self):
-        """导出符合金塔县中学模版的Word文档"""
         filename = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word Document", "*.docx")])
         if not filename: return
 
         try:
             doc = Document()
-            # 设置中文字体基础
             doc.styles['Normal'].font.name = u'宋体'
             doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
             
-            # 读取数据
             data = {k: v.get("1.0", END).strip() for k, v in self.fields.items()}
             topic = self.topic_entry.get()
             process = self.process_text.get("1.0", END).strip()
-            
-            # --- 创建表格 ---
-            # 这是一个复杂的表格，我们需要手动构建每一行来匹配您的PDF模版
-            # 模版结构大约是：
-            # R1: 课题 | 时间
-            # R2: 章节 | 课时
-            # R3: 课标
-            # R4: 目标
-            # R5: 重点 | 难点 | 方法 (这里PDF看似是分开的，我们用嵌套或拆分单元格模拟)
             
             table = doc.add_table(rows=8, cols=4)
             table.style = 'Table Grid'
             table.autofit = False
             
-            # 设置列宽 (大致比例)
             for row in table.rows:
-                row.height = Cm(1.0) # 基础高度
+                row.height = Cm(1.0) 
 
-            # --- Row 1: 课题 & 时间 ---
-            # 单元格 0: "课题" Label
             table.cell(0, 0).text = "课题"
-            # 单元格 1: 课题内容 (合并一点)
             table.cell(0, 1).text = topic
-            # 单元格 2: "时间" Label
             table.cell(0, 2).text = "时间"
-            # 单元格 3: 时间内容
             table.cell(0, 3).text = datetime.now().strftime("%Y-%m-%d")
 
-            # --- Row 2: 章节 & 课时 ---
             table.cell(1, 0).text = "课程章节"
             table.cell(1, 1).text = data.get('chapter', '')
             table.cell(1, 2).text = "课时安排"
             table.cell(1, 3).text = data.get('hours', '')
 
-            # --- Row 3: 课程标准 (跨全列) ---
             table.cell(2, 0).merge(table.cell(2, 3))
             table.cell(2, 0).text = f"课程标准:\n{data.get('standard', '')}"
 
-            # --- Row 4: 教学目标 (跨全列) ---
             table.cell(3, 0).merge(table.cell(3, 3))
             table.cell(3, 0).text = f"教学目标:\n{data.get('objectives', '')}"
 
-            # --- Row 5: 教学分析 (重点、难点、方法) ---
-            # 这行比较特殊，根据PDF，可能是几个并列的框
-            # 我们将这行拆分为三个主要区域，利用换行符区分
             table.cell(4, 0).merge(table.cell(4, 3))
-            # 或者我们手动重构这行：
             p = table.cell(4, 0).paragraphs[0]
             p.add_run(f"教学重点：\n{data.get('key_points', '')}\n\n").bold = True
             p.add_run(f"教学难点：\n{data.get('difficulties', '')}\n\n").bold = True
             p.add_run(f"教学方法：\n{data.get('methods', '')}").bold = True
 
-            # --- Row 6: 教学过程 (最长的一块) ---
             table.cell(5, 0).merge(table.cell(5, 3))
             cell = table.cell(5, 0)
             cell.text = "教学过程与师生活动"
-            # 添加具体内容
             p = cell.add_paragraph(process)
             
-            # --- Row 7: 作业设计 ---
             table.cell(6, 0).merge(table.cell(6, 3))
             table.cell(6, 0).text = f"作业设计:\n{data.get('homework', '')}"
 
-            # --- Row 8: 课后反思 ---
             table.cell(7, 0).merge(table.cell(7, 3))
             table.cell(7, 0).text = "课后反思:\n (课后手动填写)"
 
