@@ -2,7 +2,6 @@ import sys
 import os
 
 # --- 兼容性修复 ---
-# 即使 Pillow 降级了，保留这个 Try-Catch 也是一种防御性编程，防止未来环境差异报错
 try:
     import PIL._tkinter_finder
 except ImportError:
@@ -69,7 +68,8 @@ class LessonPlanWriter(ttk.Window):
 
         # 课题与进度
         topic_frame = ttk.Labelframe(header_frame, text="📚 课题与进度规划", padding=10, bootstyle="primary")
-        topic_frame.pack(side=LEFT, fill=Y, expand=True, fill=X, padx=5)
+        # 【修复点】将原来的 fill=Y, ..., fill=X 改为 fill=BOTH
+        topic_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
         
         f1 = ttk.Frame(topic_frame)
         f1.pack(fill=X, pady=(0, 5))
