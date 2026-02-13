@@ -39,7 +39,7 @@ else:
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
         super().__init__(themename="superhero") 
-        self.title("金塔县中学教案智能生成系统 v3.0 (Final)")
+        self.title("金塔县中学教案智能生成系统 v3.2 (2025课标版)")
         self.geometry("1350x950")
         
         self.lesson_data = {} 
@@ -51,7 +51,7 @@ class LessonPlanWriter(ttk.Window):
         self.total_periods_var = tk.IntVar(value=1)
         self.current_period_disp_var = tk.StringVar(value="1")
         
-        self.author_info = "设计与开发：金塔县中学化学教研组 · 于金全 (Yu JinQuan) | 核心驱动：DeepSeek-V3"
+        self.author_info = "设计与开发：金塔县中学化学教研组 · 俞晋全 (Yu JinQuan) | 核心驱动：DeepSeek-V3"
         
         self.setup_ui()
         self.save_current_data_to_memory(1)
@@ -68,7 +68,6 @@ class LessonPlanWriter(ttk.Window):
 
         # 课题与进度
         topic_frame = ttk.Labelframe(header_frame, text="📚 课题与进度规划", padding=10, bootstyle="primary")
-        # 【修复点】将原来的 fill=Y, ..., fill=X 改为 fill=BOTH
         topic_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
         
         f1 = ttk.Frame(topic_frame)
@@ -140,9 +139,11 @@ class LessonPlanWriter(ttk.Window):
         self.fields['custom_content'] = tk.Text(custom_frame, height=3, font=font_norm, bg="#fff0f0", fg="#000")
         self.fields['custom_content'].pack(fill=X, pady=2)
         
+        # 【修正】更新课标版本显示
         labels = [
             ("📖 章节名称", "chapter", 1),
-            ("🎯 素养导向目标 (新课标)", "objectives", 7),
+            ("📋 课程标准 (2017版2025修订)", "standard", 4), # UI更新
+            ("🎯 素养导向目标", "objectives", 6),
             ("🔥 教学重点", "key_points", 3),
             ("💡 教学难点", "difficulties", 3),
             ("🛠️ 教学方法", "methods", 2),
@@ -193,7 +194,7 @@ class LessonPlanWriter(ttk.Window):
     # --- 逻辑处理 ---
 
     def show_author(self):
-        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.0.0 (Linux/Win/Mac)\n适用：金塔县中学教案模版标准")
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.2.0 (Linux/Win/Mac)\n适用：金塔县中学教案模版标准")
 
     def update_period_list(self):
         try:
@@ -301,20 +302,23 @@ class LessonPlanWriter(ttk.Window):
         
         content_instruction = ""
         if custom_content:
-            content_instruction = f"【特别指令】用户强制指定本课时(第{current_p}课时)内容为：『{custom_content}』。请只围绕此内容设计，忽略其他课时的内容。"
+            content_instruction = f"【特别指令】用户强制指定本课时(第{current_p}课时)内容为：『{custom_content}』。请只围绕此内容设计。"
         else:
             content_instruction = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
 
+        # 【修正】Prompt中强制更新为最新课标
         prompt = f"""
         任务：为高中化学课题《{topic}》设计第 {current_p} 课时的教案框架。
         {content_instruction}
 
         【核心要求】
-        1. **素养导向**：严禁使用“三维目标”分类。请用一段通顺的话描述“通过...培养...素养”。
-        2. 格式：纯文本，无Markdown。
-        3. 返回JSON格式，Key必须保持一致：
+        1. **课程标准**：【必须】引用**《普通高中化学课程标准（2017年版2025年日常修订版）》**中与本课时内容直接相关的具体条目，严禁使用“匹配课标”等模糊词汇。
+        2. **素养导向**：严禁使用“三维目标”分类。请用一段通顺的话描述“通过...培养...素养”。
+        3. 格式：纯文本，无Markdown。
+        4. 返回JSON格式，Key必须保持一致：
         {{
             "chapter": "所属章节",
+            "standard": "在此处填写具体的2025日常修订版课标条目内容",
             "objectives": "素养导向目标",
             "key_points": "重点",
             "difficulties": "难点",
@@ -470,7 +474,7 @@ class LessonPlanWriter(ttk.Window):
 
                 # R3 课标
                 table.cell(2, 0).merge(table.cell(2, 3))
-                table.cell(2, 0).text = f"课程标准:\n{data.get('standard', '（AI匹配新课标要求）')}" 
+                table.cell(2, 0).text = f"课程标准:\n{data.get('standard', '（未生成，请点击生成框架）')}" 
 
                 # R4 目标
                 table.cell(3, 0).merge(table.cell(3, 3))
