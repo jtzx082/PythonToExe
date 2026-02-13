@@ -3,10 +3,6 @@ edge-tts
 pygame
 python-docx
 openai
-# --- 关键修改：强制使用 2.0 以下版本 ---
-moviepy<2.0
-decorator<5.0
-# --- 关键修改结束 ---
-imageio
+# 仅保留 ffmpeg 包装器，用于获取 ffmpeg 路径
 imageio-ffmpeg
 pyinstaller
