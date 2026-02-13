@@ -38,8 +38,9 @@ else:
 
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
-        super().__init__(themename="superhero") 
-        self.title("金塔县中学教案智能生成系统 v3.2 (2025课标版)")
+        # 【修复2】切换为 "flatly" (明亮主题) 以解决Linux下导出弹窗文字不可见的问题
+        super().__init__(themename="flatly") 
+        self.title("金塔县中学教案智能生成系统 v3.3 (滚轮增强版)")
         self.geometry("1350x950")
         
         self.lesson_data = {} 
@@ -110,23 +111,53 @@ class LessonPlanWriter(ttk.Window):
         main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=15, pady=5)
         
-        # 左侧框架
+        # --- 左侧：设计框架 ---
         left_frame = ttk.Labelframe(main_pane, text="1. 教学设计框架 (AI辅助)", padding=10, bootstyle="info")
         main_pane.add(left_frame, weight=1)
         
-        left_canvas = tk.Canvas(left_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=left_canvas.yview)
-        self.scrollable_frame = ttk.Frame(left_canvas)
-        self.scrollable_frame.bind("<Configure>", lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
+        # 滚动区域配置
+        self.left_canvas = tk.Canvas(left_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=self.left_canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.left_canvas)
+        self.scrollable_frame.bind("<Configure>", lambda e: self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all")))
         
-        left_canvas_window = left_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        left_canvas_window = self.left_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         def configure_canvas(event):
-            left_canvas.itemconfig(left_canvas_window, width=event.width)
-        left_canvas.bind('<Configure>', configure_canvas)
+            self.left_canvas.itemconfig(left_canvas_window, width=event.width)
+        self.left_canvas.bind('<Configure>', configure_canvas)
         
-        left_canvas.configure(yscrollcommand=scrollbar.set)
-        left_canvas.pack(side="left", fill="both", expand=True)
+        self.left_canvas.configure(yscrollcommand=scrollbar.set)
+        self.left_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+
+        # --- 【修复1】 鼠标滚轮绑定 (同时适配 Windows/Mac 和 Linux) ---
+        def _on_mousewheel(event):
+            # Windows/Mac
+            self.left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        def _on_linux_scroll_up(event):
+            # Linux Scroll Up
+            self.left_canvas.yview_scroll(-1, "units")
+
+        def _on_linux_scroll_down(event):
+            # Linux Scroll Down
+            self.left_canvas.yview_scroll(1, "units")
+
+        def _bind_mouse(event):
+            # 只有鼠标进入左侧区域时才绑定全局滚轮，防止干扰右侧
+            self.left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            self.left_canvas.bind_all("<Button-4>", _on_linux_scroll_up)
+            self.left_canvas.bind_all("<Button-5>", _on_linux_scroll_down)
+
+        def _unbind_mouse(event):
+            self.left_canvas.unbind_all("<MouseWheel>")
+            self.left_canvas.unbind_all("<Button-4>")
+            self.left_canvas.unbind_all("<Button-5>")
+
+        # 绑定进入/离开事件
+        left_frame.bind('<Enter>', _bind_mouse)
+        left_frame.bind('<Leave>', _unbind_mouse)
+        # -----------------------------------------------------------
 
         self.fields = {}
         font_bold = (MAIN_FONT_NAME, UI_FONT_SIZE, "bold")
@@ -139,10 +170,9 @@ class LessonPlanWriter(ttk.Window):
         self.fields['custom_content'] = tk.Text(custom_frame, height=3, font=font_norm, bg="#fff0f0", fg="#000")
         self.fields['custom_content'].pack(fill=X, pady=2)
         
-        # 【修正】更新课标版本显示
         labels = [
             ("📖 章节名称", "chapter", 1),
-            ("📋 课程标准 (2017版2025修订)", "standard", 4), # UI更新
+            ("📋 课程标准 (2017版2025修订)", "standard", 4), 
             ("🎯 素养导向目标", "objectives", 6),
             ("🔥 教学重点", "key_points", 3),
             ("💡 教学难点", "difficulties", 3),
@@ -159,7 +189,7 @@ class LessonPlanWriter(ttk.Window):
         
         ttk.Button(left_frame, text="⚡ 生成当前课时框架", command=self.generate_framework, bootstyle="info").pack(fill=X, pady=5)
 
-        # 右侧过程
+        # --- 右侧：过程撰写 ---
         right_frame = ttk.Labelframe(main_pane, text="2. 教学过程与活动 (40分钟)", padding=10, bootstyle="success")
         main_pane.add(right_frame, weight=2)
         
@@ -194,7 +224,7 @@ class LessonPlanWriter(ttk.Window):
     # --- 逻辑处理 ---
 
     def show_author(self):
-        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.2.0 (Linux/Win/Mac)\n适用：金塔县中学教案模版标准")
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.3.0 (Linux/Win/Mac)\n适用：金塔县中学教案模版标准")
 
     def update_period_list(self):
         try:
@@ -306,7 +336,6 @@ class LessonPlanWriter(ttk.Window):
         else:
             content_instruction = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
 
-        # 【修正】Prompt中强制更新为最新课标
         prompt = f"""
         任务：为高中化学课题《{topic}》设计第 {current_p} 课时的教案框架。
         {content_instruction}
