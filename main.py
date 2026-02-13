@@ -60,7 +60,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     doc = Document()
 
     # ── 1. 页面设置 (Page Setup) ──
-    # A4纸, 上37mm, 下35mm, 左28mm, 右26mm
     section = doc.sections[0]
     section.page_width = Mm(210)
     section.page_height = Mm(297)
@@ -102,14 +101,28 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     h2_counter = 0
     h3_counter = 0
     
+    # 辅助函数：清洗行内容以进行比对 (智能去重)
+    def clean_text_for_comparison(text):
+        # 去除 Markdown 符号、序号、空格，只比对核心文字
+        t = re.sub(r"^[#\*\-1-9一二三四五六七八九十\.\、\s]+", "", text)
+        return t.strip()
+
+    title_clean = clean_text_for_comparison(title)
+
     lines = md_text.splitlines()
     for line in lines:
         stripped = line.strip()
         if not stripped: continue
         if re.match(r"^[-*_]{3,}\s*$", stripped): continue
-        if stripped == title: continue # 去重标题
 
-        # ── 强力预处理：剥离行首的列表符号 (1. 或 *) ──
+        # ──【核心修复】智能去重 ──
+        # 即使这行前面有 "1. " 或 "一、"，只要核心文字和题目一样，就跳过
+        current_line_clean = clean_text_for_comparison(stripped)
+        if current_line_clean == title_clean:
+            continue
+
+        # ── 预处理：剥离行首的列表符号 ──
+        # 这能解决 "1. 一、标题" 这种双重编号问题
         is_list_item = False
         list_match = re.match(r"^(\d+[.、]|\*|-)\s+(.*)", stripped)
         if list_match:
@@ -149,7 +162,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             level = len(heading_match.group(1))
             raw_text = heading_match.group(2)
             
-            # 深度清洗标题内容
+            # 深度清洗标题内容：去除 "1. ", "一、", "(1)" 等所有自带编号
             text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
             text_content = re.sub(r"^[\(（][一二三四五六七八九十\d]+[\)）]\s*", "", text_content)
             text_content = _strip_inline(text_content) 
@@ -266,7 +279,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.3.5"  # Updated version
+APP_VERSION = "v2.3.6"  # Final polished version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -345,7 +358,7 @@ def get_system_prompts(doc_type, user_req=""):
     else:
         outline_sys += "结构需符合该文体的标准规范。\n"
 
-    # 正文提示词 (Writing Prompt) - 重点修复顺序问题
+    # 正文提示词 (Writing Prompt)
     writing_sys = f"{role_desc}\n请根据大纲撰写正文。\n\n"
     writing_sys += f"【用户附加要求】：{user_req if user_req else '无'}\n\n"
     
