@@ -60,6 +60,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     doc = Document()
 
     # ── 1. 页面设置 (Page Setup) ──
+    # A4纸, 上37mm, 下35mm, 左28mm, 右26mm
     section = doc.sections[0]
     section.page_width = Mm(210)
     section.page_height = Mm(297)
@@ -109,19 +110,14 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         if stripped == title: continue # 去重标题
 
         # ── 强力预处理：剥离行首的列表符号 (1. 或 *) ──
-        # 这能解决 "1. 一、标题" 这种双重编号问题
         is_list_item = False
-        # 匹配 "1. ", "1、", "* ", "- " 等开头
         list_match = re.match(r"^(\d+[.、]|\*|-)\s+(.*)", stripped)
         if list_match:
             is_list_item = True
-            # 如果是纯数字列表，剥离它，只保留内容
-            # 这样后续如果是标题，就不会带有 "1." 了
             stripped = list_match.group(2) 
 
         # ── 特殊段落拦截：摘要、关键词、参考文献 ──
         clean_check = re.sub(r"^[#\s]+", "", stripped)
-        # 再次清洗可能残留的序号 (如 "(一) 摘要")
         clean_check = re.sub(r"^[\(（]?[一二三四五六七八九十\d]+[\)）\.]?\s*", "", clean_check).strip()
 
         special_keywords = ["摘要", "关键词", "参考文献", "致谢", "Abstract", "Keywords", "References", "结语"]
@@ -153,8 +149,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             level = len(heading_match.group(1))
             raw_text = heading_match.group(2)
             
-            # 深度清洗标题内容：去除 "1. ", "一、", "(1)" 等所有自带编号
-            # 确保只剩下纯文本，由代码来重新编号
+            # 深度清洗标题内容
             text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
             text_content = re.sub(r"^[\(（][一二三四五六七八九十\d]+[\)）]\s*", "", text_content)
             text_content = _strip_inline(text_content) 
@@ -187,16 +182,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
         # ── 普通段落 ──
         p = doc.add_paragraph()
-        # 如果之前剥离了列表符号，这里可以视情况加回去，或者作为普通段落
-        # 为了公文美观，建议直接作为缩进段落，不加黑点
-        # 但如果是并列关系，可以用 "• " 区分
-        # 这里逻辑：如果是列表项且不是标题，加个点区分
-        if is_list_item and not heading_match:
-             # 简单判断：如果本来就是 "1. " 这种有序的，剥离后就变成了普通段落
-             # 如果是无序列表 "* "，可以加个 "• "
-             # 但为了最干净的公文，我们只缩进，不加符号，或者仅对短语加符号
-             pass 
-        
         _add_inline_runs_styled(p, stripped)
 
     # ── 5. 页码设置 ──
@@ -281,7 +266,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.3.4"  # Updated version
+APP_VERSION = "v2.3.5"  # Updated version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -333,7 +318,7 @@ DOCUMENT_TYPES = [
     ("✨", "自定义",    "根据您的描述自由定制文稿类型与结构"),
 ]
 
-# ── 动态提示词系统 ──────────────────────────────────────────────────────────
+# ── 动态提示词系统 (核心修复：强制顺序) ──────────────────────────────────────
 def get_system_prompts(doc_type, user_req=""):
     """根据文稿类型和用户要求动态生成 System Prompt"""
     if doc_type == "自定义":
@@ -343,6 +328,7 @@ def get_system_prompts(doc_type, user_req=""):
     else:
         role_desc = f"你是一位资深的{doc_type}撰写专家。"
 
+    # 大纲提示词
     outline_sys = f"{role_desc}\n请根据题目和要求设计清晰大纲。\n\n"
     if doc_type == "自定义":
         outline_sys += (
@@ -351,10 +337,15 @@ def get_system_prompts(doc_type, user_req=""):
             "2. **结构灵活**：除非用户要求，否则**不要**添加“摘要”、“关键词”、“参考文献”。\n"
         )
     elif doc_type == "学术论文":
-        outline_sys += "【学术规范】\n- 必须包含：摘要、关键词、引言、正文、结论、参考文献。\n- 摘要、关键词等标题前**不要加数字序号**。\n"
+        outline_sys += (
+            "【学术规范】\n"
+            "- 必须包含：摘要、关键词、引言、正文、结论、参考文献。\n"
+            "- 摘要、关键词等标题前**不要加数字序号**。\n"
+        )
     else:
         outline_sys += "结构需符合该文体的标准规范。\n"
 
+    # 正文提示词 (Writing Prompt) - 重点修复顺序问题
     writing_sys = f"{role_desc}\n请根据大纲撰写正文。\n\n"
     writing_sys += f"【用户附加要求】：{user_req if user_req else '无'}\n\n"
     
@@ -369,8 +360,11 @@ def get_system_prompts(doc_type, user_req=""):
         writing_sys += (
             "【撰写原则】\n"
             "1. 内容充实，逻辑严密。\n"
-            "2. **不要手动编号**：标题前不要加“1.”或“一、”，只用 #, ## 标记层级。\n"
-            "3. 摘要、关键词前不要加任何标记。\n"
+            "2. **禁止手动编号**：标题前不要加“1.”或“一、”，只用 #, ## 标记层级。\n"
+            "3. **严禁在摘要前添加任何标题**：输出顺序必须严格为：\n"
+            "   [题目] -> [摘要] -> [关键词] -> [正文内容(一、...)]\n"
+            "   绝不允许在摘要之前出现“一、引言”或类似章节标题！\n"
+            "4. 摘要、关键词前不要加任何标记。\n"
         )
 
     return outline_sys, writing_sys
