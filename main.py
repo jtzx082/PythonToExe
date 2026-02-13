@@ -1,393 +1,305 @@
-import customtkinter as ctk
-import pandas as pd
-import numpy as np
-import threading
-import os
 import sys
-from tkinter import filedialog, messagebox
+import os
+import json
+import requests
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QTextEdit, QPushButton, QComboBox,
+    QFileDialog, QMessageBox, QDialog, QFormLayout
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from docx import Document
+from docx.shared import Cm, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
 
-# --- 全局外观设置 ---
-ctk.set_appearance_mode("System")  
-ctk.set_default_color_theme("blue")  
+# ===================== 配置文件路径 =====================
+CONFIG_PATH = "config.json"
+# ======================================================
 
-class GaokaoApp(ctk.CTk):
+class ConfigManager:
+    """配置文件管理：保存/加载API Key"""
+    @staticmethod
+    def load_config():
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except:
+                return {"deepseek_api_key": ""}
+        return {"deepseek_api_key": ""}
+
+    @staticmethod
+    def save_api_key(api_key):
+        config = {"deepseek_api_key": api_key.strip()}
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+
+class APISettingDialog(QDialog):
+    """API Key 设置弹窗"""
+    def __init__(self, current_key):
+        super().__init__()
+        self.setWindowTitle("API 设置")
+        self.setFixedSize(500, 180)
+        self.api_key = current_key
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        # API Key 输入框
+        self.key_input = QLineEdit()
+        self.key_input.setPlaceholderText("请输入 DeepSeek API Key")
+        self.key_input.setText(self.api_key)
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)  # 密文显示
+        form_layout.addRow("DeepSeek API Key：", self.key_input)
+
+        # 保存按钮
+        self.save_btn = QPushButton("✅ 保存并应用")
+        self.save_btn.clicked.connect(self.save_key)
+        form_layout.addRow("", self.save_btn)
+
+        layout.addLayout(form_layout)
+        self.setLayout(layout)
+
+    def save_key(self):
+        key = self.key_input.text().strip()
+        if not key:
+            QMessageBox.warning(self, "提示", "API Key 不能为空")
+            return
+        ConfigManager.save_api_key(key)
+        QMessageBox.information(self, "成功", "API Key 已保存，下次启动自动加载！")
+        self.accept()
+
+class PaperWriter(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.config = ConfigManager.load_config()
+        self.DEEPSEEK_API_KEY = self.config.get("deepseek_api_key", "")
+        self.DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+        self.setWindowTitle("智能公文/论文撰写工具 | API可配置 | 标准Word导出")
+        self.setMinimumSize(950, 780)
+        self.init_ui()
 
-        # 1. 窗口基础设置
-        self.title("甘肃新高考赋分系统 Pro Max (自定义参数版) | 俞晋全名师工作室")
-        self.geometry("1200x850")
-        self.minsize(1000, 750)
-        
-        # 数据变量
-        self.file_path = None
-        self.df_raw = None
-        self.sheet_names = []
-        self.param_entries = {} # 存储参数输入框的字典
-        
-        # 布局配置
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+    def init_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
 
-        # ==========================
-        # === 左侧边栏 (操作区) ===
-        # ==========================
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(9, weight=1) 
+        # ========== 顶部：API 设置按钮 ==========
+        top_layout = QHBoxLayout()
+        self.api_status_label = QLabel()
+        self.update_api_status()
+        self.setting_btn = QPushButton("⚙️ API 设置")
+        self.setting_btn.clicked.connect(self.open_api_setting)
+        top_layout.addWidget(self.api_status_label)
+        top_layout.addStretch()
+        top_layout.addWidget(self.setting_btn)
+        layout.addLayout(top_layout)
 
-        # Logo
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=22, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
+        # ========== 文稿类型 ==========
+        type_layout = QHBoxLayout()
+        type_label = QLabel("文稿类型：")
+        self.type_combo = QComboBox()
+        self.type_combo.addItems([
+            "期刊论文", "工作计划", "工作总结", "学习反思", "教学案例", "汇报材料", "自定义"
+        ])
+        type_layout.addWidget(type_label)
+        type_layout.addWidget(self.type_combo)
+        layout.addLayout(type_layout)
 
-        # 1. 导入
-        self.btn_load = ctk.CTkButton(self.sidebar_frame, text="1. 导入Excel成绩表", height=40, command=self.load_file_action)
-        self.btn_load.grid(row=1, column=0, padx=20, pady=10)
+        # ========== 题目输入 ==========
+        title_layout = QHBoxLayout()
+        title_label = QLabel("题目/要求：")
+        self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText("输入完整题目或详细要求，例如：2026年度部门工作总结")
+        title_layout.addWidget(title_label)
+        title_layout.addWidget(self.title_input)
+        layout.addLayout(title_layout)
 
-        # 2. Sheet选择
-        self.lbl_sheet = ctk.CTkLabel(self.sidebar_frame, text="选择工作表 (Sheet):", anchor="w")
-        self.lbl_sheet.grid(row=2, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.sheet_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_sheet_event)
-        self.sheet_dropdown.grid(row=3, column=0, padx=20, pady=(5, 10))
-        self.sheet_dropdown.set("等待导入...")
-        self.sheet_dropdown.configure(state="disabled")
+        # ========== 生成大纲 ==========
+        self.outline_btn = QPushButton("📌 生成标准公文大纲")
+        self.outline_btn.clicked.connect(self.generate_outline)
+        layout.addWidget(self.outline_btn)
 
-        # 3. 班级列
-        self.lbl_class = ctk.CTkLabel(self.sidebar_frame, text="指定班级列 (计算班排):", anchor="w")
-        self.lbl_class.grid(row=4, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.class_col_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[])
-        self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
-        self.class_col_dropdown.set("等待加载...")
+        # ========== 大纲编辑区 ==========
+        layout.addWidget(QLabel("📝 大纲（纯文本公文层级，可直接修改）："))
+        self.outline_edit = QTextEdit()
+        self.outline_edit.setPlaceholderText("大纲格式：一、 →（一）→1. →（1），禁止使用Markdown")
+        layout.addWidget(self.outline_edit)
 
-        # 底部按钮区
-        self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始赋分计算", height=50, fg_color="green", font=ctk.CTkFont(size=16, weight="bold"), command=self.start_calculation)
-        self.btn_calc.grid(row=10, column=0, padx=20, pady=15)
-        self.btn_calc.configure(state="disabled")
+        # ========== 撰写全文 ==========
+        self.write_btn = QPushButton("🚀 按公文格式撰写完整文稿")
+        self.write_btn.clicked.connect(self.generate_full_text)
+        layout.addWidget(self.write_btn)
 
-        self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果 Excel", height=40, command=self.export_file)
-        self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
-        self.btn_export.configure(state="disabled")
+        # ========== 文稿展示 ==========
+        layout.addWidget(QLabel("📄 完整文稿（纯文本无格式）："))
+        self.result_text = QTextEdit()
+        layout.addWidget(self.result_text)
 
-        # ==========================
-        # === 右侧主内容区 (Tab) ===
-        # ==========================
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-        
-        # 状态栏
-        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请先导入数据，然后确认【赋分标准】。", anchor="w", font=("Microsoft YaHei UI", 16))
-        self.status_label.pack(fill="x", pady=(0, 10))
+        # ========== 导出Word ==========
+        self.export_btn = QPushButton("📄 导出【国家标准公文格式】Word文档")
+        self.export_btn.clicked.connect(self.export_word)
+        layout.addWidget(self.export_btn)
 
-        # 创建选项卡
-        self.tabview = ctk.CTkTabview(self.main_frame)
-        self.tabview.pack(fill="both", expand=True)
-        self.tabview.add("科目设置")
-        self.tabview.add("赋分标准设置")
-        
-        # --- Tab 1: 科目设置 ---
-        self.setup_subject_tab()
+    def update_api_status(self):
+        """更新API状态显示"""
+        if self.DEEPSEEK_API_KEY:
+            self.api_status_label.setText("✅ API Key 已配置")
+            self.api_status_label.setStyleSheet("color:green;")
+        else:
+            self.api_status_label.setText("❌ 未设置 API Key，请先配置")
+            self.api_status_label.setStyleSheet("color:red;")
 
-        # --- Tab 2: 赋分参数设置 ---
-        self.setup_params_tab()
+    def open_api_setting(self):
+        """打开API设置弹窗"""
+        dialog = APISettingDialog(self.DEEPSEEK_API_KEY)
+        if dialog.exec():
+            self.config = ConfigManager.load_config()
+            self.DEEPSEEK_API_KEY = self.config.get("deepseek_api_key", "")
+            self.update_api_status()
 
-        # 进度条
-        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progressbar.pack(fill="x", pady=(15, 0))
-        self.progressbar.set(0)
+    def check_api_key(self):
+        """检查API是否配置"""
+        if not self.DEEPSEEK_API_KEY:
+            QMessageBox.critical(self, "错误", "请先点击右上角【API 设置】配置 DeepSeek Key！")
+            return False
+        return True
 
-    # --------------------------
-    # 界面构建辅助函数
-    # --------------------------
-    def setup_subject_tab(self):
-        tab = self.tabview.tab("科目设置")
-        
-        # 滚动设置区
-        self.scroll_frame = ctk.CTkScrollableFrame(tab, label_text="勾选对应列名")
-        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # 原始计入科目区
-        self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【直接计入总分】 (语数外 + 物理/历史):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_raw.pack(fill="x", pady=(10, 5), padx=10)
-        self.raw_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.raw_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.raw_checkboxes = []
-
-        # 赋分科目区
-        self.lbl_assign = ctk.CTkLabel(self.scroll_frame, text="【等级赋分科目】 (化生政地):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_assign.pack(fill="x", pady=(25, 5), padx=10)
-        self.assign_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.assign_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.assign_checkboxes = []
-
-    def setup_params_tab(self):
-        tab = self.tabview.tab("赋分标准设置")
-        
-        info_lbl = ctk.CTkLabel(tab, text="请根据实际需求修改参数（默认值为甘肃省标准）。\n人数比例请输入整数（如15代表15%）。", font=("Microsoft YaHei UI", 13))
-        info_lbl.pack(pady=10)
-
-        # 参数网格容器
-        grid_frame = ctk.CTkFrame(tab)
-        grid_frame.pack(padx=20, pady=10)
-
-        # 表头
-        headers = ["等级", "人数比例 (%)", "赋分上限 (T2)", "赋分下限 (T1)"]
-        for col, text in enumerate(headers):
-            ctk.CTkLabel(grid_frame, text=text, font=("Arial", 12, "bold")).grid(row=0, column=col, padx=15, pady=10)
-
-        # 默认数据 (甘肃标准)
-        default_data = [
-            ('A', '15', '100', '86'),
-            ('B', '35', '85',  '71'),
-            ('C', '35', '70',  '56'),
-            ('D', '13', '55',  '41'),
-            ('E', '2',  '40',  '30')
-        ]
-
-        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
-
-        for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
-            # 等级标签
-            ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
-            
-            # 百分比输入
-            e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_pct.insert(0, pct)
-            e_pct.grid(row=row, column=1, pady=5)
-            
-            # 上限输入
-            e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_max.insert(0, tmax)
-            e_max.grid(row=row, column=2, pady=5)
-            
-            # 下限输入
-            e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_min.insert(0, tmin)
-            e_min.grid(row=row, column=3, pady=5)
-
-            # 存入字典方便调用
-            self.param_entries[f"{grade}_percent"] = e_pct
-            self.param_entries[f"{grade}_max"] = e_max
-            self.param_entries[f"{grade}_min"] = e_min
-
-    # --------------------------
-    # 文件加载与 UI 更新逻辑
-    # --------------------------
-    def load_file_action(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
-        if not file_path: return
-        
-        self.file_path = file_path
-        self.status_label.configure(text=f"正在分析文件: {os.path.basename(file_path)}...")
-        self.progressbar.start()
-        threading.Thread(target=self.read_excel_sheets).start()
-
-    def read_excel_sheets(self):
+    def call_deepseek(self, prompt):
+        """调用DeepSeek API（带配置检查）"""
+        if not self.check_api_key():
+            return "API未配置，请先设置"
+        headers = {
+            "Authorization": f"Bearer {self.DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2
+        }
         try:
-            excel_file = pd.ExcelFile(self.file_path)
-            self.sheet_names = excel_file.sheet_names
-            self.after(0, self.update_sheet_ui)
+            resp = requests.post(self.DEEPSEEK_API_URL, json=data, timeout=90)
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("错误", f"读取失败: {e}"))
-            self.after(0, self.progressbar.stop)
+            return f"API调用失败：{str(e)}"
 
-    def update_sheet_ui(self):
-        self.progressbar.stop()
-        self.progressbar.set(1)
-        self.status_label.configure(text=f"已就绪: {os.path.basename(self.file_path)}")
-        self.sheet_dropdown.configure(values=self.sheet_names, state="normal")
-        self.sheet_dropdown.set(self.sheet_names[0])
-        self.change_sheet_event(self.sheet_names[0])
-
-    def change_sheet_event(self, sheet_name):
-        try:
-            self.df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name)
-            columns = self.df_raw.columns.tolist()
-            
-            self.class_col_dropdown.configure(values=columns)
-            default_class = next((c for c in columns if "班" in str(c)), columns[0] if columns else "")
-            self.class_col_dropdown.set(default_class)
-
-            self.create_subject_checkboxes(columns)
-            
-            self.btn_calc.configure(state="normal")
-            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请在【科目设置】页勾选")
-        except Exception as e:
-            messagebox.showerror("错误", f"加载工作表失败: {e}")
-
-    def create_subject_checkboxes(self, columns):
-        for cb in self.raw_checkboxes + self.assign_checkboxes: cb.destroy()
-        self.raw_checkboxes.clear()
-        self.assign_checkboxes.clear()
-        
-        common_raw = ["语文", "数学", "英语", "物理", "历史", "外语"]
-        common_assign = ["化学", "生物", "地理", "政治", "思想政治"]
-
-        def add_cb(parent, text, storage, keywords):
-            cb = ctk.CTkCheckBox(parent, text=text, font=("Microsoft YaHei UI", 12))
-            cb.grid(row=len(storage)//5, column=len(storage)%5, sticky="w", padx=10, pady=8)
-            if any(k in str(text) for k in keywords): cb.select()
-            storage.append(cb)
-
-        for col in columns:
-            add_cb(self.raw_checkboxes_frame, col, self.raw_checkboxes, common_raw)
-        for col in columns:
-            add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
-
-    # --------------------------
-    # 核心计算逻辑 (动态读取参数)
-    # --------------------------
-    def get_user_configs(self):
-        """从UI界面读取用户输入的参数"""
-        configs = []
-        grades = ['A', 'B', 'C', 'D', 'E']
-        try:
-            for g in grades:
-                pct = float(self.param_entries[f"{g}_percent"].get()) / 100.0
-                t_max = int(self.param_entries[f"{g}_max"].get())
-                t_min = int(self.param_entries[f"{g}_min"].get())
-                
-                configs.append({
-                    'grade': g,
-                    'percent': pct,
-                    't_max': t_max,
-                    't_min': t_min
-                })
-            return configs
-        except ValueError:
-            messagebox.showerror("参数错误", "赋分标准中请输入有效的数字！")
-            return None
-
-    def start_calculation(self):
-        self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
-        self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
-        self.selected_class_col = self.class_col_dropdown.get()
-
-        if not self.selected_raw and not self.selected_assign:
-            messagebox.showwarning("提示", "请至少勾选一个科目！")
+    def generate_outline(self):
+        if not self.check_api_key(): return
+        doc_type = self.type_combo.currentText()
+        title = self.title_input.text().strip()
+        if not title:
+            QMessageBox.warning(self, "提示", "请输入题目或要求")
             return
-        
-        # 验证并获取配置
-        self.user_configs = self.get_user_configs()
-        if not self.user_configs:
+        prompt = f"""
+        你是专业公文写作助手，请为【{doc_type}】生成大纲。
+        题目：{title}
+        要求：
+        1. 纯文本，绝对禁止任何Markdown、符号、表格、代码
+        2. 严格使用国家标准公文层级：一、 →（一）→1. →（1）
+        3. 结构清晰，可直接用于正式文稿
+        只输出大纲，不要多余解释。
+        """
+        outline = self.call_deepseek(prompt)
+        self.outline_edit.setPlainText(outline)
+
+    def generate_full_text(self):
+        if not self.check_api_key(): return
+        doc_type = self.type_combo.currentText()
+        title = self.title_input.text().strip()
+        outline = self.outline_edit.toPlainText().strip()
+        if not title or not outline:
+            QMessageBox.warning(self, "提示", "请先生成并完善大纲")
             return
+        prompt = f"""
+        你是专业公文撰稿人，请按【{doc_type}】正式文体写作。
+        题目：{title}
+        大纲：{outline}
+        要求：
+        1. 纯文本，无任何Markdown、格式符、特殊符号
+        2. 严格使用公文层级：一、 （一） 1. （1）
+        3. 语言正式、逻辑严谨、内容完整
+        4. 直接输出正文，不要前言、说明、解释
+        """
+        full_text = self.call_deepseek(prompt)
+        self.result_text.setPlainText(full_text)
 
-        self.btn_calc.configure(state="disabled")
-        self.status_label.configure(text="正在根据自定义参数计算...")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start()
-        
-        threading.Thread(target=self.run_math_logic).start()
-
-    def run_math_logic(self):
+    def export_word(self):
+        """导出国家标准公文格式Word（GB/T 9704-2012）"""
+        title = self.title_input.text().strip()
+        content = self.result_text.toPlainText().strip()
+        if not title or not content:
+            QMessageBox.warning(self, "提示", "请先生成完整文稿")
+            return
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "导出Word", f"{title}.docx", "Word文档 (*.docx)"
+        )
+        if not save_path:
+            return
         try:
-            df = self.df_raw.copy()
-            grade_configs = self.user_configs # 使用用户自定义的配置
+            doc = Document()
+            # A4公文页面设置
+            section = doc.sections[0]
+            section.page_height = Cm(29.7)
+            section.page_width = Cm(21.0)
+            section.left_margin = Cm(2.8)
+            section.right_margin = Cm(2.6)
+            section.top_margin = Cm(3.7)
+            section.bottom_margin = Cm(3.5)
 
-            def calculate_assigned_score(series):
-                series_num = pd.to_numeric(series, errors='coerce')
-                valid = series_num.dropna()
-                if len(valid) == 0: return pd.Series(index=series.index, dtype=float)
-                
-                sorted_scores = valid.sort_values(ascending=False)
-                result = pd.Series(index=valid.index, dtype=float)
-                curr = 0
-                for cfg in grade_configs:
-                    cnt = int(np.round(len(valid) * cfg['percent']))
-                    if cfg['grade'] == 'E': cnt = len(valid) - curr
-                    if cnt <= 0: continue
-                    end = min(curr + cnt, len(valid))
-                    if curr >= end: break
-                    chunk = sorted_scores.iloc[curr:end]
-                    Y2, Y1 = chunk.max(), chunk.min()
-                    T2, T1 = cfg['t_max'], cfg['t_min']
-                    
-                    def linear(Y): return (T2+T1)/2 if Y2==Y1 else T1 + ((Y-Y1)*(T2-T1))/(Y2-Y1)
-                    
-                    result.loc[chunk.index] = chunk.apply(linear)
-                    curr = end
-                return result.round()
+            # 公文标题：二号小标宋体、居中
+            title_p = doc.add_paragraph()
+            title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            title_run = title_p.add_run(title)
+            title_run.font.size = Pt(22)
+            title_run.font.bold = True
+            title_run.font.name = "小标宋体"
+            title_run._element.rPr.rFonts.set(qn('w:eastAsia'), '小标宋体')
+            doc.add_paragraph()
 
-            def calc_ranks(dframe, target_col, rank_base_name):
-                yr_rk = f"{rank_base_name}年排"
-                cl_rk = f"{rank_base_name}班排"
-                dframe[yr_rk] = dframe[target_col].rank(ascending=False, method='min')
-                if self.selected_class_col in dframe.columns:
-                    dframe[cl_rk] = dframe.groupby(self.selected_class_col)[target_col].rank(ascending=False, method='min')
+            # 正文按公文层级自动排版
+            lines = content.splitlines()
+            for line in lines:
+                line = line.strip()
+                if not line: continue
+                p = doc.add_paragraph()
+                run = p.add_run(line)
+                run.font.size = Pt(16)  # 三号字
+
+                # 一级标题：一、 黑体
+                if line.startswith(("一、","二、","三、","四、","五、")):
+                    run.font.name = "黑体"
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
+                    run.font.bold = True
+                    p.paragraph_format.first_line_indent = Cm(0)
+                # 二级标题：（一） 楷体
+                elif line.startswith(("（一）","（二）","（三）")):
+                    run.font.name = "楷体_GB2312"
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '楷体_GB2312')
+                    p.paragraph_format.first_line_indent = Cm(0)
+                # 三级标题：1.  加粗
+                elif line.startswith(("1.","2.","3.")):
+                    run.font.bold = True
+                    p.paragraph_format.first_line_indent = Cm(0)
+                # 正文：仿宋_GB2312 + 首行缩进
                 else:
-                    dframe[cl_rk] = None
-                return yr_rk, cl_rk
+                    run.font.name = "仿宋_GB2312"
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋_GB2312')
+                    p.paragraph_format.first_line_indent = Cm(0.74)
+                p.paragraph_format.line_spacing = 1.25
 
-            cols_for_raw_total = []    
-            cols_for_final_total = []  
-            output_cols_order = []     
-
-            # 1. 原始科目
-            for sub in self.selected_raw:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                yr_rk, cl_rk = calc_ranks(df, sub, sub)
-                cols_for_raw_total.append(sub)
-                cols_for_final_total.append(sub)
-                output_cols_order.extend([sub, yr_rk, cl_rk])
-
-            # 2. 赋分科目
-            for sub in self.selected_assign:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                assigned_col_name = f"{sub}赋分"
-                df[assigned_col_name] = calculate_assigned_score(df[sub])
-                
-                yr_rk, cl_rk = calc_ranks(df, assigned_col_name, assigned_col_name)
-                
-                cols_for_raw_total.append(sub)            
-                cols_for_final_total.append(assigned_col_name) 
-                output_cols_order.extend([sub, assigned_col_name, yr_rk, cl_rk])
-
-            # 3. 原始总分
-            df["原始总分"] = df[cols_for_raw_total].sum(axis=1, min_count=1)
-            raw_yr_rk, raw_cl_rk = calc_ranks(df, "原始总分", "原始总分")
-            raw_total_group = ["原始总分", raw_yr_rk, raw_cl_rk]
-
-            # 4. 最终总分
-            df["总分"] = df[cols_for_final_total].sum(axis=1, min_count=1)
-            final_yr_rk, final_cl_rk = calc_ranks(df, "总分", "总分")
-            final_total_group = ["总分", final_yr_rk, final_cl_rk]
-
-            df = df.sort_values(final_yr_rk)
-
-            all_generated_cols = set(output_cols_order + raw_total_group + final_total_group)
-            base_info_cols = [c for c in df.columns if c not in all_generated_cols]
-            
-            final_order = base_info_cols + output_cols_order + raw_total_group + final_total_group
-            final_order = [c for c in final_order if c in df.columns]
-            self.df_result = df[final_order]
-
-            self.after(0, self.finish_calculation)
-
+            doc.save(save_path)
+            QMessageBox.information(self, "成功", "已按【国家标准公文格式】导出Word！")
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("计算错误", str(e)))
-            self.after(0, self.stop_loading_ui)
-
-    def finish_calculation(self):
-        self.stop_loading_ui()
-        self.status_label.configure(text="✅ 计算完成！数据已应用当前赋分标准。")
-        self.btn_export.configure(state="normal", fg_color="#2CC985", text="导出 Excel 结果")
-        messagebox.showinfo("成功", "计算完成！\n请注意：本次计算使用了您在【赋分标准设置】中填写的参数。")
-
-    def stop_loading_ui(self):
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate")
-        self.progressbar.set(1)
-        self.btn_calc.configure(state="normal")
-
-    def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
-        if save_path:
-            try:
-                self.df_result.to_excel(save_path, index=False)
-                messagebox.showinfo("导出成功", f"文件已保存至:\n{save_path}")
-                os.startfile(os.path.dirname(save_path))
-            except Exception as e:
-                messagebox.showerror("保存失败", str(e))
+            QMessageBox.critical(self, "错误", f"导出失败：{str(e)}")
 
 if __name__ == "__main__":
-    app = GaokaoApp()
-    app.mainloop()
+    app = QApplication(sys.argv)
+    window = PaperWriter()
+    window.show()
+    sys.exit(app.exec())
