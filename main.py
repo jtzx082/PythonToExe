@@ -60,7 +60,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     doc = Document()
 
     # ── 1. 页面设置 (Page Setup) ──
-    # A4纸, 上37mm, 下35mm, 左28mm, 右26mm
     section = doc.sections[0]
     section.page_width = Mm(210)
     section.page_height = Mm(297)
@@ -68,27 +67,24 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     section.bottom_margin = Mm(35)
     section.left_margin = Mm(28)
     section.right_margin = Mm(26)
-
-    # 开启奇偶页页眉页脚不同
     doc.settings.odd_and_even_pages_header_footer = True
 
     # ── 2. 基础字体设置辅助函数 ──
     def set_run_font(run, font_cn, font_en='Times New Roman', size_pt=16, bold=False):
-        """设置中西文字体, size_pt=16 对应 三号字"""
         run.font.name = font_en
         run._element.rPr.rFonts.set(qn('w:eastAsia'), font_cn)
         run.font.size = Pt(size_pt)
         run.font.bold = bold
         run.font.color.rgb = RGBColor(0, 0, 0)
 
-    # 修改默认样式 'Normal' 为公文正文样式: 仿宋_GB2312, 三号(16pt), 行距28磅
+    # 修改默认样式 'Normal' 为公文正文样式
     style_normal = doc.styles['Normal']
     style_normal.font.name = 'Times New Roman'
     style_normal.element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋_GB2312')
     style_normal.font.size = Pt(16)
     style_normal.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
     style_normal.paragraph_format.line_spacing = Pt(28)
-    style_normal.paragraph_format.first_line_indent = Pt(32) # 首行缩进2字符
+    style_normal.paragraph_format.first_line_indent = Pt(32)
 
     # ── 3. 大标题排版 ──
     head_p = doc.add_paragraph()
@@ -97,7 +93,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     head_p.paragraph_format.line_spacing = Pt(28)
     head_p.paragraph_format.space_before = Pt(0)
     head_p.paragraph_format.space_after = Pt(28)
-
     run_title = head_p.add_run(title)
     set_run_font(run_title, '方正小标宋简体', size_pt=22, bold=False)
 
@@ -109,29 +104,27 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     lines = md_text.splitlines()
     for line in lines:
         stripped = line.strip()
-        if not stripped:
-            continue
-        
-        # 忽略水平线
-        if re.match(r"^[-*_]{3,}\s*$", stripped):
-            continue
+        if not stripped: continue
+        if re.match(r"^[-*_]{3,}\s*$", stripped): continue
+        if stripped == title: continue # 去重标题
 
-        # 忽略与大标题重复的第一行
-        if stripped == title:
-            continue
-        
-        # ── 预处理：判断是否为列表项并剥离符号 ──
+        # ── 强力预处理：剥离行首的列表符号 (1. 或 *) ──
+        # 这能解决 "1. 一、标题" 这种双重编号问题
         is_list_item = False
-        list_match = re.match(r"^[\*\-]\s+(.*)", stripped)
+        # 匹配 "1. ", "1、", "* ", "- " 等开头
+        list_match = re.match(r"^(\d+[.、]|\*|-)\s+(.*)", stripped)
         if list_match:
             is_list_item = True
-            stripped = list_match.group(1) 
-        
-        # ── 特殊段落拦截：摘要、关键词、参考文献、结语等 ──
-        clean_check = re.sub(r"^[#\s]+", "", stripped)
-        clean_check = re.sub(r"^[\(（]?[一二三四五六七八九十\d]+[\)）\.]?", "", clean_check).strip()
+            # 如果是纯数字列表，剥离它，只保留内容
+            # 这样后续如果是标题，就不会带有 "1." 了
+            stripped = list_match.group(2) 
 
-        special_keywords = ["摘要", "关键词", "参考文献", "致谢", "Abstract", "Keywords", "References"]
+        # ── 特殊段落拦截：摘要、关键词、参考文献 ──
+        clean_check = re.sub(r"^[#\s]+", "", stripped)
+        # 再次清洗可能残留的序号 (如 "(一) 摘要")
+        clean_check = re.sub(r"^[\(（]?[一二三四五六七八九十\d]+[\)）\.]?\s*", "", clean_check).strip()
+
+        special_keywords = ["摘要", "关键词", "参考文献", "致谢", "Abstract", "Keywords", "References", "结语"]
         is_special = False
         for kw in special_keywords:
             if clean_check.startswith(kw):
@@ -159,7 +152,11 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         if heading_match:
             level = len(heading_match.group(1))
             raw_text = heading_match.group(2)
+            
+            # 深度清洗标题内容：去除 "1. ", "一、", "(1)" 等所有自带编号
+            # 确保只剩下纯文本，由代码来重新编号
             text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
+            text_content = re.sub(r"^[\(（][一二三四五六七八九十\d]+[\)）]\s*", "", text_content)
             text_content = _strip_inline(text_content) 
 
             p = doc.add_paragraph()
@@ -167,8 +164,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             
             if level == 1:
                 h1_counter += 1
-                h2_counter = 0
-                h3_counter = 0
+                h2_counter = 0; h3_counter = 0
                 p.paragraph_format.first_line_indent = Pt(32)
                 num_str = to_chinese_num(h1_counter)
                 run = p.add_run(f"{num_str}、{text_content}")
@@ -189,40 +185,39 @@ def save_as_docx(filepath: str, title: str, md_text: str):
                 set_run_font(run, '仿宋_GB2312', size_pt=16, bold=True)
             continue
 
-        # ── 普通段落（含列表项处理） ──
+        # ── 普通段落 ──
         p = doc.add_paragraph()
-        if is_list_item:
-            stripped = "• " + stripped
+        # 如果之前剥离了列表符号，这里可以视情况加回去，或者作为普通段落
+        # 为了公文美观，建议直接作为缩进段落，不加黑点
+        # 但如果是并列关系，可以用 "• " 区分
+        # 这里逻辑：如果是列表项且不是标题，加个点区分
+        if is_list_item and not heading_match:
+             # 简单判断：如果本来就是 "1. " 这种有序的，剥离后就变成了普通段落
+             # 如果是无序列表 "* "，可以加个 "• "
+             # 但为了最干净的公文，我们只缩进，不加符号，或者仅对短语加符号
+             pass 
+        
         _add_inline_runs_styled(p, stripped)
 
     # ── 5. 页码设置 ──
     def create_page_number_xml(run):
-        fldChar1 = OxmlElement('w:fldChar')
-        fldChar1.set(qn('w:fldCharType'), 'begin')
+        fldChar1 = OxmlElement('w:fldChar'); fldChar1.set(qn('w:fldCharType'), 'begin')
         run._element.append(fldChar1)
-        instrText = OxmlElement('w:instrText')
-        instrText.set(qn('xml:space'), 'preserve')
-        instrText.text = "PAGE"
+        instrText = OxmlElement('w:instrText'); instrText.set(qn('xml:space'), 'preserve'); instrText.text = "PAGE"
         run._element.append(instrText)
-        fldChar2 = OxmlElement('w:fldChar')
-        fldChar2.set(qn('w:fldCharType'), 'end')
+        fldChar2 = OxmlElement('w:fldChar'); fldChar2.set(qn('w:fldCharType'), 'end')
         run._element.append(fldChar2)
 
     def setup_footer(footer):
         p = footer.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.first_line_indent = 0
-        r1 = p.add_run("— ") 
-        set_run_font(r1, '宋体', size_pt=14)
-        r2 = p.add_run()
-        set_run_font(r2, '宋体', size_pt=14)
-        create_page_number_xml(r2)
-        r3 = p.add_run(" —")
-        set_run_font(r3, '宋体', size_pt=14)
+        r1 = p.add_run("— "); set_run_font(r1, '宋体', size_pt=14)
+        r2 = p.add_run(); set_run_font(r2, '宋体', size_pt=14); create_page_number_xml(r2)
+        r3 = p.add_run(" —"); set_run_font(r3, '宋体', size_pt=14)
 
     setup_footer(section.footer)
     setup_footer(section.even_page_footer)
-
     doc.save(filepath)
 
 
@@ -286,7 +281,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.3.3"  # Updated version
+APP_VERSION = "v2.3.4"  # Updated version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -338,57 +333,45 @@ DOCUMENT_TYPES = [
     ("✨", "自定义",    "根据您的描述自由定制文稿类型与结构"),
 ]
 
-# ── 动态提示词系统 (Dynamic Prompts) ─────────────────────────────────────────
+# ── 动态提示词系统 ──────────────────────────────────────────────────────────
 def get_system_prompts(doc_type, user_req=""):
-    """
-    根据文稿类型和用户要求动态生成 System Prompt
-    """
-    # 1. 基础人设
+    """根据文稿类型和用户要求动态生成 System Prompt"""
     if doc_type == "自定义":
         role_desc = "你是一位全能型、适应性极强的专业写作助手。"
     elif doc_type == "学术论文":
         role_desc = "你是一位严谨的学术写作专家，精通学术规范和论文结构。"
     else:
-        role_desc = f"你是一位资深的{doc_type}撰写专家，擅长该类文稿的结构与表达。"
+        role_desc = f"你是一位资深的{doc_type}撰写专家。"
 
-    # 2. 核心指令 (Outline)
     outline_sys = f"{role_desc}\n请根据题目和要求设计清晰大纲。\n\n"
     if doc_type == "自定义":
         outline_sys += (
             "【重要指令】\n"
-            "1. **完全遵循用户要求**：如果用户要求写一般文章、散文或特定结构，请严格执行，不要套用学术论文格式。\n"
-            "2. **结构灵活**：除非用户明确要求，否则**不要**自动添加“摘要”、“关键词”、“参考文献”等学术板块。\n"
-            "3. **精准响应**：根据用户的“附加要求”来决定大纲的详略和风格。\n"
+            "1. **完全遵循用户要求**：严格执行用户的字数、风格要求，不要套用学术论文格式。\n"
+            "2. **结构灵活**：除非用户要求，否则**不要**添加“摘要”、“关键词”、“参考文献”。\n"
         )
     elif doc_type == "学术论文":
-        outline_sys += (
-            "【学术规范】\n"
-            "- 必须包含：摘要、关键词、引言、正文各节、结论、参考文献。\n"
-            "- 摘要、关键词、参考文献标题前**不要加数字序号**。\n"
-        )
+        outline_sys += "【学术规范】\n- 必须包含：摘要、关键词、引言、正文、结论、参考文献。\n- 摘要、关键词等标题前**不要加数字序号**。\n"
     else:
-        outline_sys += "结构需符合该文体的标准规范，同时兼顾用户的特殊要求。\n"
+        outline_sys += "结构需符合该文体的标准规范。\n"
 
-    # 3. 核心指令 (Writing)
     writing_sys = f"{role_desc}\n请根据大纲撰写正文。\n\n"
     writing_sys += f"【用户附加要求】：{user_req if user_req else '无'}\n\n"
     
     if doc_type == "自定义":
         writing_sys += (
             "【撰写原则】\n"
-            "1. **字数与篇幅**：如果用户指定了字数（如800字），必须严格控制在此范围内，不要长篇大论。\n"
-            "2. **风格适配**：严格采用用户要求的语体风格（如通俗、幽默、正式等）。\n"
-            "3. **非学术模式**：如果是写一般论文或文章，严禁使用学术引用格式，严禁添加无关的摘要/参考文献。\n"
+            "1. **严格控制字数**：必须符合用户指定的字数限制。\n"
+            "2. **风格适配**：严格采用用户要求的语体风格。\n"
+            "3. **格式**：标题前**不要**加“1.”、“一、”等序号，只用Markdown的 # 表示层级，由排版软件自动生成序号。\n"
         )
     else:
         writing_sys += (
             "【撰写原则】\n"
             "1. 内容充实，逻辑严密。\n"
-            "2. **关注字数要求**：尽量贴近用户期望的篇幅。\n"
-            "3. 格式规范：使用 Markdown 标记标题 (#, ##)。\n"
+            "2. **不要手动编号**：标题前不要加“1.”或“一、”，只用 #, ## 标记层级。\n"
+            "3. 摘要、关键词前不要加任何标记。\n"
         )
-        if doc_type == "学术论文":
-            writing_sys += "4. 特别注意：摘要、关键词、参考文献部分不要加章节序号。\n"
 
     return outline_sys, writing_sys
 
@@ -851,7 +834,6 @@ class AIWriterApp(ctk.CTk):
         self._outline_editor.clear()
         self._tabs.set("📋  大纲编辑")
         
-        # 动态获取提示词
         prompt = self._make_prompt()
         user_req = self._req_entry.get().strip()
         system_prompt, _ = get_system_prompts(self._doc_type, user_req)
@@ -889,7 +871,6 @@ class AIWriterApp(ctk.CTk):
         self._wc_var.set("字数：0")
         self._tabs.set("📄  正文输出")
         
-        # 动态获取提示词
         prompt = self._make_prompt(outline=outline)
         user_req = self._req_entry.get().strip()
         _, system_prompt = get_system_prompts(self._doc_type, user_req)
