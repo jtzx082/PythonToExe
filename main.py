@@ -3,31 +3,28 @@ import sys
 import asyncio
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
-import docx  # python-docx
+from tkinter import filedialog, messagebox, scrolledtext, simpledialog
+import docx
 import edge_tts
-from openai import OpenAI # 用于调用 DeepSeek
-from moviepy.editor import AudioFileClip, ColorClip
+from openai import OpenAI
 
-# --- 配置部分 ---
-# 请在环境变量中设置 DEEPSEEK_API_KEY，或者直接在下方填入（不推荐直接填入代码中）
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "") 
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+# 默认配置
+DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com"
 
 class TTSApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("DeepSeek 智能语音合成助手")
-        self.root.geometry("800x600")
+        self.root.title("DeepSeek 智能语音合成助手 (修复版)")
+        self.root.geometry("850x650")
         
-        # 状态变量
+        # 变量初始化
         self.is_playing = False
+        self.is_generating = False # 标记是否正在生成中
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
         
-        # 启动异步事件循环线程
+        # 启动异步循环线程
         threading.Thread(target=self.start_loop, daemon=True).start()
-
         self.create_ui()
 
     def start_loop(self):
@@ -35,108 +32,115 @@ class TTSApp:
         self.loop.run_forever()
 
     def create_ui(self):
-        # 顶部按钮区：文件操作
-        frame_top = tk.Frame(self.root)
+        # 1. 顶部：文件操作区
+        frame_top = tk.LabelFrame(self.root, text="文件操作", padx=10, pady=5)
         frame_top.pack(pady=10, fill=tk.X, padx=10)
         
         tk.Button(frame_top, text="📂 导入文本/Word", command=self.import_file).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_top, text="🧹 清空内容", command=self.clear_text).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame_top, text="🗑️ 清空内容", command=self.clear_text, bg="#ffebee").pack(side=tk.LEFT, padx=5)
         
-        # 中间：文本输入区
-        self.text_area = scrolledtext.ScrolledText(self.root, font=("Arial", 12))
+        # 2. 中间：文本编辑区
+        self.text_area = scrolledtext.ScrolledText(self.root, font=("Microsoft YaHei", 12), wrap=tk.WORD)
         self.text_area.pack(expand=True, fill=tk.BOTH, padx=10, pady=5)
         
-        # DeepSeek 功能区
-        frame_ai = tk.Frame(self.root)
+        # 3. AI 功能区
+        frame_ai = tk.LabelFrame(self.root, text="DeepSeek AI 润色", padx=10, pady=5)
         frame_ai.pack(pady=5, fill=tk.X, padx=10)
-        tk.Label(frame_ai, text="AI 辅助:", fg="blue").pack(side=tk.LEFT)
-        tk.Button(frame_ai, text="✨ 使用 DeepSeek 润色文本", command=self.run_deepseek_polish, bg="#e1f5fe").pack(side=tk.LEFT, padx=5)
         
-        # 底部：控制与导出
-        frame_bottom = tk.Frame(self.root)
-        frame_bottom.pack(pady=15, fill=tk.X, padx=10)
+        tk.Label(frame_ai, text="提示: 将文本改写为更自然的口语风格").pack(side=tk.LEFT)
+        tk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bg="#e3f2fd", fg="#0d47a1").pack(side=tk.RIGHT, padx=5)
+
+        # 4. 底部：播放与导出
+        frame_bottom = tk.LabelFrame(self.root, text="语音合成与导出", padx=10, pady=5)
+        frame_bottom.pack(pady=10, fill=tk.X, padx=10)
         
-        tk.Button(frame_bottom, text="▶️ 生成并播放", command=self.play_audio, bg="#e8f5e9", width=15).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_bottom, text="⏹️ 停止播放", command=self.stop_audio, bg="#ffebee").pack(side=tk.LEFT, padx=5)
+        # 播放控制
+        tk.Button(frame_bottom, text="▶️ 生成并播放", command=self.play_audio, bg="#e8f5e9", width=12).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame_bottom, text="⏹️ 停止 / 重置", command=self.stop_audio, bg="#ffcdd2", width=12).pack(side=tk.LEFT, padx=5)
         
-        tk.Label(frame_bottom, text="|").pack(side=tk.LEFT, padx=10)
+        # 分隔线
+        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=15)
         
+        # 导出控制
         tk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3")).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_bottom, text="🎬 导出 WMV", command=lambda: self.export_audio("wmv")).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame_bottom, text="🎬 导出 WMV视频", command=lambda: self.export_audio("wmv")).pack(side=tk.LEFT, padx=5)
         
         # 状态栏
-        self.status_label = tk.Label(self.root, text="就绪", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status_label = tk.Label(self.root, text="就绪", bd=1, relief=tk.SUNKEN, anchor=tk.W, bg="#f0f0f0")
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
 
     def update_status(self, text):
-        self.status_label.config(text=text)
+        self.status_label.config(text=f"状态: {text}")
         self.root.update_idletasks()
 
-    # --- 文件处理 ---
+    # --- 功能函数 ---
     def import_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text/Word", "*.txt *.docx")])
         if not file_path: return
-        
-        content = ""
         try:
-            if file_path.endswith(".txt"):
+            content = ""
+            if file_path.lower().endswith(".txt"):
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
-            elif file_path.endswith(".docx"):
+            elif file_path.lower().endswith(".docx"):
                 doc = docx.Document(file_path)
                 content = "\n".join([para.text for para in doc.paragraphs])
-            
             self.text_area.delete("1.0", tk.END)
             self.text_area.insert(tk.END, content)
-            self.update_status(f"已导入: {os.path.basename(file_path)}")
+            self.update_status(f"已加载: {os.path.basename(file_path)}")
         except Exception as e:
-            messagebox.showerror("错误", f"无法读取文件: {str(e)}")
+            messagebox.showerror("导入失败", str(e))
 
     def clear_text(self):
         self.text_area.delete("1.0", tk.END)
-        self.update_status("已清空")
+        self.stop_audio()
+        self.update_status("内容已清空")
 
-    # --- DeepSeek API 调用 ---
+    # --- DeepSeek 调用 ---
     def run_deepseek_polish(self):
         text = self.text_area.get("1.0", tk.END).strip()
         if not text:
-            messagebox.showwarning("提示", "请输入需要润色的内容")
+            messagebox.showwarning("提示", "请先输入需要润色的文本")
             return
             
-        if not DEEPSEEK_API_KEY:
-            # 尝试弹窗让用户输入 Key
-            key = tk.simpledialog.askstring("DeepSeek API Key", "请输入你的 DeepSeek API Key:", show="*")
-            if not key: return
-            globals()["DEEPSEEK_API_KEY"] = key
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            api_key = simpledialog.askstring("API Key", "请输入 DeepSeek API Key:", show="*")
+            if not api_key: return
+            os.environ["DEEPSEEK_API_KEY"] = api_key # 临时保存到环境变量
 
-        threading.Thread(target=self._deepseek_thread, args=(text,)).start()
+        threading.Thread(target=self._deepseek_thread, args=(text, api_key)).start()
 
-    def _deepseek_thread(self, text):
-        self.update_status("正在连接 DeepSeek 进行润色...")
+    def _deepseek_thread(self, text, api_key):
+        self.update_status("正在连接 DeepSeek AI...")
         try:
-            client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+            client = OpenAI(api_key=api_key, base_url=DEFAULT_DEEPSEEK_URL)
             response = client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
-                    {"role": "system", "content": "你是一个专业的文本润色助手。请将用户的输入修改为更自然、流畅、适合朗读的口语化文本。保持原意，但修正语病。直接输出润色后的文本，不要包含解释。"},
+                    {"role": "system", "content": "你是一个专业的配音文案润色专家。请将用户输入的文本修改为适合朗读的口语化文案，去除生硬的书面语，增加自然的连接词。请直接输出润色后的结果，不要包含任何解释性语言。"},
                     {"role": "user", "content": text},
                 ],
                 stream=False
             )
-            polished_text = response.choices[0].message.content
+            polished = response.choices[0].message.content
             
-            # 回到主线程更新 UI
-            self.root.after(0, lambda: self.text_area.delete("1.0", tk.END))
-            self.root.after(0, lambda: self.text_area.insert(tk.END, polished_text))
-            self.root.after(0, lambda: self.update_status("DeepSeek 润色完成"))
+            def update_ui():
+                self.text_area.delete("1.0", tk.END)
+                self.text_area.insert(tk.END, polished)
+                self.update_status("润色完成")
+                messagebox.showinfo("完成", "DeepSeek 润色已完成！")
+            
+            self.root.after(0, update_ui)
+            
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("API 错误", str(e)))
-            self.root.after(0, lambda: self.update_status("API 调用失败"))
+            self.root.after(0, lambda: messagebox.showerror("API 错误", f"请求失败: {str(e)}"))
+            self.root.after(0, lambda: self.update_status("润色失败"))
 
-    # --- 语音合成逻辑 (Edge-TTS) ---
-    async def _generate_audio(self, text, output_file):
-        # 使用中文语音，可根据需要修改为 zh-CN-YunjianNeural 等
-        voice = "zh-CN-XiaoxiaoNeural" 
+    # --- 语音处理核心 ---
+    async def _generate_audio_task(self, text, output_file):
+        # 语音角色：zh-CN-XiaoxiaoNeural (女), zh-CN-YunxiNeural (男)
+        voice = "zh-CN-XiaoxiaoNeural"
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_file)
 
@@ -144,32 +148,43 @@ class TTSApp:
         text = self.text_area.get("1.0", tk.END).strip()
         if not text: return
         
-        self.stop_audio() # 先停止之前的
-        self.update_status("正在生成语音...")
+        self.stop_audio()
+        self.is_generating = True
+        self.update_status("正在合成语音 (Edge-TTS)...")
         
         def run_gen():
-            future = asyncio.run_coroutine_threadsafe(
-                self._generate_audio(text, self.temp_audio_file), self.loop
-            )
             try:
-                future.result() # 等待完成
-                self.root.after(0, self._play_sound_file)
+                future = asyncio.run_coroutine_threadsafe(
+                    self._generate_audio_task(text, self.temp_audio_file), self.loop
+                )
+                future.result() # 等待生成完成
+                
+                if not self.is_generating: # 如果生成过程中被点击了停止
+                    return
+
+                self.root.after(0, self._play_sound)
             except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror("错误", str(e)))
+                self.root.after(0, lambda: messagebox.showerror("合成错误", str(e)))
+                self.root.after(0, lambda: self.update_status("合成出错"))
 
         threading.Thread(target=run_gen).start()
 
-    def _play_sound_file(self):
-        import pygame
-        pygame.mixer.init()
-        pygame.mixer.music.load(self.temp_audio_file)
-        pygame.mixer.music.play()
-        self.is_playing = True
-        self.update_status("正在播放...")
+    def _play_sound(self):
+        try:
+            import pygame
+            pygame.mixer.init()
+            pygame.mixer.music.load(self.temp_audio_file)
+            pygame.mixer.music.play()
+            self.is_playing = True
+            self.is_generating = False
+            self.update_status("正在播放...")
+        except Exception as e:
+            messagebox.showerror("播放错误", f"无法播放音频: {e}\n(Linux系统请确保安装了 ffmpeg 和 audio 驱动)")
 
     def stop_audio(self):
-        import pygame
+        self.is_generating = False # 标记停止生成
         try:
+            import pygame
             pygame.mixer.init()
             if pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()
@@ -179,45 +194,55 @@ class TTSApp:
         self.is_playing = False
         self.update_status("已停止")
 
-    # --- 导出功能 ---
+    # --- 导出 ---
     def export_audio(self, fmt):
         text = self.text_area.get("1.0", tk.END).strip()
         if not text: return
 
-        file_types = [("MP3 Audio", "*.mp3")] if fmt == "mp3" else [("WMV Video", "*.wmv")]
-        save_path = filedialog.asksaveasfilename(defaultextension=f".{fmt}", filetypes=file_types)
+        # 选择保存路径
+        ext = ".mp3" if fmt == "mp3" else ".wmv"
+        save_path = filedialog.asksaveasfilename(defaultextension=ext, filetypes=[(f"{fmt.upper()} File", f"*{ext}")])
         if not save_path: return
 
-        self.update_status(f"正在导出 {fmt}...")
+        self.update_status(f"正在导出为 {fmt}...")
 
         def run_export():
             try:
-                # 1. 先生成 MP3
+                # 1. 先生成基础 MP3
                 temp_mp3 = "temp_export.mp3"
                 future = asyncio.run_coroutine_threadsafe(
-                    self._generate_audio(text, temp_mp3), self.loop
+                    self._generate_audio_task(text, temp_mp3), self.loop
                 )
                 future.result()
 
-                # 2. 如果是 WMV，进行转换
-                if fmt == "wmv":
-                    audio = AudioFileClip(temp_mp3)
-                    # 创建一个黑色背景的视频，时长等于音频时长
-                    video = ColorClip(size=(640, 480), color=(0,0,0), duration=audio.duration)
-                    video = video.set_audio(audio)
-                    # 导出 WMV (使用 wmv 编码器或 libx264)
-                    video.write_videofile(save_path, fps=1, codec="libx264", audio_codec="aac")
-                    audio.close()
-                    video.close()
-                else:
-                    # 如果是 MP3，直接重命名或移动
+                # 2. 根据格式处理
+                if fmt == "mp3":
                     import shutil
                     shutil.move(temp_mp3, save_path)
+                
+                elif fmt == "wmv":
+                    self.root.after(0, lambda: self.update_status("正在渲染视频 (MoviePy)..."))
+                    # 延迟导入 moviepy，避免启动时报错
+                    from moviepy.editor import AudioFileClip, ColorClip
+                    
+                    audio = AudioFileClip(temp_mp3)
+                    # 创建黑底视频
+                    video = ColorClip(size=(640, 480), color=(0,0,0), duration=audio.duration)
+                    video = video.set_audio(audio)
+                    # 写入文件，使用 libx264 兼容性更好
+                    video.write_videofile(save_path, fps=1, codec="libx264", audio_codec="aac", logger=None)
+                    
+                    audio.close()
+                    video.close()
+                    os.remove(temp_mp3)
 
-                self.root.after(0, lambda: messagebox.showinfo("成功", f"文件已导出到: {save_path}"))
+                self.root.after(0, lambda: messagebox.showinfo("成功", f"导出成功！\n保存路径: {save_path}"))
                 self.root.after(0, lambda: self.update_status("导出完成"))
+            
+            except ImportError:
+                 self.root.after(0, lambda: messagebox.showerror("组件缺失", "导出视频需要 moviepy 库，但在当前环境中未找到。请检查打包配置。"))
             except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror("导出错误", str(e)))
+                self.root.after(0, lambda: messagebox.showerror("导出失败", f"错误详情:\n{str(e)}"))
                 self.root.after(0, lambda: self.update_status("导出失败"))
 
         threading.Thread(target=run_export).start()
