@@ -10,24 +10,48 @@ import docx
 import edge_tts
 from openai import OpenAI
 import imageio_ffmpeg
-import re  # 新增：引入正则库，用于处理隐形同音字
+import re
 
 # 默认配置
 DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com"
 
-# --- 语音角色映射表 ---
+# --- 扩展版超级语音角色映射表 ---
 VOICE_MAP = {
-    "晓晓 (女声 - 活泼/默认)": "zh-CN-XiaoxiaoNeural",
-    "云希 (男声 - 沉稳/影视)": "zh-CN-YunxiNeural",
-    "云健 (男声 - 体育/解说)": "zh-CN-YunjianNeural",
-    "晓伊 (女声 - 可爱/儿童)": "zh-CN-XiaoyiNeural",
-    "云扬 (男声 - 新闻/播音)": "zh-CN-YunyangNeural",
-    "辽宁小北 (方言 - 东北话)": "zh-CN-Liaoning-XiaobeiNeural",
-    "陕西小妮 (方言 - 陕西话)": "zh-CN-Shaanxi-XiaoniNeural",
-    "香港晓佳 (方言 - 粤语)": "zh-HK-HiuGaaiNeural",
-    "台湾晓臻 (方言 - 台湾腔)": "zh-TW-HsiaoChenNeural",
-    "英语 (女声 - Aria)": "en-US-AriaNeural",
-    "英语 (男声 - Christopher)": "en-US-ChristopherNeural"
+    # --- 经典女声 ---
+    "晓晓 (经典女声 - 活泼/默认)": "zh-CN-XiaoxiaoNeural",
+    "晓伊 (甜美女声 - 可爱/童声)": "zh-CN-XiaoyiNeural",
+    "晓梦 (知性女声 - 播音/电台)": "zh-CN-XiaomengNeural",
+    "晓甄 (成熟女声 - 稳重/旁白)": "zh-CN-XiaozhenNeural",
+    "晓睿 (沉稳女声 - 老年/讲故事)": "zh-CN-XiaoruiNeural",
+    "晓颜 (优美女声 - 抒情/散文)": "zh-CN-XiaoyanNeural",
+    "晓秋 (温柔女声 - 情感/阅读)": "zh-CN-XiaoqiuNeural",
+    "晓双 (俏皮女声 - 儿童/动画)": "zh-CN-XiaoshuangNeural",
+
+    # --- 经典男声 ---
+    "云希 (经典男声 - 沉稳/影视解说)": "zh-CN-YunxiNeural",
+    "云扬 (播音男声 - 新闻/专业)": "zh-CN-YunyangNeural",
+    "云健 (激昂男声 - 体育/纪录片)": "zh-CN-YunjianNeural",
+    "云泽 (成熟男声 - 老年/沧桑)": "zh-CN-YunzeNeural",
+    "云枫 (阳光男声 - 活力/通用)": "zh-CN-YunfengNeural",
+    "云皓 (开朗男声 - 轻松/日常)": "zh-CN-YunhaoNeural",
+    "云夏 (稚嫩男声 - 男童声)": "zh-CN-YunxiaNeural",
+
+    # --- 方言与地方腔调 ---
+    "辽宁小北 (方言 - 纯正东北话)": "zh-CN-Liaoning-XiaobeiNeural",
+    "陕西小妮 (方言 - 纯正陕西话)": "zh-CN-Shaanxi-XiaoniNeural",
+    "香港晓佳 (粤语女声 - 港剧风)": "zh-HK-HiuGaaiNeural",
+    "香港晓曼 (粤语女声 - 温柔)": "zh-HK-HiuMaanNeural",
+    "香港云龙 (粤语男声 - 新闻)": "zh-HK-WanLungNeural",
+    "台湾晓臻 (台湾腔女声 - 甜美)": "zh-TW-HsiaoChenNeural",
+    "台湾晓雨 (台湾腔女声 - 活泼)": "zh-TW-HsiaoYuNeural",
+    "台湾云哲 (台湾腔男声 - 清新)": "zh-TW-YunJheNeural",
+
+    # --- 常用外语发音 ---
+    "英语 - Aria (美音女声 - 随和自然)": "en-US-AriaNeural",
+    "英语 - Jenny (美音女声 - 清晰专业)": "en-US-JennyNeural",
+    "英语 - Guy (美音男声 - 沉稳有力)": "en-US-GuyNeural",
+    "英语 - Sonia (英音女声 - 优雅端庄)": "en-GB-SoniaNeural",
+    "英语 - Ryan (英音男声 - 专业播音)": "en-GB-RyanNeural"
 }
 
 class TTSApp:
@@ -35,17 +59,17 @@ class TTSApp:
         self.root = root
         self.root.title("DeepSeek 智能语音合成助手 - 作者: Yu JinQuan")
         
-        window_width = 950
+        window_width = 1000  # 稍微加宽整体窗口
         window_height = 700
         self.center_window(window_width, window_height)
-        self.root.minsize(800, 500)
+        self.root.minsize(850, 600)
         
         self.is_playing = False
         self.is_generating = False 
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
         
-        self.selected_voice_key = tk.StringVar(value="晓晓 (女声 - 活泼/默认)")
+        self.selected_voice_key = tk.StringVar(value="晓晓 (经典女声 - 活泼/默认)")
         
         threading.Thread(target=self.start_loop, daemon=True).start()
         self.create_ui()
@@ -69,11 +93,11 @@ class TTSApp:
         tk.Button(frame_top, text="📂 导入文本/Word", command=self.import_file).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_top, text="🗑️ 清空内容", command=self.clear_text, bg="#ffebee").pack(side=tk.LEFT, padx=5)
         
-        tk.Frame(frame_top, width=20).pack(side=tk.LEFT) # 占位
+        tk.Frame(frame_top, width=20).pack(side=tk.LEFT)
         tk.Label(frame_top, text="选中多音字后点击 ->", fg="gray").pack(side=tk.LEFT)
         tk.Button(frame_top, text="📝 修正选中字读音", command=self.fix_pronunciation, bg="#fff3e0").pack(side=tk.LEFT, padx=5)
 
-        # 2. 底部控制区 (倒序)
+        # 2. 底部控制区
         frame_status = tk.Frame(self.root, bd=1, relief=tk.SUNKEN, bg="#f0f0f0")
         frame_status.pack(side=tk.BOTTOM, fill=tk.X)
         self.status_label = tk.Label(frame_status, text="状态: 就绪", anchor=tk.W, bg="#f0f0f0")
@@ -84,7 +108,8 @@ class TTSApp:
         frame_bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(5, 10))
         
         tk.Label(frame_bottom, text="选择语音:").pack(side=tk.LEFT, padx=(5, 0))
-        voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=25)
+        # 扩大了下拉菜单的宽度（width=35），防止文字被截断
+        voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=35)
         voice_combo.pack(side=tk.LEFT, padx=5)
 
         tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10)
@@ -111,7 +136,6 @@ class TTSApp:
         self.status_label.config(text=f"状态: {text}")
         self.root.update_idletasks()
 
-    # --- 核心功能：同音字修正读音 ---
     def fix_pronunciation(self):
         try:
             selection = self.text_area.get(tk.SEL_FIRST, tk.SEL_LAST)
@@ -123,19 +147,16 @@ class TTSApp:
             messagebox.showwarning("提示", "每次请只选中一个汉字！")
             return
 
-        # 提示输入同音字，而不是拼音
         hint = f"请输入 [{selection}] 的【同音字】\n例如：如果你希望把“行”读成“航”，请直接输入：航"
         homophone = simpledialog.askstring("修正读音", hint)
         
         if homophone and len(homophone.strip()) > 0:
-            homophone = homophone.strip()[0] # 只取第一个字
-            # 插入易读的标记，例如：行[读音:航]
+            homophone = homophone.strip()[0] 
             marker = f"{selection}[读音:{homophone}]"
             self.text_area.delete(tk.SEL_FIRST, tk.SEL_LAST)
             self.text_area.insert(tk.INSERT, marker)
             self.update_status(f"已修正: '{selection}' 将被读作 '{homophone}'")
 
-    # --- 文件操作 ---
     def import_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text/Word", "*.txt *.docx")])
         if not file_path: return
@@ -158,7 +179,6 @@ class TTSApp:
         self.stop_audio()
         self.update_status("内容已清空")
 
-    # --- DeepSeek ---
     def run_deepseek_polish(self):
         text = self.text_area.get("1.0", tk.END).strip()
         if not text:
@@ -194,14 +214,11 @@ class TTSApp:
             self.root.after(0, lambda: messagebox.showerror("API 错误", f"请求失败: {str(e)}"))
             self.root.after(0, lambda: self.update_status("润色失败"))
 
-    # --- 语音合成核心 (正则替换) ---
     async def _generate_audio_task(self, text, output_file):
         selected_name = self.selected_voice_key.get()
         voice_id = VOICE_MAP.get(selected_name, "zh-CN-XiaoxiaoNeural")
         
-        # === 核心修改：隐形替换魔法 ===
-        # 使用正则表达式，将文本中的 "行[读音:航]" 偷偷替换为 "航"
-        # \1 代表原字，\2 代表同音字。这里直接提取 \2 传给语音引擎
+        # 隐形替换魔法
         processed_text = re.sub(r'(.)\[读音:(.)\]', r'\2', text)
         
         communicate = edge_tts.Communicate(processed_text, voice_id)
