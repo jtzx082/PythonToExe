@@ -41,14 +41,16 @@ class TTSApp:
         self.root = root
         self.root.title("DeepSeek 智能语音合成助手 - 作者: Yu JinQuan")
         
-        # 稍微加高了窗口，以容纳新的参数面板
-        window_width = 980
+        window_width = 1000  # 稍微加宽一点适应新增按钮
         window_height = 760
         self.center_window(window_width, window_height)
         self.root.minsize(900, 600)
         
+        # 播放状态控制
         self.is_playing = False
         self.is_generating = False 
+        self.is_paused = False  # 新增：暂停状态标识
+        
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
         
@@ -85,8 +87,6 @@ class TTSApp:
         ttk.Label(frame_top, text="选中多音字后点击 ->", foreground="gray").pack(side=LEFT)
         ttk.Button(frame_top, text="📝 修正选中字读音", command=self.fix_pronunciation, bootstyle="warning").pack(side=LEFT, padx=5)
 
-        # === 以下按倒序(BOTTOM)加载 ===
-
         # 2. 状态栏 (最底)
         frame_status = ttk.Frame(self.root, padding=5)
         frame_status.pack(side=BOTTOM, fill=X)
@@ -94,54 +94,55 @@ class TTSApp:
         self.status_label.pack(side=LEFT, padx=10)
         ttk.Label(frame_status, text="Author: Yu JinQuan", bootstyle="secondary").pack(side=RIGHT, padx=10)
 
-        # 3. 语音控制与导出 (倒数第二)
+        # 3. 语音控制与导出 (倒数第二) - 按钮已优化
         frame_bottom = ttk.Labelframe(self.root, text="语音控制与导出", padding=15, bootstyle="primary")
         frame_bottom.pack(side=BOTTOM, fill=X, padx=15, pady=(5, 10))
         
         ttk.Label(frame_bottom, text="发音人:").pack(side=LEFT, padx=(5, 5))
-        voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=25, bootstyle="primary")
+        voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=23, bootstyle="primary")
         voice_combo.pack(side=LEFT, padx=5)
 
         ttk.Separator(frame_bottom, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=15)
 
-        ttk.Button(frame_bottom, text="▶️ 生成并播放", command=self.play_audio, bootstyle="success").pack(side=LEFT, padx=5)
-        ttk.Button(frame_bottom, text="⏹️ 停止", command=self.stop_audio, bootstyle="danger").pack(side=LEFT, padx=5)
+        # 核心修改：重构试听、暂停、停止按钮
+        self.play_btn = ttk.Button(frame_bottom, text="▶️ 试听音频", command=self.play_audio, bootstyle="success")
+        self.play_btn.pack(side=LEFT, padx=5)
+        
+        self.pause_btn = ttk.Button(frame_bottom, text="⏸️ 暂停", command=self.pause_audio, bootstyle="warning")
+        self.pause_btn.pack(side=LEFT, padx=5)
+        
+        self.stop_btn = ttk.Button(frame_bottom, text="⏹️ 停止", command=self.stop_audio, bootstyle="danger")
+        self.stop_btn.pack(side=LEFT, padx=5)
         
         ttk.Separator(frame_bottom, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=15)
         
         ttk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3"), bootstyle="info").pack(side=LEFT, padx=5)
         ttk.Button(frame_bottom, text="🎵 导出 WAV", command=lambda: self.export_audio("wav"), bootstyle="info").pack(side=LEFT, padx=5)
 
-        # 4. 新增：高级参数调节区 (倒数第三)
+        # 4. 高级参数调节区 (倒数第三)
         frame_params = ttk.Labelframe(self.root, text="高级语音参数", padding=10, bootstyle="warning")
         frame_params.pack(side=BOTTOM, fill=X, padx=15, pady=5)
         
-        # 使用 Grid 布局使滑块对齐更美观
-        # --- 语速 ---
         ttk.Label(frame_params, text="语速调节:").grid(row=0, column=0, padx=(10, 5), pady=5, sticky="e")
         scale_rate = ttk.Scale(frame_params, from_=-50, to=50, variable=self.rate_var, command=self.update_param_labels, bootstyle="primary")
         scale_rate.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         self.lbl_rate = ttk.Label(frame_params, text="0%", width=5, font=("Arial", 10, "bold"))
         self.lbl_rate.grid(row=0, column=2, padx=5, pady=5, sticky="w")
         
-        # --- 音量 ---
         ttk.Label(frame_params, text="音量调节:").grid(row=0, column=3, padx=(20, 5), pady=5, sticky="e")
         scale_vol = ttk.Scale(frame_params, from_=-50, to=50, variable=self.volume_var, command=self.update_param_labels, bootstyle="success")
         scale_vol.grid(row=0, column=4, padx=5, pady=5, sticky="ew")
         self.lbl_vol = ttk.Label(frame_params, text="0%", width=5, font=("Arial", 10, "bold"))
         self.lbl_vol.grid(row=0, column=5, padx=5, pady=5, sticky="w")
         
-        # --- 音调 ---
         ttk.Label(frame_params, text="音调调节:").grid(row=0, column=6, padx=(20, 5), pady=5, sticky="e")
         scale_pitch = ttk.Scale(frame_params, from_=-50, to=50, variable=self.pitch_var, command=self.update_param_labels, bootstyle="warning")
         scale_pitch.grid(row=0, column=7, padx=5, pady=5, sticky="ew")
         self.lbl_pitch = ttk.Label(frame_params, text="0Hz", width=6, font=("Arial", 10, "bold"))
         self.lbl_pitch.grid(row=0, column=8, padx=5, pady=5, sticky="w")
         
-        # --- 重置按钮 ---
         ttk.Button(frame_params, text="🔄 重置参数", command=self.reset_params, bootstyle="secondary-outline").grid(row=0, column=9, padx=(20, 10), pady=5)
 
-        # 配置列权重，让滑块占据剩余空间
         frame_params.columnconfigure(1, weight=1)
         frame_params.columnconfigure(4, weight=1)
         frame_params.columnconfigure(7, weight=1)
@@ -152,7 +153,7 @@ class TTSApp:
         ttk.Label(frame_ai, text="提示: 借助大模型将生硬的文本改写为更自然、流畅的口语化播音文案。").pack(side=LEFT, padx=5)
         ttk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bootstyle="success-outline").pack(side=RIGHT, padx=5)
 
-        # 6. 中间文本区 (置顶，填充剩余空间)
+        # 6. 中间文本区
         frame_text = ttk.Frame(self.root, padding=2)
         frame_text.pack(side=TOP, expand=True, fill=BOTH, padx=15, pady=10)
         self.text_area = scrolledtext.ScrolledText(frame_text, font=("Microsoft YaHei", 12), wrap=tk.WORD, bd=1, relief=tk.SOLID)
@@ -172,14 +173,11 @@ class TTSApp:
         if sys.platform == "darwin":
             self.text_area.bind("<ButtonRelease-2>", self.show_context_menu)
 
-    # --- 新增：参数调节联动功能 ---
+    # --- 参数调节与右键 ---
     def update_param_labels(self, *args):
-        # 获取滑块的整数值
         r = int(self.rate_var.get())
         v = int(self.volume_var.get())
         p = int(self.pitch_var.get())
-        
-        # 格式化显示文本 (带有正负号)
         self.lbl_rate.config(text=f"{r:+d}%" if r else "0%")
         self.lbl_vol.config(text=f"{v:+d}%" if v else "0%")
         self.lbl_pitch.config(text=f"{p:+d}Hz" if p else "0Hz")
@@ -190,7 +188,6 @@ class TTSApp:
         self.pitch_var.set(0)
         self.update_param_labels()
 
-    # --- 右键菜单功能 ---
     def show_context_menu(self, event):
         self.context_menu.tk_popup(event.x_root, event.y_root)
 
@@ -221,8 +218,7 @@ class TTSApp:
             messagebox.showwarning("提示", "请先在文本框中选中需要修正读音的汉字！")
             return
 
-        if not selection.strip():
-            return
+        if not selection.strip(): return
 
         hint = f"请输入 [{selection}] 的【同音字】\n例如选了“单”，这里输入发音相同的“善”"
         homophone = simpledialog.askstring("同音字替换", hint)
@@ -270,7 +266,7 @@ class TTSApp:
         threading.Thread(target=self._deepseek_thread, args=(text, api_key)).start()
 
     def _deepseek_thread(self, text, api_key):
-        self.update_status("正在连接 DeepSeek AI...")
+        self.update_status("正在连接 DeepSeek AI 润色文本...")
         try:
             client = OpenAI(api_key=api_key, base_url=DEFAULT_DEEPSEEK_URL)
             response = client.chat.completions.create(
@@ -284,20 +280,18 @@ class TTSApp:
             polished = response.choices[0].message.content
             self.root.after(0, lambda: self.text_area.delete("1.0", tk.END))
             self.root.after(0, lambda: self.text_area.insert(tk.END, polished))
-            self.root.after(0, lambda: self.update_status("润色完成"))
+            self.root.after(0, lambda: self.update_status("润色完成，您可以开始试听了"))
             self.root.after(0, lambda: messagebox.showinfo("完成", "DeepSeek 润色已完成！"))
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("API 错误", f"请求失败: {str(e)}"))
             self.root.after(0, lambda: self.update_status("润色失败"))
 
-    # --- 升级版语音合成核心 (融入三大参数) ---
     async def _generate_audio_task(self, text, output_file):
         selected_name = self.selected_voice_key.get()
         voice_id = VOICE_MAP.get(selected_name, "zh-CN-XiaoxiaoNeural")
         
         processed_text = re.sub(r'\[.*?\|(.*?)\]', r'\1', text)
         
-        # 提取参数值并格式化为 Edge-TTS 接受的字符串标准
         r = int(self.rate_var.get())
         v = int(self.volume_var.get())
         p = int(self.pitch_var.get())
@@ -306,7 +300,6 @@ class TTSApp:
         vol_str = f"{v:+d}%"
         pitch_str = f"{p:+d}Hz"
         
-        # 将参数一并发送给引擎
         communicate = edge_tts.Communicate(
             text=processed_text, 
             voice=voice_id,
@@ -316,12 +309,16 @@ class TTSApp:
         )
         await communicate.save(output_file)
 
+    # === 新增/重构的音频控制逻辑 ===
     def play_audio(self):
         text = self.text_area.get("1.0", tk.END).strip()
-        if not text: return
-        self.stop_audio()
+        if not text: 
+            messagebox.showwarning("提示", "文本框为空，请输入需要试听的文本。")
+            return
+            
+        self.update_status(f"准备试听 ({self.selected_voice_key.get()})... 正在拉取音频")
+        self.stop_audio(silent=True) # 停止之前的播放状态
         self.is_generating = True
-        self.update_status(f"正在合成 ({self.selected_voice_key.get()})...")
         
         def run_gen():
             try:
@@ -333,7 +330,7 @@ class TTSApp:
                 self.root.after(0, self._play_sound)
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("合成错误", str(e)))
-                self.root.after(0, lambda: self.update_status("合成出错"))
+                self.root.after(0, lambda: self.update_status("试听准备出错"))
 
         threading.Thread(target=run_gen).start()
 
@@ -345,26 +342,65 @@ class TTSApp:
             pygame.mixer.music.play()
             self.is_playing = True
             self.is_generating = False
-            self.update_status("正在播放...")
+            self.is_paused = False
+            self.pause_btn.configure(text="⏸️ 暂停")
+            self.update_status("🔊 正在试听音频...")
         except Exception as e:
             messagebox.showerror("播放错误", str(e))
 
-    def stop_audio(self):
+    def pause_audio(self):
+        if self.is_generating:
+            self.update_status("⚠️ 音频正在合成中，请稍后再操作")
+            return
+            
+        try:
+            import pygame
+            if not pygame.mixer.get_init():
+                self.update_status("⚠️ 尚未开始播放，无法暂停")
+                return
+                
+            if self.is_playing:
+                if not self.is_paused:
+                    # 当前在播放 -> 暂停它
+                    pygame.mixer.music.pause()
+                    self.is_paused = True
+                    self.pause_btn.configure(text="▶️ 继续")
+                    self.update_status("⏸️ 试听已暂停")
+                else:
+                    # 当前是暂停 -> 恢复它
+                    pygame.mixer.music.unpause()
+                    self.is_paused = False
+                    self.pause_btn.configure(text="⏸️ 暂停")
+                    self.update_status("🔊 继续试听...")
+            else:
+                self.update_status("⚠️ 当前没有正在播放的音频")
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+
+    def stop_audio(self, silent=False):
         self.is_generating = False 
         try:
             import pygame
             pygame.mixer.init()
-            if pygame.mixer.music.get_busy():
+            if pygame.mixer.music.get_busy() or self.is_paused:
                 pygame.mixer.music.stop()
                 pygame.mixer.music.unload()
         except:
             pass
+            
         self.is_playing = False
-        self.update_status("已停止")
+        self.is_paused = False
+        self.pause_btn.configure(text="⏸️ 暂停") # 恢复按钮外观
+        
+        if not silent:
+            self.update_status("⏹️ 试听已停止")
 
+    # === 导出功能保持不变 ===
     def export_audio(self, fmt):
         text = self.text_area.get("1.0", tk.END).strip()
-        if not text: return
+        if not text: 
+            messagebox.showwarning("提示", "文本框为空，请输入需要导出的文本。")
+            return
 
         ext = ".mp3" if fmt == "mp3" else ".wav"
         save_path = filedialog.asksaveasfilename(defaultextension=ext, filetypes=[(f"{fmt.upper()} File", f"*{ext}")])
@@ -385,7 +421,7 @@ class TTSApp:
                     shutil.move(temp_mp3, save_path)
                     
                 elif fmt == "wav":
-                    self.root.after(0, lambda: self.update_status("正在转换格式 (FFmpeg)..."))
+                    self.root.after(0, lambda: self.update_status("正在转换高质量无损音频格式 (FFmpeg)..."))
                     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
                     cmd = [
                         ffmpeg_exe, "-y",
@@ -400,10 +436,10 @@ class TTSApp:
                         os.remove(temp_mp3)
 
                 self.root.after(0, lambda: messagebox.showinfo("成功", f"导出成功！\n保存路径: {save_path}"))
-                self.root.after(0, lambda: self.update_status("导出完成"))
+                self.root.after(0, lambda: self.update_status("✅ 导出完成"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("导出失败", f"错误详情:\n{str(e)}"))
-                self.root.after(0, lambda: self.update_status("导出失败"))
+                self.root.after(0, lambda: self.update_status("❌ 导出失败"))
 
         threading.Thread(target=run_export).start()
 
