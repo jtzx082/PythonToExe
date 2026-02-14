@@ -241,14 +241,27 @@ def popup_context_menu(event):
         pass
     context_menu.tk_popup(event.x_root, event.y_root)
 
-# ================= UI 交互与播放控制 =================
-
-# 【新增】一键重置参数功能
+# ================= UI 交互、重置与作者信息 =================
 def reset_params():
     rate_scale.set(0)
     pitch_scale.set(0)
     volume_scale.set(100)
     status_label.config(text="⚙️ 参数已重置为默认", fg="green")
+
+# 【新增】关于软件与作者的弹窗信息
+def show_about():
+    about_text = (
+        "微课语音生成专业版 (ChemTTS Pro)\n"
+        "==========================\n\n"
+        "👨‍🏫 作者：俞金泉 (Yu)\n"
+        "🏫 单位：金塔县中学\n"
+        "🧪 职务：化学教研组长 / 高中化学名师工作室主持人\n"
+        "🎓 班级：高二(1)班班主任\n\n"
+        "💡 专为一线教学、微课制作与新高考教案定制开发。\n"
+        "✅ 支持双语混合、SSML注音修正、无损 WAV 导出。\n\n"
+        "✨ 祝老师们工作顺利，桃李满天下！"
+    )
+    messagebox.showinfo("关于软件与作者", about_text)
 
 def check_playback_status():
     global is_playing, is_paused
@@ -321,12 +334,12 @@ def on_convert(audio_format="mp3"):
     if audio_format == "wav":
         save_path = filedialog.asksaveasfilename(
             title="保存无损 WAV 音频", defaultextension=".wav",
-            filetypes=[("WAV 无损音频", "*.wav"), ("所有文件", "*.*")], initialfile="微课语音_01.wav"
+            filetypes=[("WAV 无损音频", "*.wav"), ("所有文件", "*.*")], initialfile="化学微课语音_01.wav"
         )
     else:
         save_path = filedialog.asksaveasfilename(
             title="保存 MP3 音频", defaultextension=".mp3",
-            filetypes=[("MP3 音频", "*.mp3"), ("所有文件", "*.*")], initialfile="微课语音_01.mp3"
+            filetypes=[("MP3 音频", "*.mp3"), ("所有文件", "*.*")], initialfile="化学微课语音_01.mp3"
         )
         
     if not save_path: return
@@ -424,9 +437,9 @@ def on_clear():
 
 # ================= 界面设计部分 =================
 root = tk.Tk()
-root.title("微课语音生成旗舰版 (多平台/一键重置)")
-root.geometry("780x680")
-root.minsize(700, 630)
+root.title("微课语音生成专业版 (多平台/版权所有)")
+root.geometry("780x690")
+root.minsize(700, 640)
 
 saved_config = load_config()
 
@@ -451,7 +464,6 @@ voice_combo = ttk.Combobox(top_frame, values=list(VOICES.keys()), state="readonl
 voice_combo.grid(row=0, column=1, padx=5, pady=5)
 voice_combo.current(0)
 
-# 稍微调小了长度，为重置按钮留出空间
 rate_scale = tk.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="语速(%)", resolution=1, length=100)
 rate_scale.set(0)
 rate_scale.grid(row=0, column=2, padx=5)
@@ -464,7 +476,6 @@ volume_scale = tk.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL, label=
 volume_scale.set(100)
 volume_scale.grid(row=0, column=4, padx=5)
 
-# 【新增】一键重置按钮
 btn_reset = tk.Button(top_frame, text="↺ 重置", command=reset_params, font=("微软雅黑", 9), bg="#F5F5F5", relief=tk.GROOVE)
 btn_reset.grid(row=0, column=5, padx=5, sticky="s", pady=6)
 
@@ -510,7 +521,7 @@ text_input.bind("<Button-3>", popup_context_menu)
 text_input.bind("<Button-2>", popup_context_menu)
 
 bottom_frame = tk.Frame(root)
-bottom_frame.pack(fill=tk.X, padx=15, pady=10)
+bottom_frame.pack(fill=tk.X, padx=15, pady=5)
 
 play_frame = tk.Frame(bottom_frame)
 play_frame.pack(side=tk.TOP, pady=5)
@@ -528,7 +539,7 @@ btn_clear = tk.Button(play_frame, text="🗑 清空", command=on_clear, width=8)
 btn_clear.grid(row=0, column=3, padx=15)
 
 export_frame = tk.Frame(bottom_frame)
-export_frame.pack(side=tk.TOP, pady=10)
+export_frame.pack(side=tk.TOP, pady=(5, 10))
 
 convert_btn_mp3 = tk.Button(export_frame, text="🎵 导出 MP3", font=("微软雅黑", 11, "bold"), 
                             command=lambda: on_convert("mp3"), bg="#4CAF50", fg="white", width=16)
@@ -539,7 +550,13 @@ convert_btn_wav = tk.Button(export_frame, text="🎚️ 导出 WAV", font=("微�
 convert_btn_wav.pack(side=tk.LEFT, padx=15)
 
 status_label = tk.Label(bottom_frame, text="准备就绪", font=("微软雅黑", 9), fg="gray")
-status_label.pack(pady=5)
+status_label.pack(pady=(0, 5))
+
+# 【新增】作者与版权信息 (可点击)
+author_label = tk.Label(bottom_frame, text="© 俞晋全 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 8), fg="#9E9E9E", cursor="hand2")
+author_label.pack(side=tk.BOTTOM, pady=(0, 5))
+# 绑定点击事件，弹出详细关于窗口
+author_label.bind("<Button-1>", lambda e: show_about())
 
 def on_closing():
     stop_playback()
