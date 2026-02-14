@@ -4,10 +4,9 @@ import asyncio
 import threading
 import subprocess
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog, scrolledtext
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-from ttkbootstrap.scrolled import ScrolledText
 import docx
 import edge_tts
 from openai import OpenAI
@@ -69,7 +68,7 @@ class TTSApp:
         self.loop.run_forever()
 
     def create_ui(self):
-        # 1. 顶部操作区 (使用现代化 LabelFrame 和带有强调色的按钮)
+        # 1. 顶部操作区
         frame_top = ttk.Labelframe(self.root, text="文件与编辑", padding=15, bootstyle="info")
         frame_top.pack(side=TOP, fill=X, padx=15, pady=(15, 5))
         
@@ -110,11 +109,14 @@ class TTSApp:
         ttk.Label(frame_ai, text="提示: 借助大模型将生硬的文本改写为更自然、流畅的口语化播音文案。").pack(side=LEFT, padx=5)
         ttk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bootstyle="success-outline").pack(side=RIGHT, padx=5)
 
-        # 4. 中间文本区 (使用现代化的 ScrolledText)
-        self.text_area = ScrolledText(self.root, font=("Microsoft YaHei", 12), wrap=tk.WORD, padding=10, bootstyle="round")
-        self.text_area.pack(side=TOP, expand=True, fill=BOTH, padx=15, pady=10)
+        # 4. 中间文本区 (使用原生 scrolledtext 恢复右键菜单功能)
+        frame_text = ttk.Frame(self.root, padding=2)
+        frame_text.pack(side=TOP, expand=True, fill=BOTH, padx=15, pady=10)
+        # 换回原生的 tkinter scrolledtext
+        self.text_area = scrolledtext.ScrolledText(frame_text, font=("Microsoft YaHei", 12), wrap=tk.WORD, bd=1, relief=tk.SOLID)
+        self.text_area.pack(expand=True, fill=BOTH)
 
-        # === 右键菜单保持原生体验 ===
+        # === 恢复右键菜单 ===
         self.context_menu = tk.Menu(self.root, tearoff=0, font=("Microsoft YaHei", 10))
         self.context_menu.add_command(label="剪切", command=self.cut_text)
         self.context_menu.add_command(label="复制", command=self.copy_text)
@@ -124,6 +126,7 @@ class TTSApp:
         self.context_menu.add_separator()
         self.context_menu.add_command(label="📝 修正选中字读音", command=self.fix_pronunciation)
 
+        # 绑定右键点击事件
         self.text_area.bind("<Button-3>", self.show_context_menu)
         if sys.platform == "darwin":
             self.text_area.bind("<Button-2>", self.show_context_menu)
@@ -147,7 +150,7 @@ class TTSApp:
         self.text_area.see(tk.INSERT)
         return 'break'
 
-    # --- 逻辑功能区 (与之前完全一致) ---
+    # --- 逻辑功能区 ---
     def update_status(self, text):
         self.status_label.config(text=f"状态: {text}")
         self.root.update_idletasks()
@@ -329,7 +332,6 @@ class TTSApp:
         threading.Thread(target=run_export).start()
 
 if __name__ == "__main__":
-    # 使用 ttkbootstrap 初始化窗口，并应用 cosmo 主题
     root = ttk.Window(themename="cosmo")
     app = TTSApp(root)
     root.mainloop()
