@@ -21,7 +21,7 @@ jobs:
       with:
         python-version: '3.10'
 
-    # Linux 仍需安装系统级 ffmpeg 库，以防万一
+    # Linux 仍需安装系统级 ffmpeg 库
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
       run: |
@@ -32,15 +32,16 @@ jobs:
       run: |
         pip install --upgrade pip
         pip install -r requirements.txt
-        # 确保 imageio-ffmpeg 安装成功
         pip install imageio-ffmpeg
+        pip install pyinstaller
 
     - name: Build with PyInstaller
       shell: bash
       run: |
-        # 移除了 moviepy 相关的 hidden-import，因为不再使用了
+        # 核心修改：增加了 --hidden-import=PIL._tkinter_finder
         pyinstaller --onefile --windowed --name="DeepTTS" \
           --hidden-import=imageio_ffmpeg \
+          --hidden-import=PIL._tkinter_finder \
           main.py
 
     - name: Upload Artifacts
