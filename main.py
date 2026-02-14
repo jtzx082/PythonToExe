@@ -242,6 +242,14 @@ def popup_context_menu(event):
     context_menu.tk_popup(event.x_root, event.y_root)
 
 # ================= UI 交互与播放控制 =================
+
+# 【新增】一键重置参数功能
+def reset_params():
+    rate_scale.set(0)
+    pitch_scale.set(0)
+    volume_scale.set(100)
+    status_label.config(text="⚙️ 参数已重置为默认", fg="green")
+
 def check_playback_status():
     global is_playing, is_paused
     if not AUDIO_SUPPORTED or not is_playing: return
@@ -416,9 +424,9 @@ def on_clear():
 
 # ================= 界面设计部分 =================
 root = tk.Tk()
-root.title("微课语音生成旗舰版 (键鼠无缝协同/支持撤销)")
-root.geometry("750x680")
-root.minsize(680, 630)
+root.title("微课语音生成旗舰版 (多平台/一键重置)")
+root.geometry("780x680")
+root.minsize(700, 630)
 
 saved_config = load_config()
 
@@ -439,21 +447,26 @@ top_frame = tk.Frame(root)
 top_frame.pack(fill=tk.X, padx=15, pady=5)
 
 tk.Label(top_frame, text="发音人:", font=("微软雅黑", 10, "bold")).grid(row=0, column=0, pady=5, sticky="e")
-voice_combo = ttk.Combobox(top_frame, values=list(VOICES.keys()), state="readonly", width=38)
+voice_combo = ttk.Combobox(top_frame, values=list(VOICES.keys()), state="readonly", width=33)
 voice_combo.grid(row=0, column=1, padx=5, pady=5)
 voice_combo.current(0)
 
-rate_scale = tk.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="语速(%)", resolution=1, length=120)
+# 稍微调小了长度，为重置按钮留出空间
+rate_scale = tk.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="语速(%)", resolution=1, length=100)
 rate_scale.set(0)
-rate_scale.grid(row=0, column=2, padx=10)
+rate_scale.grid(row=0, column=2, padx=5)
 
-pitch_scale = tk.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="音调(%)", resolution=1, length=120)
+pitch_scale = tk.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="音调(%)", resolution=1, length=100)
 pitch_scale.set(0)
-pitch_scale.grid(row=0, column=3, padx=10)
+pitch_scale.grid(row=0, column=3, padx=5)
 
-volume_scale = tk.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL, label="音量", resolution=1, length=100)
+volume_scale = tk.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL, label="音量", resolution=1, length=90)
 volume_scale.set(100)
-volume_scale.grid(row=0, column=4, padx=10)
+volume_scale.grid(row=0, column=4, padx=5)
+
+# 【新增】一键重置按钮
+btn_reset = tk.Button(top_frame, text="↺ 重置", command=reset_params, font=("微软雅黑", 9), bg="#F5F5F5", relief=tk.GROOVE)
+btn_reset.grid(row=0, column=5, padx=5, sticky="s", pady=6)
 
 text_frame = tk.Frame(root)
 text_frame.pack(expand=True, fill=tk.BOTH, padx=15, pady=5)
