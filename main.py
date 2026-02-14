@@ -10,7 +10,7 @@ import docx
 import edge_tts
 from openai import OpenAI
 import imageio_ffmpeg
-import re  # 新增正则表达式库，用于处理同音字替换
+import re
 
 # 默认配置
 DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com"
@@ -74,7 +74,6 @@ class TTSApp:
         tk.Button(frame_top, text="📂 导入文本/Word", command=self.import_file).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_top, text="🗑️ 清空内容", command=self.clear_text, bg="#ffebee").pack(side=tk.LEFT, padx=5)
         
-        # 恢复并优化的多音字修正按钮
         tk.Frame(frame_top, width=20).pack(side=tk.LEFT) 
         tk.Label(frame_top, text="选中多音字后点击 ->", fg="gray").pack(side=tk.LEFT)
         tk.Button(frame_top, text="📝 修正选中字读音 (同音字法)", command=self.fix_pronunciation, bg="#fff3e0").pack(side=tk.LEFT, padx=5)
@@ -113,11 +112,45 @@ class TTSApp:
         self.text_area = scrolledtext.ScrolledText(self.root, font=("Microsoft YaHei", 12), wrap=tk.WORD)
         self.text_area.pack(side=tk.TOP, expand=True, fill=tk.BOTH, padx=10, pady=5)
 
+        # === 新增：右键菜单初始化与事件绑定 ===
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="剪切", command=self.cut_text)
+        self.context_menu.add_command(label="复制", command=self.copy_text)
+        self.context_menu.add_command(label="粘贴", command=self.paste_text)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="全选", command=self.select_all_text)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="📝 修正选中字读音", command=self.fix_pronunciation)
+
+        # 绑定右键点击事件 (跨平台支持)
+        self.text_area.bind("<Button-3>", self.show_context_menu) # Windows, Linux, 现代 macOS
+        if sys.platform == "darwin":
+            self.text_area.bind("<Button-2>", self.show_context_menu) # 兼容老版本 macOS
+
+    # --- 新增：右键菜单功能实现 ---
+    def show_context_menu(self, event):
+        self.context_menu.tk_popup(event.x_root, event.y_root)
+
+    def cut_text(self):
+        self.text_area.event_generate("<<Cut>>")
+
+    def copy_text(self):
+        self.text_area.event_generate("<<Copy>>")
+
+    def paste_text(self):
+        self.text_area.event_generate("<<Paste>>")
+
+    def select_all_text(self):
+        self.text_area.tag_add(tk.SEL, "1.0", tk.END)
+        self.text_area.mark_set(tk.INSERT, "1.0")
+        self.text_area.see(tk.INSERT)
+        return 'break'
+
+    # --- 原有功能 ---
     def update_status(self, text):
         self.status_label.config(text=f"状态: {text}")
         self.root.update_idletasks()
 
-    # --- 恢复同音字替换逻辑 ---
     def fix_pronunciation(self):
         try:
             selection = self.text_area.get(tk.SEL_FIRST, tk.SEL_LAST)
@@ -132,13 +165,11 @@ class TTSApp:
         homophone = simpledialog.askstring("同音字替换", hint)
         
         if homophone:
-            # 格式化为 [原字|同音字]，例如 [单|善]
             replacement = f"[{selection}|{homophone.strip()}]"
             self.text_area.delete(tk.SEL_FIRST, tk.SEL_LAST)
             self.text_area.insert(tk.INSERT, replacement)
             self.update_status(f"已设置同音字: {selection} -> {homophone}")
 
-    # --- 文件操作 ---
     def import_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text/Word", "*.txt *.docx")])
         if not file_path: return
@@ -161,7 +192,6 @@ class TTSApp:
         self.stop_audio()
         self.update_status("内容已清空")
 
-    # --- DeepSeek ---
     def run_deepseek_polish(self):
         text = self.text_area.get("1.0", tk.END).strip()
         if not text:
@@ -197,16 +227,12 @@ class TTSApp:
             self.root.after(0, lambda: messagebox.showerror("API 错误", f"请求失败: {str(e)}"))
             self.root.after(0, lambda: self.update_status("润色失败"))
 
-    # --- 语音合成核心 ---
     async def _generate_audio_task(self, text, output_file):
         selected_name = self.selected_voice_key.get()
         voice_id = VOICE_MAP.get(selected_name, "zh-CN-XiaoxiaoNeural")
         
-        # 核心逻辑：利用正则表达式，将 [原字|同音字] 提取出同音字发给引擎
-        # 比如：引擎收到的不再是 [单|善]老师，而是 善老师
         processed_text = re.sub(r'\[.*?\|(.*?)\]', r'\1', text)
         
-        # 使用最纯净的文本进行发音，完美兼容所有声音模型
         communicate = edge_tts.Communicate(processed_text, voice_id)
         await communicate.save(output_file)
 
