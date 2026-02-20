@@ -375,6 +375,7 @@ class LessonPlanWriter(ttk.Window):
         else:
             content_instruction = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
 
+        # 核心更新：加入强制使用 Unicode 化学符号的指令
         prompt = f"""
         任务：为高中化学课题《{topic}》设计第 {current_p} 课时的教案框架。
         {content_instruction}
@@ -382,7 +383,7 @@ class LessonPlanWriter(ttk.Window):
         【核心要求】
         1. **课程标准**：【必须】引用**《普通高中化学课程标准（2017年版2025年日常修订版）》**中与本课时内容直接相关的具体条目，严禁使用“匹配课标”等模糊词汇。
         2. **素养导向**：严禁使用“三维目标”分类。请用一段通顺的话描述“通过...培养...素养”。
-        3. 格式：纯文本，无Markdown。
+        3. 格式：纯文本，无Markdown。**【重要】化学式、离子符号、化学方程式【必须】严格使用 Unicode 标准的上标和下标字符（例如：H₂O, SO₄²⁻, Fe³⁺, ∆表示加热），绝对不能用普通数字替代。**
         4. 返回JSON格式，Key必须保持一致：
         {{
             "chapter": "所属章节",
@@ -446,6 +447,7 @@ class LessonPlanWriter(ttk.Window):
         custom_content = context.get('custom_content', '')
         custom_hint = f"本课时核心锁定：{custom_content}。" if custom_content else ""
 
+        # 核心更新：加入强制使用 Unicode 化学符号的指令
         prompt = f"""
         任务：撰写高中化学《{topic}》第 {current_p} 课时的“教学过程”。
         
@@ -455,7 +457,7 @@ class LessonPlanWriter(ttk.Window):
         重难点：{context['key_points']}
         
         【严格限制】
-        1. 格式：纯文本，严禁Markdown。
+        1. 格式：纯文本，严禁Markdown。**【重要】所有的化学式、离子符号等【必须】严格使用 Unicode 标准的上下标字符（例如：H₂O, CO₃²⁻, Fe³⁺）。**
         2. 时长：40分钟。
         3. 风格：{plan_type}。{instruction}
         4. 理念：新课标“教-学-评”一体化。
