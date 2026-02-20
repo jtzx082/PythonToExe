@@ -41,7 +41,7 @@ class TTSApp:
         self.root = root
         self.root.title("DeepSeek 智能语音合成助手 - 作者: Yu JinQuan")
         
-        window_width = 1000  # 稍微加宽一点适应新增按钮
+        window_width = 1000
         window_height = 760
         self.center_window(window_width, window_height)
         self.root.minsize(900, 600)
@@ -49,7 +49,7 @@ class TTSApp:
         # 播放状态控制
         self.is_playing = False
         self.is_generating = False 
-        self.is_paused = False  # 新增：暂停状态标识
+        self.is_paused = False  
         
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
@@ -87,14 +87,14 @@ class TTSApp:
         ttk.Label(frame_top, text="选中多音字后点击 ->", foreground="gray").pack(side=LEFT)
         ttk.Button(frame_top, text="📝 修正选中字读音", command=self.fix_pronunciation, bootstyle="warning").pack(side=LEFT, padx=5)
 
-        # 2. 状态栏 (最底)
+        # 2. 状态栏
         frame_status = ttk.Frame(self.root, padding=5)
         frame_status.pack(side=BOTTOM, fill=X)
         self.status_label = ttk.Label(frame_status, text="状态: 就绪", bootstyle="secondary")
         self.status_label.pack(side=LEFT, padx=10)
         ttk.Label(frame_status, text="Author: Yu JinQuan", bootstyle="secondary").pack(side=RIGHT, padx=10)
 
-        # 3. 语音控制与导出 (倒数第二) - 按钮已优化
+        # 3. 语音控制与导出
         frame_bottom = ttk.Labelframe(self.root, text="语音控制与导出", padding=15, bootstyle="primary")
         frame_bottom.pack(side=BOTTOM, fill=X, padx=15, pady=(5, 10))
         
@@ -104,7 +104,6 @@ class TTSApp:
 
         ttk.Separator(frame_bottom, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=15)
 
-        # 核心修改：重构试听、暂停、停止按钮
         self.play_btn = ttk.Button(frame_bottom, text="▶️ 试听音频", command=self.play_audio, bootstyle="success")
         self.play_btn.pack(side=LEFT, padx=5)
         
@@ -119,7 +118,7 @@ class TTSApp:
         ttk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3"), bootstyle="info").pack(side=LEFT, padx=5)
         ttk.Button(frame_bottom, text="🎵 导出 WAV", command=lambda: self.export_audio("wav"), bootstyle="info").pack(side=LEFT, padx=5)
 
-        # 4. 高级参数调节区 (倒数第三)
+        # 4. 高级参数调节区
         frame_params = ttk.Labelframe(self.root, text="高级语音参数", padding=10, bootstyle="warning")
         frame_params.pack(side=BOTTOM, fill=X, padx=15, pady=5)
         
@@ -147,7 +146,7 @@ class TTSApp:
         frame_params.columnconfigure(4, weight=1)
         frame_params.columnconfigure(7, weight=1)
 
-        # 5. AI 润色区 (倒数第四)
+        # 5. AI 润色区
         frame_ai = ttk.Labelframe(self.root, text="DeepSeek AI 智能处理", padding=15, bootstyle="success")
         frame_ai.pack(side=BOTTOM, fill=X, padx=15, pady=5)
         ttk.Label(frame_ai, text="提示: 借助大模型将生硬的文本改写为更自然、流畅的口语化播音文案。").pack(side=LEFT, padx=5)
@@ -290,6 +289,7 @@ class TTSApp:
         selected_name = self.selected_voice_key.get()
         voice_id = VOICE_MAP.get(selected_name, "zh-CN-XiaoxiaoNeural")
         
+        # 处理同音字替换逻辑
         processed_text = re.sub(r'\[.*?\|(.*?)\]', r'\1', text)
         
         r = int(self.rate_var.get())
@@ -309,7 +309,7 @@ class TTSApp:
         )
         await communicate.save(output_file)
 
-    # === 新增/重构的音频控制逻辑 ===
+    # === 音频控制逻辑 ===
     def play_audio(self):
         text = self.text_area.get("1.0", tk.END).strip()
         if not text: 
@@ -317,7 +317,9 @@ class TTSApp:
             return
             
         self.update_status(f"准备试听 ({self.selected_voice_key.get()})... 正在拉取音频")
-        self.stop_audio(silent=True) # 停止之前的播放状态
+        
+        # 强制解除 Windows 文件锁
+        self.stop_audio(silent=True) 
         self.is_generating = True
         
         def run_gen():
@@ -337,6 +339,7 @@ class TTSApp:
     def _play_sound(self):
         try:
             import pygame
+            # 每次播放前重新初始化混音器，以防被 stop_audio 销毁
             pygame.mixer.init()
             pygame.mixer.music.load(self.temp_audio_file)
             pygame.mixer.music.play()
@@ -345,8 +348,30 @@ class TTSApp:
             self.is_paused = False
             self.pause_btn.configure(text="⏸️ 暂停")
             self.update_status("🔊 正在试听音频...")
+            
+            # 启动播放状态监听
+            self.check_playback_status()
+            
         except Exception as e:
             messagebox.showerror("播放错误", str(e))
+
+    def check_playback_status(self):
+        if not self.is_playing: return
+        if self.is_paused:
+            self.root.after(200, self.check_playback_status)
+            return
+
+        try:
+            import pygame
+            if pygame.mixer.get_init():
+                if not pygame.mixer.music.get_busy():
+                    self.stop_audio(silent=True)
+                    self.update_status("✅ 试听结束")
+                    return
+        except Exception:
+            pass
+            
+        self.root.after(200, self.check_playback_status)
 
     def pause_audio(self):
         if self.is_generating:
@@ -361,13 +386,11 @@ class TTSApp:
                 
             if self.is_playing:
                 if not self.is_paused:
-                    # 当前在播放 -> 暂停它
                     pygame.mixer.music.pause()
                     self.is_paused = True
                     self.pause_btn.configure(text="▶️ 继续")
                     self.update_status("⏸️ 试听已暂停")
                 else:
-                    # 当前是暂停 -> 恢复它
                     pygame.mixer.music.unpause()
                     self.is_paused = False
                     self.pause_btn.configure(text="⏸️ 暂停")
@@ -381,21 +404,23 @@ class TTSApp:
         self.is_generating = False 
         try:
             import pygame
-            pygame.mixer.init()
-            if pygame.mixer.music.get_busy() or self.is_paused:
+            if pygame.mixer.get_init():
                 pygame.mixer.music.stop()
-                pygame.mixer.music.unload()
+                if hasattr(pygame.mixer.music, 'unload'):
+                    pygame.mixer.music.unload()
+                # 核心修复：彻底关闭混音器，强行释放 Windows 系统层面的文件锁！
+                pygame.mixer.quit()
         except:
             pass
             
         self.is_playing = False
         self.is_paused = False
-        self.pause_btn.configure(text="⏸️ 暂停") # 恢复按钮外观
+        self.pause_btn.configure(text="⏸️ 暂停") 
         
         if not silent:
-            self.update_status("⏹️ 试听已停止")
+            self.update_status("⏹️ 试听已手动停止")
 
-    # === 导出功能保持不变 ===
+    # === 导出功能 ===
     def export_audio(self, fmt):
         text = self.text_area.get("1.0", tk.END).strip()
         if not text: 
