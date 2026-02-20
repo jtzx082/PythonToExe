@@ -455,14 +455,14 @@ root.minsize(900, 620)
 
 saved_config = load_config()
 
-# ---- 使用 PanedWindow 容器实现可拖拉的分栏 ----
-main_paned = tb.PanedWindow(root, orient=tk.HORIZONTAL, bootstyle=INFO)
+# ---- 使用 Panedwindow (小写w) 容器实现可拖拉的分栏 ----
+main_paned = tb.Panedwindow(root, orient=tk.HORIZONTAL, bootstyle=INFO)
 main_paned.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
 
 left_panel = tb.Frame(main_paned)
 right_panel = tb.Frame(main_paned)
 
-# 【核心修复】：将左右初始比例调为 2:1，给右侧控制面板更多空间
+# 将左右初始比例调为 2:1，给右侧控制面板更多空间
 main_paned.add(left_panel, weight=2)
 main_paned.add(right_panel, weight=1)
 
@@ -489,7 +489,7 @@ voice_frame = tb.Labelframe(right_inner, text=" 🗣️ 语音与参数 ", paddi
 voice_frame.pack(fill=tk.X, pady=(0, 10))
 
 tb.Label(voice_frame, text="发音人:", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(0, 2))
-# 【核心修复】：为发音人下拉框加入硬性 width 约束，避免被左侧文本框挤扁
+# 为发音人下拉框加入硬性 width 约束，避免被左侧文本框挤扁
 voice_combo = tb.Combobox(voice_frame, values=list(VOICES.keys()), state="readonly", bootstyle=PRIMARY, width=32)
 voice_combo.pack(fill=tk.X, pady=(0, 8))
 voice_combo.current(0)
@@ -567,7 +567,7 @@ btn_clear.pack(side=tk.LEFT, padx=5)
 btn_pinyin = tb.Button(toolbar_frame, text="✍ 修正选中字读音", command=on_correct_pinyin, bootstyle=(PRIMARY, OUTLINE))
 btn_pinyin.pack(side=tk.LEFT, padx=(15, 0)) 
 
-# 【核心修复】：为 Text 控件加入 width=10，剥夺它硬性抢占宽度的特权，配合 expand=True 它依然能自适应拉伸！
+# 为 Text 控件加入 width=10，剥夺它硬性抢占宽度的特权，配合 expand=True 它依然能自适应拉伸！
 text_input = tk.Text(left_inner, width=10, font=("微软雅黑", 12), wrap=tk.WORD, undo=True, maxundo=-1, relief=tk.FLAT, bg="#F8F9FA", padx=10, pady=10)
 text_input.pack(fill=tk.BOTH, expand=True)
 
