@@ -581,7 +581,7 @@ bottom_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=15, pady=(0, 10))
 status_label = tb.Label(bottom_bar, text="准备就绪", font=("微软雅黑", 9), bootstyle=SECONDARY)
 status_label.pack(side=tk.LEFT)
 
-author_label = tb.Label(bottom_bar, text="© 俞晋全 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 9), bootstyle=SECONDARY, cursor="hand2")
+author_label = tb.Label(bottom_bar, text="© 俞金泉 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 9), bootstyle=SECONDARY, cursor="hand2")
 author_label.pack(side=tk.RIGHT)
 author_label.bind("<Button-1>", lambda e: show_about())
 
