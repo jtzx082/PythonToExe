@@ -30,15 +30,13 @@ jobs:
 
     - name: Install Python dependencies
       run: |
-        pip install --upgrade pip
+        python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install imageio-ffmpeg
-        pip install pyinstaller
 
     - name: Build with PyInstaller
       shell: bash
       run: |
-        # 核心修改：增加了 --hidden-import=PIL._tkinter_finder
+        # 核心修改：增加了必要的 hidden-import 确保软件打包后能正常启动和转换格式
         pyinstaller --onefile --windowed --name="DeepTTS" \
           --hidden-import=imageio_ffmpeg \
           --hidden-import=PIL._tkinter_finder \
