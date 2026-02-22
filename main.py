@@ -16,7 +16,7 @@ CONFIG_FILE = "docwriter_config.json"
 class ModernAIDocWriter:
     def __init__(self, root):
         self.root = root
-        self.root.title("DeepSeek 智能写作 Pro版 v3.0")
+        self.root.title("DeepSeek 智能写作 Pro版 v3.1 (超长文本支持)")
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
         
@@ -46,14 +46,14 @@ class ModernAIDocWriter:
             pass
 
     def create_ui(self):
-        # 整体网格布局：左侧控制栏 (权值0)，右侧编辑区 (权值1)
+        # 整体网格布局
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
         # ==================== 左侧侧边栏 ====================
-        self.sidebar = ctk.CTkFrame(self.root, width=280, corner_radius=0)
+        self.sidebar = ctk.CTkFrame(self.root, width=290, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(7, weight=1) # 让中间部分自动撑开
+        self.sidebar.grid_rowconfigure(7, weight=1) 
 
         # Logo / 标题
         self.logo_label = ctk.CTkLabel(self.sidebar, text="✨ AI 写作 Pro", font=ctk.CTkFont(family="微软雅黑", size=24, weight="bold"))
@@ -82,10 +82,16 @@ class ModernAIDocWriter:
         self.tone_menu = ctk.CTkOptionMenu(self.settings_frame, values=["专业严谨", "幽默风趣", "热情洋溢", "平易近人"], variable=self.tone_var, width=110)
         self.tone_menu.grid(row=1, column=0, sticky="w", pady=5)
 
-        ctk.CTkLabel(self.settings_frame, text="篇幅要求:").grid(row=0, column=1, sticky="w", padx=(10,0))
+        # 【核心优化】：将下拉菜单更换为 ComboBox（组合框），支持手动输入
+        ctk.CTkLabel(self.settings_frame, text="字数(可点进去手填):").grid(row=0, column=1, sticky="w", padx=(5,0))
         self.length_var = ctk.StringVar(value="详细(约2000字)")
-        self.length_menu = ctk.CTkOptionMenu(self.settings_frame, values=["简短(约500字)", "适中(约1000字)", "详细(约2000字)"], variable=self.length_var, width=110)
-        self.length_menu.grid(row=1, column=1, sticky="w", padx=(10,0), pady=5)
+        self.length_menu = ctk.CTkComboBox(
+            self.settings_frame, 
+            values=["简短(约500字)", "适中(约1000字)", "详细(约2000字)", "长篇(约5000字)", "超长篇(约8000字)"], 
+            variable=self.length_var, 
+            width=135
+        )
+        self.length_menu.grid(row=1, column=1, sticky="w", padx=(5,0), pady=5)
 
         # 4. 文档生成按钮区
         self.doc_types = ["📝 学术论文", "📊 研究报告", "📅 工作计划", "💡 总结反思", "📢 演讲稿件", "📧 商业邮件"]
@@ -111,11 +117,9 @@ class ModernAIDocWriter:
         self.main_frame.grid_rowconfigure(0, weight=1)
         self.main_frame.grid_columnconfigure(0, weight=1)
 
-        # 主输入文本框
         self.text_area = ctk.CTkTextbox(self.main_frame, font=ctk.CTkFont(family="微软雅黑", size=14), wrap="word")
         self.text_area.grid(row=0, column=0, columnspan=3, sticky="nsew", pady=(0, 15))
 
-        # 底部操作栏
         self.clear_btn = ctk.CTkButton(self.main_frame, text="🗑️ 清空面板", fg_color="gray", command=self.clear_text, width=120)
         self.clear_btn.grid(row=1, column=0, sticky="w")
 
@@ -146,21 +150,17 @@ class ModernAIDocWriter:
             if not messagebox.askyesno("确认", "编辑器已有内容，是否清空并重新生成？"):
                 return
 
-        # 保存 API Key
         self.save_config(api_key)
-
         self.is_generating = True
         self.stop_flag = False
         
-        # 显示停止按钮
         self.stop_btn.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
         
         self.text_area.delete("1.0", "end")
         self.text_area.insert("end", f"🚀 正在连接 DeepSeek 大模型，构思【{doc_type}】...\n\n")
 
-        # 读取设定参数
         tone = self.tone_var.get()
-        length = self.length_var.get()
+        length = self.length_var.get() # 这里能直接获取到用户手打的任意自定义字数
 
         threading.Thread(target=self.call_deepseek, args=(api_key, topic, doc_type, tone, length), daemon=True).start()
 
@@ -169,11 +169,14 @@ class ModernAIDocWriter:
             client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
             
             sys_prompt = "你是一个顶级文档写作专家，精通各类公文、学术、职场和商业文档的撰写，排版结构完美。"
+            
+            # 【核心优化】：针对长文本专门强化的 Prompt 提示词工程
             user_prompt = f"""请帮我撰写一份【{doc_type}】。
 - 核心主题/需求：{topic}
 - 语气风格：{tone}
-- 篇幅要求：{length}
-- 排版格式：请使用清晰的 Markdown 格式输出，包含适当的层级标题（#、##）、列表等。不要输出任何寒暄废话，直接给我正文内容。"""
+- 篇幅字数要求：严格遵循【{length}】的长度标准！
+  *特别注意*：如果是长篇或超长篇，请务必通过【增加多维度的深度分析】、【提供丰富的具体案例】、【详实的数据与步骤拆解】等方式来实质性扩充篇幅！切忌车轱辘话来回凑字数，坚决不要草草收尾。
+- 排版格式：使用清晰的 Markdown 格式输出，包含层级标题（#、##）。不要输出任何寒暄废话，直接给我正文内容。"""
 
             response = client.chat.completions.create(
                 model="deepseek-chat",
@@ -181,7 +184,8 @@ class ModernAIDocWriter:
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                stream=True 
+                stream=True,
+                max_tokens=8192 # 【核心优化】：解锁单次生成的最大 Token 限制，支持几万字的巨长文本不被截断
             )
 
             self.root.after(0, self.text_area.delete, "1.0", "end")
@@ -205,7 +209,7 @@ class ModernAIDocWriter:
 
     def finish_generation(self):
         self.is_generating = False
-        self.stop_btn.grid_forget() # 隐藏停止按钮
+        self.stop_btn.grid_forget()
 
     def append_text(self, text):
         self.text_area.insert("end", text)
@@ -230,7 +234,6 @@ class ModernAIDocWriter:
             doc = Document()
             content = self.text_area.get("1.0", "end").strip()
             
-            # 简单的 Markdown 解析转 Word
             for line in content.split('\n'):
                 if line.startswith('# '):
                     doc.add_heading(line[2:].strip(), level=1)
@@ -241,14 +244,13 @@ class ModernAIDocWriter:
                 elif line.startswith('- ') or line.startswith('* '):
                     doc.add_paragraph(line[2:].strip(), style='List Bullet')
                 else:
-                    if line.strip(): # 忽略纯空行
+                    if line.strip():
                         doc.add_paragraph(line)
             
             doc.save(file_path)
             messagebox.showinfo("成功", f"Word 文件已成功导出至:\n{file_path}")
         except Exception as e:
             messagebox.showerror("错误", f"导出 Word 失败:\n{str(e)}")
-
 
 if __name__ == "__main__":
     app = ctk.CTk()
