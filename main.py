@@ -1,15 +1,14 @@
 import sys
 import os
 import requests
+import json
 import docx
 import PyPDF2
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QTextEdit, QLabel, QLineEdit, QFileDialog, QProgressBar, QMessageBox)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from PyQt6.QtGui import QFont
 from pptx import Presentation
-from pptx.util import Inches, Pt
-from openai import OpenAI
+from pptx.util import Inches
 
 # ================= 线程类：调用DeepSeek生成大纲 =================
 class OutlineWorker(QThread):
@@ -23,7 +22,11 @@ class OutlineWorker(QThread):
 
     def run(self):
         try:
-            client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com")
+            # 使用原生 requests 替代 openai 库，避免代理参数冲突导致崩溃
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
             prompt = f"""
             请根据以下内容/主题生成一份PPT演示文稿大纲。
             要求格式严格遵守以下Markdown规范，以便后续程序解析：
@@ -40,17 +43,32 @@ class OutlineWorker(QThread):
             [Image Keyword: Artificial Intelligence Future]
             """
             
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [
                     {"role": "system", "content": "你是一个专业的PPT大纲设计师。"},
                     {"role": "user", "content": prompt}
                 ]
+            }
+            
+            # 发起请求
+            response = requests.post(
+                "https://api.deepseek.com/chat/completions", 
+                headers=headers, 
+                json=payload,
+                timeout=60 # 设置超时防卡死
             )
-            outline = response.choices[0].message.content
+            
+            # 抛出HTTP错误
+            response.raise_for_status() 
+            
+            # 解析返回数据
+            result_data = response.json()
+            outline = result_data["choices"][0]["message"]["content"]
             self.finished.emit(outline)
+            
         except Exception as e:
-            self.error.emit(str(e))
+            self.error.emit(f"网络请求失败:\n{str(e)}")
 
 # ================= 线程类：生成PPT =================
 class PPTWorker(QThread):
@@ -89,7 +107,6 @@ class PPTWorker(QThread):
             if not slides_data:
                 raise ValueError("大纲格式错误，未找到幻灯片内容。请确保包含'#'标题。")
 
-            # 加载模板或创建空白
             if self.template_path and os.path.exists(self.template_path):
                 prs = Presentation(self.template_path)
             else:
@@ -97,15 +114,12 @@ class PPTWorker(QThread):
 
             total = len(slides_data)
             for idx, slide_data in enumerate(slides_data):
-                # 尝试使用"标题和内容"排版 (索引一般为1)
                 layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
                 slide = prs.slides.add_slide(layout)
                 
-                # 填入标题
                 if slide.shapes.title:
                     slide.shapes.title.text = slide_data['title']
                 
-                # 填入要点内容
                 if len(slide.placeholders) > 1:
                     tf = slide.placeholders[1].text_frame
                     tf.text = ""
@@ -114,7 +128,6 @@ class PPTWorker(QThread):
                         p.text = bullet
                         p.level = 0
                 
-                # AI配图 (使用免费免key的pollinations API生图)
                 try:
                     img_url = f"https://image.pollinations.ai/prompt/{slide_data['keyword']}?width=400&height=300&nologo=true"
                     img_data = requests.get(img_url, timeout=10).content
@@ -122,11 +135,10 @@ class PPTWorker(QThread):
                     with open(img_path, 'wb') as handler:
                         handler.write(img_data)
                     
-                    # 将图片插入到幻灯片右侧
                     left = Inches(5)
                     top = Inches(2)
                     slide.shapes.add_picture(img_path, left, top, width=Inches(4.5))
-                    os.remove(img_path) # 清理临时图片
+                    os.remove(img_path) 
                 except Exception as img_e:
                     print(f"无法生成图片: {img_e}")
 
@@ -175,9 +187,9 @@ class MainWindow(QMainWindow):
         self.input_text.setPlaceholderText("在此输入PPT主题，或点击右侧按钮解析文档内容...")
         
         btn_layout = QVBoxLayout()
-        self.btn_upload = QPushButton("📂 上传解析文件")
+        self.btn_upload = QPushButton("上传解析文件")
         self.btn_upload.clicked.connect(self.upload_file)
-        self.btn_gen_outline = QPushButton("✨ 第一步: AI 生成大纲")
+        self.btn_gen_outline = QPushButton("第一步: AI 生成大纲")
         self.btn_gen_outline.clicked.connect(self.generate_outline)
         
         btn_layout.addWidget(self.btn_upload)
@@ -197,11 +209,11 @@ class MainWindow(QMainWindow):
 
         # 4. 生成区
         bottom_layout = QHBoxLayout()
-        self.btn_template = QPushButton("🎨 选择本地PPT模板 (可选)")
+        self.btn_template = QPushButton("选择本地 PPT 模板 (可选)")
         self.btn_template.clicked.connect(self.select_template)
         self.template_path = ""
         
-        self.btn_generate_ppt = QPushButton("🚀 第二步: 一键生成PPT")
+        self.btn_generate_ppt = QPushButton("第二步: 一键生成 PPT")
         self.btn_generate_ppt.clicked.connect(self.generate_ppt)
         
         bottom_layout.addWidget(self.btn_template)
@@ -258,13 +270,13 @@ class MainWindow(QMainWindow):
     def on_outline_finished(self, text):
         self.outline_text.setText(text)
         self.btn_gen_outline.setEnabled(True)
-        self.btn_gen_outline.setText("✨ 第一步: AI 生成大纲")
+        self.btn_gen_outline.setText("第一步: AI 生成大纲")
         self.progress_bar.setValue(100)
         QMessageBox.information(self, "成功", "大纲已生成，请在文本框中检查并修改！")
 
     def on_outline_error(self, err):
         self.btn_gen_outline.setEnabled(True)
-        self.btn_gen_outline.setText("✨ 第一步: AI 生成大纲")
+        self.btn_gen_outline.setText("第一步: AI 生成大纲")
         self.progress_bar.setValue(0)
         QMessageBox.critical(self, "API请求失败", str(err))
 
@@ -272,7 +284,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "选择PPT模板", "", "PPTX 文件 (*.pptx)")
         if path:
             self.template_path = path
-            self.btn_template.setText(f"🎨 已选: {os.path.basename(path)}")
+            self.btn_template.setText(f"已选模板: {os.path.basename(path)}")
 
     def generate_ppt(self):
         outline = self.outline_text.toPlainText().strip()
@@ -296,12 +308,12 @@ class MainWindow(QMainWindow):
 
     def on_ppt_finished(self, path):
         self.btn_generate_ppt.setEnabled(True)
-        self.btn_generate_ppt.setText("🚀 第二步: 一键生成PPT")
+        self.btn_generate_ppt.setText("第二步: 一键生成 PPT")
         QMessageBox.information(self, "成功", f"PPT生成完毕！\n保存位置: {path}")
 
     def on_ppt_error(self, err):
         self.btn_generate_ppt.setEnabled(True)
-        self.btn_generate_ppt.setText("🚀 第二步: 一键生成PPT")
+        self.btn_generate_ppt.setText("第二步: 一键生成 PPT")
         QMessageBox.critical(self, "生成失败", str(err))
 
 if __name__ == "__main__":
