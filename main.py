@@ -4,11 +4,11 @@ import tkinter.filedialog as filedialog
 import threading
 import json
 import os
+import re
 from openai import OpenAI
 from docx import Document
-import re
 from docx.shared import Pt, Mm
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 # 设置 CustomTkinter 的全局主题和颜色
@@ -20,7 +20,7 @@ CONFIG_FILE = "docwriter_config.json"
 class ModernAIDocWriter:
     def __init__(self, root):
         self.root = root
-        self.root.title("DeepSeek 智能写作 Pro版 v3.1 (超长文本支持)")
+        self.root.title("DeepSeek 智能写作 Pro版 v4.0 (公文排版级)")
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
         
@@ -86,7 +86,7 @@ class ModernAIDocWriter:
         self.tone_menu = ctk.CTkOptionMenu(self.settings_frame, values=["专业严谨", "幽默风趣", "热情洋溢", "平易近人"], variable=self.tone_var, width=110)
         self.tone_menu.grid(row=1, column=0, sticky="w", pady=5)
 
-        # 【核心优化】：将下拉菜单更换为 ComboBox（组合框），支持手动输入
+        # 组合框：支持下拉选择，也支持用户点进去直接手打字数要求
         ctk.CTkLabel(self.settings_frame, text="字数(可点进去手填):").grid(row=0, column=1, sticky="w", padx=(5,0))
         self.length_var = ctk.StringVar(value="详细(约2000字)")
         self.length_menu = ctk.CTkComboBox(
@@ -130,7 +130,7 @@ class ModernAIDocWriter:
         self.export_md_btn = ctk.CTkButton(self.main_frame, text="💾 导出为 Markdown", command=self.export_md, width=150)
         self.export_md_btn.grid(row=1, column=1, sticky="e", padx=(0, 10))
 
-        self.export_word_btn = ctk.CTkButton(self.main_frame, text="📄 导出为 Word", command=self.export_word, fg_color="#27ae60", hover_color="#219653", width=150)
+        self.export_word_btn = ctk.CTkButton(self.main_frame, text="📄 导出为正规 Word", command=self.export_word, fg_color="#27ae60", hover_color="#219653", width=160)
         self.export_word_btn.grid(row=1, column=2, sticky="e")
 
     def change_appearance(self, new_mode):
@@ -164,7 +164,7 @@ class ModernAIDocWriter:
         self.text_area.insert("end", f"🚀 正在连接 DeepSeek 大模型，构思【{doc_type}】...\n\n")
 
         tone = self.tone_var.get()
-        length = self.length_var.get() # 这里能直接获取到用户手打的任意自定义字数
+        length = self.length_var.get()
 
         threading.Thread(target=self.call_deepseek, args=(api_key, topic, doc_type, tone, length), daemon=True).start()
 
@@ -174,7 +174,7 @@ class ModernAIDocWriter:
             
             sys_prompt = "你是一个顶级文档写作专家，精通各类公文、学术、职场和商业文档的撰写，排版结构完美。"
             
-            # 【核心优化】：针对长文本专门强化的 Prompt 提示词工程
+            # 强化提示词工程：强迫长文本提供深度内容，同时输出标准 Markdown
             user_prompt = f"""请帮我撰写一份【{doc_type}】。
 - 核心主题/需求：{topic}
 - 语气风格：{tone}
@@ -189,7 +189,7 @@ class ModernAIDocWriter:
                     {"role": "user", "content": user_prompt}
                 ],
                 stream=True,
-                max_tokens=8192 # 【核心优化】：解锁单次生成的最大 Token 限制，支持几万字的巨长文本不被截断
+                max_tokens=8192 # 解锁单次生成的最大 Token 限制，支持万字长文
             )
 
             self.root.after(0, self.text_area.delete, "1.0", "end")
@@ -230,7 +230,8 @@ class ModernAIDocWriter:
                 f.write(self.text_area.get("1.0", "end"))
             messagebox.showinfo("成功", "Markdown 文件导出成功！")
 
-   def export_word(self):
+    def export_word(self):
+        """完全按照国家公文标准 (GB/T 9704-2012) 导出并清除 Markdown 符号"""
         file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word 文档", "*.docx")], title="导出为公文排版 Word")
         if not file_path: return
         
@@ -253,7 +254,7 @@ class ModernAIDocWriter:
             style._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
             style.font.size = Pt(16)
             style.paragraph_format.line_spacing = 1.5
-            style.paragraph_format.first_line_indent = Pt(32) # 首行缩进2字符(三号字=16磅，两个字=32磅)
+            style.paragraph_format.first_line_indent = Pt(32) # 首行缩进2字符
 
             content = self.text_area.get("1.0", "end").strip()
             
@@ -276,7 +277,7 @@ class ModernAIDocWriter:
                 if heading_level == 1:
                     # 一级标题：黑体，三号，居中，不加粗
                     p = doc.add_paragraph()
-                    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     p.paragraph_format.first_line_indent = 0 # 居中不缩进
                     
                     line_clean = line.replace('*', '').replace('#', '') # 暴力清除残留符号
@@ -287,7 +288,7 @@ class ModernAIDocWriter:
                     run.font.bold = False
                     
                 elif heading_level == 2:
-                    # 二级标题：楷体，三号，加粗，不缩进 (更醒目)
+                    # 二级标题：楷体，三号，加粗，不缩进
                     p = doc.add_paragraph()
                     p.paragraph_format.first_line_indent = 0
                     
@@ -299,34 +300,46 @@ class ModernAIDocWriter:
                     run.font.bold = True
                     
                 else:
-                    # 正文或三级及以下标题：处理内联的 **粗体**
+                    # 三级标题及以下 / 正文：处理内联的 **粗体**
                     p = doc.add_paragraph()
                     
                     if heading_level >= 3:
                         p.paragraph_format.first_line_indent = Pt(32) # 缩进2字符
-                        run = p.add_run(line.replace('*', '').replace('#', ''))
-                        run.font.name = '仿宋'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
-                        run.font.size = Pt(16)
-                        run.font.bold = True
+                        line_clean = line.replace('*', '').replace('#', '')
+                        if line_clean:
+                            run = p.add_run(line_clean)
+                            run.font.name = '仿宋'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
+                            run.font.size = Pt(16)
+                            run.font.bold = True
                     else:
                         # 普通正文拆分处理加粗
                         parts = re.split(r'(\*\*.*?\*\*)', line)
                         for part in parts:
+                            if not part: continue
+                            
+                            # 处理加粗文本
                             if part.startswith('**') and part.endswith('**'):
-                                run = p.add_run(part[2:-2]) # 去除**符号
+                                run = p.add_run(part[2:-2]) # 去除两端**符号
                                 run.font.bold = True
                             else:
-                                # 清理其余单独残留的Markdown乱码符号
+                                # 清理普通文本中其余残留的 Markdown 乱码符号
                                 clean_part = part.replace('*', '').replace('#', '')
-                                if clean_part:
-                                    run = p.add_run(clean_part)
+                                if not clean_part: continue
+                                run = p.add_run(clean_part)
+                                run.font.bold = False
                             
-                            # 统一设定正文字体
+                            # 统一设定正文字体为三号仿宋
                             run.font.name = '仿宋'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
+                            run.font.size = Pt(16)
             
             doc.save(file_path)
-            messagebox.showinfo("成功", f"✅ 公文级 Word 已成功导出，无残留符号！\n路径:\n{file_path}")
+            messagebox.showinfo("成功", f"✅ 公文级 Word 已成功导出，无任何残留符号！\n\n文件保存路径:\n{file_path}")
         except Exception as e:
             messagebox.showerror("错误", f"导出 Word 失败:\n{str(e)}")
+
+if __name__ == "__main__":
+    app = ctk.CTk()
+    ModernAIDocWriter(app)
+    app.mainloop()
