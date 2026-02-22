@@ -20,7 +20,7 @@ CONFIG_FILE = "docwriter_config.json"
 class ModernAIDocWriter:
     def __init__(self, root):
         self.root = root
-        self.root.title("DeepSeek 智能写作 Pro版 v4.0 (公文排版级)")
+        self.root.title("DeepSeek 智能写作 Pro版 v4.1 (支持自定义题材)")
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
         
@@ -52,24 +52,27 @@ class ModernAIDocWriter:
         self.root.grid_rowconfigure(0, weight=1)
 
         # ==================== 左侧侧边栏 ====================
-        self.sidebar = ctk.CTkFrame(self.root, width=290, corner_radius=0)
+        self.sidebar = ctk.CTkFrame(self.root, width=300, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(7, weight=1) 
+        self.sidebar.grid_rowconfigure(9, weight=1) # 调整弹簧行
 
         self.logo_label = ctk.CTkLabel(self.sidebar, text="✨ AI 写作 Pro", font=ctk.CTkFont(family="微软雅黑", size=24, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
 
+        # 1. API Key
         self.api_key_entry = ctk.CTkEntry(self.sidebar, placeholder_text="输入 DeepSeek API Key", show="*")
         self.api_key_entry.grid(row=1, column=0, padx=20, pady=(0, 15), sticky="ew")
         if self.config.get("api_key"):
             self.api_key_entry.insert(0, self.config["api_key"])
 
+        # 2. 需求描述
         self.topic_label = ctk.CTkLabel(self.sidebar, text="🎯 具体写作需求：", anchor="w", font=ctk.CTkFont(weight="bold"))
         self.topic_label.grid(row=2, column=0, padx=20, pady=(5, 0), sticky="ew")
         self.topic_textbox = ctk.CTkTextbox(self.sidebar, height=100)
         self.topic_textbox.grid(row=3, column=0, padx=20, pady=(5, 15), sticky="ew")
-        self.topic_textbox.insert("1.0", "例如：写一份关于高二理科班学生学情分析的调研报告，侧重于...")
+        self.topic_textbox.insert("1.0", "例如：写一份关于高二理科班学生期中考试后的学情分析，侧重于...")
 
+        # 3. 语气与篇幅
         self.settings_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.settings_frame.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
         self.settings_frame.grid_columnconfigure((0, 1), weight=1)
@@ -79,7 +82,7 @@ class ModernAIDocWriter:
         self.tone_menu = ctk.CTkOptionMenu(self.settings_frame, values=["专业严谨", "平易近人", "鼓舞人心", "客观中立"], variable=self.tone_var, width=110)
         self.tone_menu.grid(row=1, column=0, sticky="w", pady=5)
 
-        ctk.CTkLabel(self.settings_frame, text="字数(可点手填):").grid(row=0, column=1, sticky="w", padx=(5,0))
+        ctk.CTkLabel(self.settings_frame, text="字数(可手填):").grid(row=0, column=1, sticky="w", padx=(5,0))
         self.length_var = ctk.StringVar(value="详细(约2000字)")
         self.length_menu = ctk.CTkComboBox(
             self.settings_frame, 
@@ -89,21 +92,32 @@ class ModernAIDocWriter:
         )
         self.length_menu.grid(row=1, column=1, sticky="w", padx=(5,0), pady=5)
 
-        # 调整了预设类型，使其更贴近高频写作需求
-        self.doc_types = ["📝 教研论文", "📊 调研报告", "📅 工作计划", "💡 总结反思", "📢 讲话稿", "🧪 教学设计"]
+        # 4. 预设快捷按钮区 (加入“教学案例”)
+        self.doc_types = ["📝 教研论文", "📊 调研报告", "📅 工作计划", "💡 总结反思", "📖 教学案例", "🧪 教学设计"]
         
         self.btn_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.btn_frame.grid(row=5, column=0, padx=20, pady=15, sticky="ew")
+        self.btn_frame.grid(row=5, column=0, padx=20, pady=(15, 5), sticky="ew")
         self.btn_frame.grid_columnconfigure((0, 1), weight=1)
 
         for i, doc in enumerate(self.doc_types):
             btn = ctk.CTkButton(self.btn_frame, text=doc, command=lambda d=doc: self.start_generation(d), fg_color="#2b6b84", hover_color="#1f5368")
             btn.grid(row=i//2, column=i%2, padx=3, pady=5, sticky="ew")
 
+        # 5. 自定义题材输入区 (新增功能)
+        self.custom_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.custom_frame.grid(row=6, column=0, padx=20, pady=(5, 15), sticky="ew")
+        
+        self.custom_entry = ctk.CTkEntry(self.custom_frame, placeholder_text="如：主题班会教案、家访记录", height=32)
+        self.custom_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        self.custom_btn = ctk.CTkButton(self.custom_frame, text="🚀 生成", width=60, height=32, command=self.generate_custom)
+        self.custom_btn.pack(side="right")
+
+        # 停止按钮 (默认隐藏)
         self.stop_btn = ctk.CTkButton(self.sidebar, text="🛑 停止生成", fg_color="#c0392b", hover_color="#a53125", command=self.stop_generation)
         
         self.appearance_mode_menu = ctk.CTkOptionMenu(self.sidebar, values=["System", "Dark", "Light"], command=self.change_appearance)
-        self.appearance_mode_menu.grid(row=8, column=0, padx=20, pady=(10, 20), sticky="ew")
+        self.appearance_mode_menu.grid(row=10, column=0, padx=20, pady=(10, 20), sticky="ew")
 
         # ==================== 右侧编辑与导出区 ====================
         self.main_frame = ctk.CTkFrame(self.root, fg_color="transparent")
@@ -125,6 +139,14 @@ class ModernAIDocWriter:
 
     def change_appearance(self, new_mode):
         ctk.set_appearance_mode(new_mode)
+
+    def generate_custom(self):
+        """处理自定义文种的生成逻辑"""
+        custom_type = self.custom_entry.get().strip()
+        if not custom_type:
+            messagebox.showwarning("提示", "请输入您想生成的自定义题材名称！")
+            return
+        self.start_generation(custom_type)
 
     def start_generation(self, doc_type):
         if self.is_generating:
@@ -148,7 +170,7 @@ class ModernAIDocWriter:
         self.is_generating = True
         self.stop_flag = False
         
-        self.stop_btn.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
+        self.stop_btn.grid(row=7, column=0, padx=20, pady=10, sticky="ew")
         
         self.text_area.delete("1.0", "end")
         self.text_area.insert("end", f"🚀 正在连接 DeepSeek 大模型，构思【{doc_type}】...\n\n")
@@ -164,7 +186,6 @@ class ModernAIDocWriter:
             
             sys_prompt = "你是一个顶级文档写作专家，精通各类公文、学术、职场和教研文档的撰写，排版结构完美。"
             
-            # 强化提示词：约束 AI 输出标准的公文标题层级符号，方便后续解析
             user_prompt = f"""请帮我撰写一份【{doc_type}】。
 - 核心主题/需求：{topic}
 - 语气风格：{tone}
@@ -276,39 +297,30 @@ class ModernAIDocWriter:
                 p = doc.add_paragraph()
                 
                 if heading_level == 1:
-                    # 【大标题】二号 (22pt)，方正小标宋简体，居中，不加粗
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     p.paragraph_format.first_line_indent = 0
                     run = p.add_run(line_clean)
-                    # 注: 若系统无方正小标宋，会回退为宋体。建议用户电脑安装该字体。
                     self.set_font(run, '方正小标宋简体', 22, False)
                     
                 elif heading_level == 2:
-                    # 【一级标题】(如 一、) 三号 (16pt)，黑体，首行缩进2字符 (32pt)
                     p.paragraph_format.first_line_indent = Pt(32)
                     run = p.add_run(line_clean)
                     self.set_font(run, '黑体', 16, False)
                     
                 elif heading_level == 3:
-                    # 【二级标题】(如 (一)) 三号 (16pt)，楷体_GB2312，首行缩进2字符
                     p.paragraph_format.first_line_indent = Pt(32)
                     run = p.add_run(line_clean)
                     self.set_font(run, '楷体_GB2312', 16, False)
                     
                 else:
-                    # 【正文及三四级标题】三号 (16pt)，仿宋_GB2312，首行缩进2字符
                     p.paragraph_format.first_line_indent = Pt(32)
-                    
                     if heading_level >= 4:
                         run = p.add_run(line_clean)
-                        # 公文中三级标题通常加粗
                         self.set_font(run, '仿宋_GB2312', 16, True)
                     else:
-                        # 普通正文拆分处理 Markdown 局部加粗
                         parts = re.split(r'(\*\*.*?\*\*)', line)
                         for part in parts:
                             if not part: continue
-                            
                             is_bold = False
                             if part.startswith('**') and part.endswith('**'):
                                 is_bold = True
