@@ -6,6 +6,10 @@ import json
 import os
 from openai import OpenAI
 from docx import Document
+import re
+from docx.shared import Pt, Mm
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.oxml.ns import qn
 
 # 设置 CustomTkinter 的全局主题和颜色
 ctk.set_appearance_mode("System")  # 跟随系统深色/浅色模式
