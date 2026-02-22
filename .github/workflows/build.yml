@@ -5,7 +5,16 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:  # 明确启用手动触发
+    inputs:
+      target_os:
+        description: 'Target OS (optional)'
+        required: false
+        default: 'all'
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
 
 jobs:
   build:
@@ -14,9 +23,17 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: [3.9]
+        include:
+          - os: ubuntu-latest
+            output_name: PPTMaker-Linux
+          - os: windows-latest
+            output_name: PPTMaker-Windows.exe
+          - os: macos-latest
+            output_name: PPTMaker-macOS
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
@@ -32,21 +49,35 @@ jobs:
     - name: Build executable
       run: |
         pyinstaller --onefile --windowed --name PPTMaker main.py
-      
-    - name: Upload artifacts
+    
+    - name: Upload artifact
       uses: actions/upload-artifact@v3
       with:
-        name: PPTMaker-${{ matrix.os }}
+        name: ${{ matrix.output_name }}
         path: dist/PPTMaker*
 
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
+      
+    - name: Create Release Directory
+      run: |
+        mkdir -p releases
+        
+    - name: Move Artifacts
+      run: |
+        find . -name "PPTMaker*" -type f -exec cp {} releases/ \;
+        
+    - name: Display Release Files
+      run: ls -la releases/
       
     - name: Create Release
       id: create_release
@@ -59,13 +90,13 @@ jobs:
         draft: false
         prerelease: false
         
-    - name: Upload Release Assets
+    - name: Upload Linux Asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./PPTMaker-ubuntu-latest/PPTMaker
+        asset_path: ./releases/PPTMaker-Linux
         asset_name: PPTMaker-Linux
         asset_content_type: application/octet-stream
         
@@ -75,9 +106,9 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./PPTMaker-windows-latest/PPTMaker.exe
+        asset_path: ./releases/PPTMaker-Windows.exe
         asset_name: PPTMaker-Windows.exe
-        asset_content_type: application/octet-stream
+        asset_content_type: application/vnd.microsoft.portable-executable
         
     - name: Upload macOS Asset
       uses: actions/upload-release-asset@v1
@@ -85,6 +116,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./PPTMaker-macos-latest/PPTMaker
+        asset_path: ./releases/PPTMaker-macOS
         asset_name: PPTMaker-macOS
         asset_content_type: application/octet-stream
