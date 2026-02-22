@@ -25,7 +25,7 @@ class PPTMakerApp:
         self.style = ttk.Style()
         self.style.theme_use('clam')
         
-        # 创建主框架
+        # 创建主框架样式
         main_frame = ttk.Frame(root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
