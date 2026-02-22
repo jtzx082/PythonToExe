@@ -1,386 +1,311 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+import sys
 import os
-import pptx
-from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN
-from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
 import requests
-import json
-import threading
-from PIL import Image, ImageTk
-import io
-import re
-import openai
-from pptx.enum.dml import MSO_THEME_COLOR
+import docx
+import PyPDF2
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                             QPushButton, QTextEdit, QLabel, QLineEdit, QFileDialog, QProgressBar, QMessageBox)
+from PyQt6.QtCore import QThread, pyqtSignal, Qt
+from PyQt6.QtGui import QFont
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from openai import OpenAI
 
-class PPTMakerApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("AI智能PPT制作工具")
-        self.root.geometry("1200x800")
-        
-        # 设置样式
-        self.style = ttk.Style()
-        self.style.theme_use('clam')
-        
-        # 创建主框架样式
-        main_frame = ttk.Frame(root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # 左侧控制面板
-        control_frame = ttk.LabelFrame(main_frame, text="控制面板", width=300)
-        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        control_frame.pack_propagate(False)
-        
-        # 主题输入
-        ttk.Label(control_frame, text="PPT主题:").pack(pady=5)
-        self.topic_var = tk.StringVar()
-        topic_entry = ttk.Entry(control_frame, textvariable=self.topic_var, width=35)
-        topic_entry.pack(pady=5)
-        
-        # 文件上传
-        ttk.Label(control_frame, text="上传文档:").pack(pady=5)
-        self.file_path_var = tk.StringVar()
-        file_frame = ttk.Frame(control_frame)
-        file_frame.pack(pady=5)
-        ttk.Entry(file_frame, textvariable=self.file_path_var, width=25).pack(side=tk.LEFT)
-        ttk.Button(file_frame, text="浏览", command=self.browse_file).pack(side=tk.LEFT, padx=5)
-        
-        # API密钥输入
-        ttk.Label(control_frame, text="DeepSeek API Key:").pack(pady=5)
-        self.api_key_var = tk.StringVar()
-        api_entry = ttk.Entry(control_frame, textvariable=self.api_key_var, show="*", width=35)
-        api_entry.pack(pady=5)
-        
-        # 生成按钮
-        ttk.Button(control_frame, text="生成大纲", command=self.generate_outline).pack(pady=10)
-        ttk.Button(control_frame, text="生成PPT", command=self.generate_ppt).pack(pady=5)
-        
-        # 进度条
-        self.progress = ttk.Progressbar(control_frame, mode='indeterminate')
-        self.progress.pack(fill=tk.X, pady=10)
-        
-        # 中间大纲编辑区
-        outline_frame = ttk.LabelFrame(main_frame, text="PPT大纲编辑", width=500)
-        outline_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-        
-        # 大纲树形控件
-        columns = ('title', 'content')
-        self.outline_tree = ttk.Treeview(outline_frame, columns=columns, show='tree headings', height=20)
-        self.outline_tree.heading('#0', text='幻灯片')
-        self.outline_tree.heading('title', text='标题')
-        self.outline_tree.heading('content', text='内容')
-        self.outline_tree.column('#0', width=100)
-        self.outline_tree.column('title', width=150)
-        self.outline_tree.column('content', width=300)
-        
-        # 滚动条
-        tree_scroll = ttk.Scrollbar(outline_frame, orient=tk.VERTICAL, command=self.outline_tree.yview)
-        self.outline_tree.configure(yscrollcommand=tree_scroll.set)
-        
-        self.outline_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # 添加/删除按钮
-        btn_frame = ttk.Frame(outline_frame)
-        btn_frame.pack(fill=tk.X, pady=5)
-        ttk.Button(btn_frame, text="添加幻灯片", command=self.add_slide).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="删除选中", command=self.delete_slide).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="上移", command=self.move_up).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="下移", command=self.move_down).pack(side=tk.LEFT, padx=5)
-        
-        # 右侧预览区
-        preview_frame = ttk.LabelFrame(main_frame, text="预览", width=400)
-        preview_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        
-        # 预览Canvas
-        self.preview_canvas = tk.Canvas(preview_frame, bg='white', width=350, height=600)
-        preview_scroll = ttk.Scrollbar(preview_frame, orient=tk.VERTICAL, command=self.preview_canvas.yview)
-        self.preview_canvas.configure(yscrollcommand=preview_scroll.set)
-        
-        self.preview_frame = ttk.Frame(self.preview_canvas)
-        self.preview_window = self.preview_canvas.create_window((0, 0), window=self.preview_frame, anchor="nw")
-        
-        self.preview_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        preview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # 绑定滚动事件
-        self.preview_frame.bind("<Configure>", self.on_preview_configure)
-        
-        # 初始化大纲示例
-        self.init_example_outline()
-        
-        # 存储API响应
-        self.generated_outline = []
-        
-    def on_preview_configure(self, event):
-        self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
-    
-    def browse_file(self):
-        filename = filedialog.askopenfilename(
-            title="选择文档",
-            filetypes=[
-                ("Text files", "*.txt"),
-                ("Word documents", "*.docx"),
-                ("PDF files", "*.pdf"),
-                ("All files", "*.*")
-            ]
-        )
-        if filename:
-            self.file_path_var.set(filename)
-    
-    def init_example_outline(self):
-        """初始化示例大纲"""
-        example_slides = [
-            {"title": "欢迎页", "content": "演示文稿标题\n副标题或作者信息"},
-            {"title": "目录", "content": "1. 背景介绍\n2. 问题分析\n3. 解决方案\n4. 实施计划\n5. 总结"},
-            {"title": "背景介绍", "content": "项目背景\n市场需求\n技术趋势"},
-            {"title": "问题分析", "content": "现状分析\n存在问题\n影响因素"},
-            {"title": "解决方案", "content": "核心方案\n实施步骤\n预期效果"},
-            {"title": "总结", "content": "要点回顾\n未来展望\n致谢"}
-        ]
-        
-        for i, slide in enumerate(example_slides):
-            self.outline_tree.insert('', 'end', text=f'幻灯片 {i+1}', values=(slide['title'], slide['content']))
-    
-    def generate_outline(self):
-        """生成PPT大纲"""
-        topic = self.topic_var.get().strip()
-        file_path = self.file_path_var.get().strip()
-        api_key = self.api_key_var.get().strip()
-        
-        if not api_key:
-            messagebox.showerror("错误", "请输入API密钥")
-            return
-        
-        if not topic and not file_path:
-            messagebox.showerror("错误", "请输入主题或上传文件")
-            return
-        
-        # 启动进度条
-        self.progress.start()
-        
-        # 在新线程中执行API调用
-        thread = threading.Thread(target=self._generate_outline_thread, args=(topic, file_path, api_key))
-        thread.daemon = True
-        thread.start()
-    
-    def _generate_outline_thread(self, topic, file_path, api_key):
+# ================= 线程类：调用DeepSeek生成大纲 =================
+class OutlineWorker(QThread):
+    finished = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, api_key, content):
+        super().__init__()
+        self.api_key = api_key
+        self.content = content
+
+    def run(self):
         try:
-            # 准备提示词
-            prompt = f"请为'{topic}'这个主题生成一个详细的PPT大纲，包含至少6个幻灯片。每个幻灯片应包含标题和详细内容。以JSON格式返回，格式如下：[{{'title': '幻灯片标题', 'content': '幻灯片内容'}}, ...]"
+            client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com")
+            prompt = f"""
+            请根据以下内容/主题生成一份PPT演示文稿大纲。
+            要求格式严格遵守以下Markdown规范，以便后续程序解析：
+            每个幻灯片以 '# ' 开头作为标题。
+            幻灯片的内容要点以 '- ' 开头。
+            在每个幻灯片的最后，提供一个用于生成配图的英文关键词，格式为 '[Image Keyword: 关键词]'。
             
-            # 如果有上传文件，读取内容并加入提示词
-            if file_path:
-                content = self.read_file_content(file_path)
-                prompt = f"根据以下内容为'{topic}'这个主题生成一个详细的PPT大纲：\n{content}\n\n请返回JSON格式：[{{'title': '幻灯片标题', 'content': '幻灯片内容'}}, ...]"
+            内容/主题：{self.content}
             
-            # 调用DeepSeek API
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {api_key}'
-            }
+            示例：
+            # PPT封面：人工智能的未来
+            - 探索AI的无限可能
+            - 演讲者：张三
+            [Image Keyword: Artificial Intelligence Future]
+            """
             
-            data = {
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7
-            }
-            
-            response = requests.post(
-                "https://api.deepseek.com/chat/completions",
-                headers=headers,
-                json=data
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": "你是一个专业的PPT大纲设计师。"},
+                    {"role": "user", "content": prompt}
+                ]
             )
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content']
-                
-                # 提取JSON部分
-                json_match = re.search(r'\[(.*?)\]', content, re.DOTALL)
-                if json_match:
-                    json_str = '[' + json_match.group(1) + ']'
-                    self.generated_outline = json.loads(json_str)
-                    
-                    # 在主线程中更新界面
-                    self.root.after(0, self._update_outline_ui)
-                else:
-                    # 尝试直接解析
-                    try:
-                        self.generated_outline = json.loads(content)
-                        self.root.after(0, self._update_outline_ui)
-                    except:
-                        messagebox.showerror("错误", "无法解析API返回结果")
-            else:
-                error_msg = response.json().get('error', {}).get('message', '未知错误')
-                self.root.after(0, lambda: messagebox.showerror("API错误", f"请求失败: {error_msg}"))
-        
+            outline = response.choices[0].message.content
+            self.finished.emit(outline)
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("错误", f"生成大纲时出错: {str(e)}"))
-        finally:
-            self.root.after(0, lambda: self.progress.stop())
-    
-    def _update_outline_ui(self):
-        """在主线程中更新大纲UI"""
-        # 清空现有内容
-        for item in self.outline_tree.get_children():
-            self.outline_tree.delete(item)
+            self.error.emit(str(e))
+
+# ================= 线程类：生成PPT =================
+class PPTWorker(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, outline_text, template_path, output_path):
+        super().__init__()
+        self.outline_text = outline_text
+        self.template_path = template_path
+        self.output_path = output_path
+
+    def parse_outline(self, text):
+        slides = []
+        current_slide = None
+        for line in text.split('\n'):
+            line = line.strip()
+            if line.startswith('# '):
+                if current_slide:
+                    slides.append(current_slide)
+                current_slide = {'title': line[2:], 'bullets': [], 'keyword': 'presentation'}
+            elif line.startswith('- '):
+                if current_slide:
+                    current_slide['bullets'].append(line[2:])
+            elif line.startswith('[Image Keyword:'):
+                if current_slide:
+                    current_slide['keyword'] = line.split(':')[1].strip()[:-1]
+        if current_slide:
+            slides.append(current_slide)
+        return slides
+
+    def run(self):
+        try:
+            slides_data = self.parse_outline(self.outline_text)
+            if not slides_data:
+                raise ValueError("大纲格式错误，未找到幻灯片内容。请确保包含'#'标题。")
+
+            # 加载模板或创建空白
+            if self.template_path and os.path.exists(self.template_path):
+                prs = Presentation(self.template_path)
+            else:
+                prs = Presentation()
+
+            total = len(slides_data)
+            for idx, slide_data in enumerate(slides_data):
+                # 尝试使用"标题和内容"排版 (索引一般为1)
+                layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
+                slide = prs.slides.add_slide(layout)
+                
+                # 填入标题
+                if slide.shapes.title:
+                    slide.shapes.title.text = slide_data['title']
+                
+                # 填入要点内容
+                if len(slide.placeholders) > 1:
+                    tf = slide.placeholders[1].text_frame
+                    tf.text = ""
+                    for bullet in slide_data['bullets']:
+                        p = tf.add_paragraph()
+                        p.text = bullet
+                        p.level = 0
+                
+                # AI配图 (使用免费免key的pollinations API生图)
+                try:
+                    img_url = f"https://image.pollinations.ai/prompt/{slide_data['keyword']}?width=400&height=300&nologo=true"
+                    img_data = requests.get(img_url, timeout=10).content
+                    img_path = f"temp_img_{idx}.jpg"
+                    with open(img_path, 'wb') as handler:
+                        handler.write(img_data)
+                    
+                    # 将图片插入到幻灯片右侧
+                    left = Inches(5)
+                    top = Inches(2)
+                    slide.shapes.add_picture(img_path, left, top, width=Inches(4.5))
+                    os.remove(img_path) # 清理临时图片
+                except Exception as img_e:
+                    print(f"无法生成图片: {img_e}")
+
+                self.progress.emit(int(((idx + 1) / total) * 100))
+
+            prs.save(self.output_path)
+            self.finished.emit(self.output_path)
+        except Exception as e:
+            self.error.emit(str(e))
+
+# ================= 主窗口 GUI =================
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("AI PPT Master - DeepSeek 智能生成器")
+        self.resize(900, 700)
+        self.setStyleSheet("""
+            QMainWindow { background-color: #f4f5f7; }
+            QLabel { font-size: 14px; font-weight: bold; color: #333; }
+            QTextEdit, QLineEdit { background-color: white; border: 1px solid #ccc; border-radius: 5px; padding: 8px; font-size: 14px; }
+            QPushButton { background-color: #0052cc; color: white; border-radius: 5px; padding: 10px; font-size: 14px; font-weight: bold; }
+            QPushButton:hover { background-color: #0043a6; }
+            QPushButton:disabled { background-color: #a5b4fc; }
+            QProgressBar { text-align: center; border: 1px solid #ccc; border-radius: 5px; }
+            QProgressBar::chunk { background-color: #0052cc; }
+        """)
         
-        # 添加新大纲
-        for i, slide in enumerate(self.generated_outline):
-            self.outline_tree.insert('', 'end', text=f'幻灯片 {i+1}', 
-                                   values=(slide['title'], slide['content']))
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QVBoxLayout(main_widget)
+
+        # 1. API配置区
+        api_layout = QHBoxLayout()
+        api_layout.addWidget(QLabel("DeepSeek API Key:"))
+        self.api_input = QLineEdit()
+        self.api_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_input.setPlaceholderText("sk-...")
+        api_layout.addWidget(self.api_input)
+        layout.addLayout(api_layout)
+
+        # 2. 输入区
+        input_label = QLabel("输入主题或上传文件 (TXT/DOCX/PDF):")
+        layout.addWidget(input_label)
         
-        messagebox.showinfo("成功", "大纲生成完成！您可以进一步编辑大纲内容。")
-    
-    def read_file_content(self, file_path):
-        """读取文件内容"""
-        ext = os.path.splitext(file_path)[1].lower()
+        self.input_text = QTextEdit()
+        self.input_text.setPlaceholderText("在此输入PPT主题，或点击右侧按钮解析文档内容...")
         
-        if ext == '.txt':
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        elif ext == '.docx':
-            from docx import Document
-            doc = Document(file_path)
-            full_text = []
-            for para in doc.paragraphs:
-                full_text.append(para.text)
-            return '\n'.join(full_text)
-        elif ext == '.pdf':
-            import PyPDF2
-            with open(file_path, 'rb') as f:
-                reader = PyPDF2.PdfReader(f)
-                full_text = []
-                for page in reader.pages:
-                    full_text.append(page.extract_text())
-                return '\n'.join(full_text)
-        else:
-            return ""
-    
-    def add_slide(self):
-        """添加幻灯片"""
-        item_id = self.outline_tree.selection()[0] if self.outline_tree.selection() else ''
-        self.outline_tree.insert('', 'end', text='新幻灯片', values=('新标题', '新内容'))
-    
-    def delete_slide(self):
-        """删除选中幻灯片"""
-        selected_items = self.outline_tree.selection()
-        if selected_items:
-            for item in selected_items:
-                self.outline_tree.delete(item)
-    
-    def move_up(self):
-        """上移选中项"""
-        selected = self.outline_tree.selection()
-        if selected:
-            item = selected[0]
-            prev_item = self.outline_tree.prev(item)
-            if prev_item:
-                self.outline_tree.move(item, self.outline_tree.parent(item), 
-                                     self.outline_tree.index(prev_item))
-    
-    def move_down(self):
-        """下移选中项"""
-        selected = self.outline_tree.selection()
-        if selected:
-            item = selected[0]
-            next_item = self.outline_tree.next(item)
-            if next_item:
-                self.outline_tree.move(item, self.outline_tree.parent(item), 
-                                     self.outline_tree.index(next_item)+1)
-    
-    def generate_ppt(self):
-        """生成PPT文件"""
-        slides_data = []
-        for item in self.outline_tree.get_children():
-            values = self.outline_tree.item(item, 'values')
-            slides_data.append({
-                'title': values[0],
-                'content': values[1]
-            })
+        btn_layout = QVBoxLayout()
+        self.btn_upload = QPushButton("📂 上传解析文件")
+        self.btn_upload.clicked.connect(self.upload_file)
+        self.btn_gen_outline = QPushButton("✨ 第一步: AI 生成大纲")
+        self.btn_gen_outline.clicked.connect(self.generate_outline)
         
-        if not slides_data:
-            messagebox.showwarning("警告", "请先生成或编辑PPT大纲")
-            return
+        btn_layout.addWidget(self.btn_upload)
+        btn_layout.addWidget(self.btn_gen_outline)
+        btn_layout.addStretch()
+
+        input_box = QHBoxLayout()
+        input_box.addWidget(self.input_text, 4)
+        input_box.addLayout(btn_layout, 1)
+        layout.addLayout(input_box)
+
+        # 3. 大纲编辑区
+        layout.addWidget(QLabel("PPT 大纲 (支持手动调整修改):"))
+        self.outline_text = QTextEdit()
+        self.outline_text.setPlaceholderText("生成的Markdown大纲将显示在这里，您可以随意修改标题、要点和图片关键词...")
+        layout.addWidget(self.outline_text)
+
+        # 4. 生成区
+        bottom_layout = QHBoxLayout()
+        self.btn_template = QPushButton("🎨 选择本地PPT模板 (可选)")
+        self.btn_template.clicked.connect(self.select_template)
+        self.template_path = ""
         
-        # 选择保存位置
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".pptx",
-            filetypes=[("PowerPoint files", "*.pptx"), ("All files", "*.*")]
-        )
+        self.btn_generate_ppt = QPushButton("🚀 第二步: 一键生成PPT")
+        self.btn_generate_ppt.clicked.connect(self.generate_ppt)
         
+        bottom_layout.addWidget(self.btn_template)
+        bottom_layout.addWidget(self.btn_generate_ppt)
+        layout.addLayout(bottom_layout)
+
+        # 进度条
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+
+    def upload_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "文档 (*.txt *.docx *.pdf)")
         if not file_path:
             return
         
-        # 启动进度条
-        self.progress.start()
-        
-        # 在新线程中生成PPT
-        thread = threading.Thread(target=self._generate_ppt_thread, args=(slides_data, file_path))
-        thread.daemon = True
-        thread.start()
-    
-    def _generate_ppt_thread(self, slides_data, file_path):
+        ext = file_path.split('.')[-1].lower()
+        content = ""
         try:
-            # 创建PPT
-            prs = pptx.Presentation()
-            
-            # 设置主题颜色
-            prs.slide_master.background.fill.solid()
-            prs.slide_master.background.fill.fore_color.rgb = RGBColor(255, 255, 255)
-            
-            # 为每个幻灯片数据创建幻灯片
-            for i, slide_data in enumerate(slides_data):
-                # 根据内容类型选择布局
-                if i == 0:  # 第一张通常是标题页
-                    slide_layout = prs.slide_layouts[0]  # 标题幻灯片
-                elif "目录" in slide_data['title'] or "概览" in slide_data['title']:
-                    slide_layout = prs.slide_layouts[1]  # 标题和内容
-                elif len(slide_data['content'].split('\n')) > 3:
-                    slide_layout = prs.slide_layouts[1]  # 标题和内容
-                else:
-                    slide_layout = prs.slide_layouts[1]  # 标题和内容
-            
-                slide = prs.slides.add_slide(slide_layout)
-                
-                # 获取占位符
-                for shape in slide.placeholders:
-                    if shape.placeholder_format.type == 0:  # 标题
-                        title = shape
-                        title.text = slide_data['title']
-                        title.text_frame.paragraphs[0].font.size = Pt(32)
-                        title.text_frame.paragraphs[0].font.bold = True
-                        title.text_frame.paragraphs[0].font.color.rgb = RGBColor(0, 51, 102)
-                    elif shape.placeholder_format.type == 1:  # 内容
-                        content = shape
-                        content.text = slide_data['content']
-                        content.text_frame.paragraphs[0].font.size = Pt(18)
-                        # 设置行间距
-                        for paragraph in content.text_frame.paragraphs:
-                            paragraph.line_spacing = 1.2
-            
-            # 保存文件
-            prs.save(file_path)
-            
-            self.root.after(0, lambda: [
-                self.progress.stop(),
-                messagebox.showinfo("成功", f"PPT已保存到: {file_path}")
-            ])
-        
+            if ext == 'txt':
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            elif ext == 'docx':
+                doc = docx.Document(file_path)
+                content = "\n".join([para.text for para in doc.paragraphs])
+            elif ext == 'pdf':
+                with open(file_path, 'rb') as f:
+                    reader = PyPDF2.PdfReader(f)
+                    content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            self.input_text.setText(content)
         except Exception as e:
-            self.root.after(0, lambda: [
-                self.progress.stop(),
-                messagebox.showerror("错误", f"生成PPT时出错: {str(e)}")
-            ])
+            QMessageBox.critical(self, "读取失败", f"无法解析文件: {str(e)}")
 
-def main():
-    root = tk.Tk()
-    app = PPTMakerApp(root)
-    root.mainloop()
+    def generate_outline(self):
+        api_key = self.api_input.text().strip()
+        content = self.input_text.toPlainText().strip()
+        
+        if not api_key:
+            QMessageBox.warning(self, "错误", "请输入 DeepSeek API Key!")
+            return
+        if not content:
+            QMessageBox.warning(self, "错误", "请输入主题或上传文件内容!")
+            return
+
+        self.btn_gen_outline.setEnabled(False)
+        self.btn_gen_outline.setText("生成中，请稍候...")
+        self.progress_bar.setValue(30)
+
+        self.outline_worker = OutlineWorker(api_key, content)
+        self.outline_worker.finished.connect(self.on_outline_finished)
+        self.outline_worker.error.connect(self.on_outline_error)
+        self.outline_worker.start()
+
+    def on_outline_finished(self, text):
+        self.outline_text.setText(text)
+        self.btn_gen_outline.setEnabled(True)
+        self.btn_gen_outline.setText("✨ 第一步: AI 生成大纲")
+        self.progress_bar.setValue(100)
+        QMessageBox.information(self, "成功", "大纲已生成，请在文本框中检查并修改！")
+
+    def on_outline_error(self, err):
+        self.btn_gen_outline.setEnabled(True)
+        self.btn_gen_outline.setText("✨ 第一步: AI 生成大纲")
+        self.progress_bar.setValue(0)
+        QMessageBox.critical(self, "API请求失败", str(err))
+
+    def select_template(self):
+        path, _ = QFileDialog.getOpenFileName(self, "选择PPT模板", "", "PPTX 文件 (*.pptx)")
+        if path:
+            self.template_path = path
+            self.btn_template.setText(f"🎨 已选: {os.path.basename(path)}")
+
+    def generate_ppt(self):
+        outline = self.outline_text.toPlainText().strip()
+        if not outline:
+            QMessageBox.warning(self, "错误", "大纲为空！请先生成或手动输入。")
+            return
+
+        save_path, _ = QFileDialog.getSaveFileName(self, "保存PPT", "AI_Presentation.pptx", "PPTX 文件 (*.pptx)")
+        if not save_path:
+            return
+
+        self.btn_generate_ppt.setEnabled(False)
+        self.btn_generate_ppt.setText("正在合成PPT与配图...")
+        self.progress_bar.setValue(0)
+
+        self.ppt_worker = PPTWorker(outline, self.template_path, save_path)
+        self.ppt_worker.progress.connect(self.progress_bar.setValue)
+        self.ppt_worker.finished.connect(self.on_ppt_finished)
+        self.ppt_worker.error.connect(self.on_ppt_error)
+        self.ppt_worker.start()
+
+    def on_ppt_finished(self, path):
+        self.btn_generate_ppt.setEnabled(True)
+        self.btn_generate_ppt.setText("🚀 第二步: 一键生成PPT")
+        QMessageBox.information(self, "成功", f"PPT生成完毕！\n保存位置: {path}")
+
+    def on_ppt_error(self, err):
+        self.btn_generate_ppt.setEnabled(True)
+        self.btn_generate_ppt.setText("🚀 第二步: 一键生成PPT")
+        QMessageBox.critical(self, "生成失败", str(err))
 
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
