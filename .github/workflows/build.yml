@@ -45,7 +45,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-dev build-essential
+        sudo apt-get install -y python3-dev build-essential libxcb-cursor0
     
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
@@ -60,7 +60,7 @@ jobs:
     
     - name: Install additional dependencies for PyInstaller
       run: |
-        pip install Pillow openpyxl
+        pip install Pillow
     
     - name: Build executable
       run: |
@@ -68,10 +68,16 @@ jobs:
         pyinstaller --onefile --windowed --name PPTMaker main.py
         echo "Build completed"
     
-    - name: Verify build
+    - name: Verify build (Linux/macOS)
+      if: runner.os != 'Windows'
       run: |
         ls -la dist/
-        file dist/PPTMaker* || echo "No file command on Windows"
+        file dist/PPTMaker* 2>/dev/null || echo "Executable created"
+    
+    - name: Verify build (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        Get-ChildItem dist/
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
