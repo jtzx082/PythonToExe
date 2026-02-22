@@ -2,11 +2,11 @@ name: Build PPT Maker
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
-  
+    branches: [ main ]
+  workflow_dispatch:  # 允许手动触发
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -38,3 +38,53 @@ jobs:
       with:
         name: PPTMaker-${{ matrix.os }}
         path: dist/PPTMaker*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Release v${{ github.run_number }}
+        draft: false
+        prerelease: false
+        
+    - name: Upload Release Assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./PPTMaker-ubuntu-latest/PPTMaker
+        asset_name: PPTMaker-Linux
+        asset_content_type: application/octet-stream
+        
+    - name: Upload Windows Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./PPTMaker-windows-latest/PPTMaker.exe
+        asset_name: PPTMaker-Windows.exe
+        asset_content_type: application/octet-stream
+        
+    - name: Upload macOS Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./PPTMaker-macos-latest/PPTMaker
+        asset_name: PPTMaker-macOS
+        asset_content_type: application/octet-stream
