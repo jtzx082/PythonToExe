@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch:  # <--- 加上这一行，意思是允许手动在网页端点击运行
+  workflow_dispatch: # 添加这一行，允许在网页端 Actions 页面手动点击运行
 
 jobs:
   build:
@@ -15,27 +15,27 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-    - name: Checkout code
+    - name: Checkout code (检出代码)
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Set up Python (配置 Python 3.11 环境)
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    - name: Install dependencies
+    - name: Install dependencies (安装所需依赖)
       run: |
-        python -m pip install --upgrade pip
+        python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
       shell: bash
 
-    - name: Build executable
+    - name: Build executable (使用 PyInstaller 打包)
       run: |
-        # 针对 CustomTkinter 收集所有 UI 静态资源
-        pyinstaller --noconsole --onefile --collect-all customtkinter main.py --name AI_DocWriter_Pro_${{ runner.os }}
+        # 强制收集 customtkinter, docx 以及 jaraco 相关的隐藏依赖，防止 Linux 运行报错
+        pyinstaller --noconsole --onefile --collect-all customtkinter --collect-all jaraco --hidden-import jaraco.text --hidden-import jaraco.functools --hidden-import jaraco.context --hidden-import docx main.py --name AI_DocWriter_Pro_${{ runner.os }}
       shell: bash
 
-    - name: Upload Artifacts
+    - name: Upload Artifacts (上传生成的软件成品)
       uses: actions/upload-artifact@v4
       with:
         name: AI_DocWriter_Pro_${{ runner.os }}
