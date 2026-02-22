@@ -1,393 +1,386 @@
-import customtkinter as ctk
-import pandas as pd
-import numpy as np
-import threading
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
 import os
-import sys
-from tkinter import filedialog, messagebox
+import pptx
+from pptx.util import Inches, Pt
+from pptx.enum.text import PP_ALIGN
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
+import requests
+import json
+import threading
+from PIL import Image, ImageTk
+import io
+import re
+import openai
+from pptx.enum.dml import MSO_THEME_COLOR
 
-# --- 全局外观设置 ---
-ctk.set_appearance_mode("System")  
-ctk.set_default_color_theme("blue")  
-
-class GaokaoApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-
-        # 1. 窗口基础设置
-        self.title("甘肃新高考赋分系统 Pro Max (自定义参数版) | 俞晋全名师工作室")
-        self.geometry("1200x850")
-        self.minsize(1000, 750)
+class PPTMakerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("AI智能PPT制作工具")
+        self.root.geometry("1200x800")
         
-        # 数据变量
-        self.file_path = None
-        self.df_raw = None
-        self.sheet_names = []
-        self.param_entries = {} # 存储参数输入框的字典
+        # 设置样式
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
         
-        # 布局配置
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-
-        # ==========================
-        # === 左侧边栏 (操作区) ===
-        # ==========================
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(9, weight=1) 
-
-        # Logo
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=22, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
-
-        # 1. 导入
-        self.btn_load = ctk.CTkButton(self.sidebar_frame, text="1. 导入Excel成绩表", height=40, command=self.load_file_action)
-        self.btn_load.grid(row=1, column=0, padx=20, pady=10)
-
-        # 2. Sheet选择
-        self.lbl_sheet = ctk.CTkLabel(self.sidebar_frame, text="选择工作表 (Sheet):", anchor="w")
-        self.lbl_sheet.grid(row=2, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.sheet_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_sheet_event)
-        self.sheet_dropdown.grid(row=3, column=0, padx=20, pady=(5, 10))
-        self.sheet_dropdown.set("等待导入...")
-        self.sheet_dropdown.configure(state="disabled")
-
-        # 3. 班级列
-        self.lbl_class = ctk.CTkLabel(self.sidebar_frame, text="指定班级列 (计算班排):", anchor="w")
-        self.lbl_class.grid(row=4, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.class_col_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[])
-        self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
-        self.class_col_dropdown.set("等待加载...")
-
-        # 底部按钮区
-        self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始赋分计算", height=50, fg_color="green", font=ctk.CTkFont(size=16, weight="bold"), command=self.start_calculation)
-        self.btn_calc.grid(row=10, column=0, padx=20, pady=15)
-        self.btn_calc.configure(state="disabled")
-
-        self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果 Excel", height=40, command=self.export_file)
-        self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
-        self.btn_export.configure(state="disabled")
-
-        # ==========================
-        # === 右侧主内容区 (Tab) ===
-        # ==========================
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        # 创建主框架
+        main_frame = ttk.Frame(root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # 状态栏
-        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请先导入数据，然后确认【赋分标准】。", anchor="w", font=("Microsoft YaHei UI", 16))
-        self.status_label.pack(fill="x", pady=(0, 10))
-
-        # 创建选项卡
-        self.tabview = ctk.CTkTabview(self.main_frame)
-        self.tabview.pack(fill="both", expand=True)
-        self.tabview.add("科目设置")
-        self.tabview.add("赋分标准设置")
+        # 左侧控制面板
+        control_frame = ttk.LabelFrame(main_frame, text="控制面板", width=300)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        control_frame.pack_propagate(False)
         
-        # --- Tab 1: 科目设置 ---
-        self.setup_subject_tab()
-
-        # --- Tab 2: 赋分参数设置 ---
-        self.setup_params_tab()
-
+        # 主题输入
+        ttk.Label(control_frame, text="PPT主题:").pack(pady=5)
+        self.topic_var = tk.StringVar()
+        topic_entry = ttk.Entry(control_frame, textvariable=self.topic_var, width=35)
+        topic_entry.pack(pady=5)
+        
+        # 文件上传
+        ttk.Label(control_frame, text="上传文档:").pack(pady=5)
+        self.file_path_var = tk.StringVar()
+        file_frame = ttk.Frame(control_frame)
+        file_frame.pack(pady=5)
+        ttk.Entry(file_frame, textvariable=self.file_path_var, width=25).pack(side=tk.LEFT)
+        ttk.Button(file_frame, text="浏览", command=self.browse_file).pack(side=tk.LEFT, padx=5)
+        
+        # API密钥输入
+        ttk.Label(control_frame, text="DeepSeek API Key:").pack(pady=5)
+        self.api_key_var = tk.StringVar()
+        api_entry = ttk.Entry(control_frame, textvariable=self.api_key_var, show="*", width=35)
+        api_entry.pack(pady=5)
+        
+        # 生成按钮
+        ttk.Button(control_frame, text="生成大纲", command=self.generate_outline).pack(pady=10)
+        ttk.Button(control_frame, text="生成PPT", command=self.generate_ppt).pack(pady=5)
+        
         # 进度条
-        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progressbar.pack(fill="x", pady=(15, 0))
-        self.progressbar.set(0)
-
-    # --------------------------
-    # 界面构建辅助函数
-    # --------------------------
-    def setup_subject_tab(self):
-        tab = self.tabview.tab("科目设置")
+        self.progress = ttk.Progressbar(control_frame, mode='indeterminate')
+        self.progress.pack(fill=tk.X, pady=10)
         
-        # 滚动设置区
-        self.scroll_frame = ctk.CTkScrollableFrame(tab, label_text="勾选对应列名")
-        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # 原始计入科目区
-        self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【直接计入总分】 (语数外 + 物理/历史):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_raw.pack(fill="x", pady=(10, 5), padx=10)
-        self.raw_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.raw_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.raw_checkboxes = []
-
-        # 赋分科目区
-        self.lbl_assign = ctk.CTkLabel(self.scroll_frame, text="【等级赋分科目】 (化生政地):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_assign.pack(fill="x", pady=(25, 5), padx=10)
-        self.assign_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.assign_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.assign_checkboxes = []
-
-    def setup_params_tab(self):
-        tab = self.tabview.tab("赋分标准设置")
+        # 中间大纲编辑区
+        outline_frame = ttk.LabelFrame(main_frame, text="PPT大纲编辑", width=500)
+        outline_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         
-        info_lbl = ctk.CTkLabel(tab, text="请根据实际需求修改参数（默认值为甘肃省标准）。\n人数比例请输入整数（如15代表15%）。", font=("Microsoft YaHei UI", 13))
-        info_lbl.pack(pady=10)
-
-        # 参数网格容器
-        grid_frame = ctk.CTkFrame(tab)
-        grid_frame.pack(padx=20, pady=10)
-
-        # 表头
-        headers = ["等级", "人数比例 (%)", "赋分上限 (T2)", "赋分下限 (T1)"]
-        for col, text in enumerate(headers):
-            ctk.CTkLabel(grid_frame, text=text, font=("Arial", 12, "bold")).grid(row=0, column=col, padx=15, pady=10)
-
-        # 默认数据 (甘肃标准)
-        default_data = [
-            ('A', '15', '100', '86'),
-            ('B', '35', '85',  '71'),
-            ('C', '35', '70',  '56'),
-            ('D', '13', '55',  '41'),
-            ('E', '2',  '40',  '30')
+        # 大纲树形控件
+        columns = ('title', 'content')
+        self.outline_tree = ttk.Treeview(outline_frame, columns=columns, show='tree headings', height=20)
+        self.outline_tree.heading('#0', text='幻灯片')
+        self.outline_tree.heading('title', text='标题')
+        self.outline_tree.heading('content', text='内容')
+        self.outline_tree.column('#0', width=100)
+        self.outline_tree.column('title', width=150)
+        self.outline_tree.column('content', width=300)
+        
+        # 滚动条
+        tree_scroll = ttk.Scrollbar(outline_frame, orient=tk.VERTICAL, command=self.outline_tree.yview)
+        self.outline_tree.configure(yscrollcommand=tree_scroll.set)
+        
+        self.outline_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 添加/删除按钮
+        btn_frame = ttk.Frame(outline_frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+        ttk.Button(btn_frame, text="添加幻灯片", command=self.add_slide).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="删除选中", command=self.delete_slide).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="上移", command=self.move_up).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="下移", command=self.move_down).pack(side=tk.LEFT, padx=5)
+        
+        # 右侧预览区
+        preview_frame = ttk.LabelFrame(main_frame, text="预览", width=400)
+        preview_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        # 预览Canvas
+        self.preview_canvas = tk.Canvas(preview_frame, bg='white', width=350, height=600)
+        preview_scroll = ttk.Scrollbar(preview_frame, orient=tk.VERTICAL, command=self.preview_canvas.yview)
+        self.preview_canvas.configure(yscrollcommand=preview_scroll.set)
+        
+        self.preview_frame = ttk.Frame(self.preview_canvas)
+        self.preview_window = self.preview_canvas.create_window((0, 0), window=self.preview_frame, anchor="nw")
+        
+        self.preview_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        preview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 绑定滚动事件
+        self.preview_frame.bind("<Configure>", self.on_preview_configure)
+        
+        # 初始化大纲示例
+        self.init_example_outline()
+        
+        # 存储API响应
+        self.generated_outline = []
+        
+    def on_preview_configure(self, event):
+        self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
+    
+    def browse_file(self):
+        filename = filedialog.askopenfilename(
+            title="选择文档",
+            filetypes=[
+                ("Text files", "*.txt"),
+                ("Word documents", "*.docx"),
+                ("PDF files", "*.pdf"),
+                ("All files", "*.*")
+            ]
+        )
+        if filename:
+            self.file_path_var.set(filename)
+    
+    def init_example_outline(self):
+        """初始化示例大纲"""
+        example_slides = [
+            {"title": "欢迎页", "content": "演示文稿标题\n副标题或作者信息"},
+            {"title": "目录", "content": "1. 背景介绍\n2. 问题分析\n3. 解决方案\n4. 实施计划\n5. 总结"},
+            {"title": "背景介绍", "content": "项目背景\n市场需求\n技术趋势"},
+            {"title": "问题分析", "content": "现状分析\n存在问题\n影响因素"},
+            {"title": "解决方案", "content": "核心方案\n实施步骤\n预期效果"},
+            {"title": "总结", "content": "要点回顾\n未来展望\n致谢"}
         ]
-
-        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
-
-        for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
-            # 等级标签
-            ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
-            
-            # 百分比输入
-            e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_pct.insert(0, pct)
-            e_pct.grid(row=row, column=1, pady=5)
-            
-            # 上限输入
-            e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_max.insert(0, tmax)
-            e_max.grid(row=row, column=2, pady=5)
-            
-            # 下限输入
-            e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_min.insert(0, tmin)
-            e_min.grid(row=row, column=3, pady=5)
-
-            # 存入字典方便调用
-            self.param_entries[f"{grade}_percent"] = e_pct
-            self.param_entries[f"{grade}_max"] = e_max
-            self.param_entries[f"{grade}_min"] = e_min
-
-    # --------------------------
-    # 文件加载与 UI 更新逻辑
-    # --------------------------
-    def load_file_action(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
-        if not file_path: return
         
-        self.file_path = file_path
-        self.status_label.configure(text=f"正在分析文件: {os.path.basename(file_path)}...")
-        self.progressbar.start()
-        threading.Thread(target=self.read_excel_sheets).start()
-
-    def read_excel_sheets(self):
-        try:
-            excel_file = pd.ExcelFile(self.file_path)
-            self.sheet_names = excel_file.sheet_names
-            self.after(0, self.update_sheet_ui)
-        except Exception as e:
-            self.after(0, lambda: messagebox.showerror("错误", f"读取失败: {e}"))
-            self.after(0, self.progressbar.stop)
-
-    def update_sheet_ui(self):
-        self.progressbar.stop()
-        self.progressbar.set(1)
-        self.status_label.configure(text=f"已就绪: {os.path.basename(self.file_path)}")
-        self.sheet_dropdown.configure(values=self.sheet_names, state="normal")
-        self.sheet_dropdown.set(self.sheet_names[0])
-        self.change_sheet_event(self.sheet_names[0])
-
-    def change_sheet_event(self, sheet_name):
-        try:
-            self.df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name)
-            columns = self.df_raw.columns.tolist()
-            
-            self.class_col_dropdown.configure(values=columns)
-            default_class = next((c for c in columns if "班" in str(c)), columns[0] if columns else "")
-            self.class_col_dropdown.set(default_class)
-
-            self.create_subject_checkboxes(columns)
-            
-            self.btn_calc.configure(state="normal")
-            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请在【科目设置】页勾选")
-        except Exception as e:
-            messagebox.showerror("错误", f"加载工作表失败: {e}")
-
-    def create_subject_checkboxes(self, columns):
-        for cb in self.raw_checkboxes + self.assign_checkboxes: cb.destroy()
-        self.raw_checkboxes.clear()
-        self.assign_checkboxes.clear()
+        for i, slide in enumerate(example_slides):
+            self.outline_tree.insert('', 'end', text=f'幻灯片 {i+1}', values=(slide['title'], slide['content']))
+    
+    def generate_outline(self):
+        """生成PPT大纲"""
+        topic = self.topic_var.get().strip()
+        file_path = self.file_path_var.get().strip()
+        api_key = self.api_key_var.get().strip()
         
-        common_raw = ["语文", "数学", "英语", "物理", "历史", "外语"]
-        common_assign = ["化学", "生物", "地理", "政治", "思想政治"]
-
-        def add_cb(parent, text, storage, keywords):
-            cb = ctk.CTkCheckBox(parent, text=text, font=("Microsoft YaHei UI", 12))
-            cb.grid(row=len(storage)//5, column=len(storage)%5, sticky="w", padx=10, pady=8)
-            if any(k in str(text) for k in keywords): cb.select()
-            storage.append(cb)
-
-        for col in columns:
-            add_cb(self.raw_checkboxes_frame, col, self.raw_checkboxes, common_raw)
-        for col in columns:
-            add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
-
-    # --------------------------
-    # 核心计算逻辑 (动态读取参数)
-    # --------------------------
-    def get_user_configs(self):
-        """从UI界面读取用户输入的参数"""
-        configs = []
-        grades = ['A', 'B', 'C', 'D', 'E']
-        try:
-            for g in grades:
-                pct = float(self.param_entries[f"{g}_percent"].get()) / 100.0
-                t_max = int(self.param_entries[f"{g}_max"].get())
-                t_min = int(self.param_entries[f"{g}_min"].get())
-                
-                configs.append({
-                    'grade': g,
-                    'percent': pct,
-                    't_max': t_max,
-                    't_min': t_min
-                })
-            return configs
-        except ValueError:
-            messagebox.showerror("参数错误", "赋分标准中请输入有效的数字！")
-            return None
-
-    def start_calculation(self):
-        self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
-        self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
-        self.selected_class_col = self.class_col_dropdown.get()
-
-        if not self.selected_raw and not self.selected_assign:
-            messagebox.showwarning("提示", "请至少勾选一个科目！")
+        if not api_key:
+            messagebox.showerror("错误", "请输入API密钥")
             return
         
-        # 验证并获取配置
-        self.user_configs = self.get_user_configs()
-        if not self.user_configs:
+        if not topic and not file_path:
+            messagebox.showerror("错误", "请输入主题或上传文件")
             return
-
-        self.btn_calc.configure(state="disabled")
-        self.status_label.configure(text="正在根据自定义参数计算...")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start()
         
-        threading.Thread(target=self.run_math_logic).start()
-
-    def run_math_logic(self):
+        # 启动进度条
+        self.progress.start()
+        
+        # 在新线程中执行API调用
+        thread = threading.Thread(target=self._generate_outline_thread, args=(topic, file_path, api_key))
+        thread.daemon = True
+        thread.start()
+    
+    def _generate_outline_thread(self, topic, file_path, api_key):
         try:
-            df = self.df_raw.copy()
-            grade_configs = self.user_configs # 使用用户自定义的配置
-
-            def calculate_assigned_score(series):
-                series_num = pd.to_numeric(series, errors='coerce')
-                valid = series_num.dropna()
-                if len(valid) == 0: return pd.Series(index=series.index, dtype=float)
+            # 准备提示词
+            prompt = f"请为'{topic}'这个主题生成一个详细的PPT大纲，包含至少6个幻灯片。每个幻灯片应包含标题和详细内容。以JSON格式返回，格式如下：[{{'title': '幻灯片标题', 'content': '幻灯片内容'}}, ...]"
+            
+            # 如果有上传文件，读取内容并加入提示词
+            if file_path:
+                content = self.read_file_content(file_path)
+                prompt = f"根据以下内容为'{topic}'这个主题生成一个详细的PPT大纲：\n{content}\n\n请返回JSON格式：[{{'title': '幻灯片标题', 'content': '幻灯片内容'}}, ...]"
+            
+            # 调用DeepSeek API
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+            
+            data = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7
+            }
+            
+            response = requests.post(
+                "https://api.deepseek.com/chat/completions",
+                headers=headers,
+                json=data
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                content = result['choices'][0]['message']['content']
                 
-                sorted_scores = valid.sort_values(ascending=False)
-                result = pd.Series(index=valid.index, dtype=float)
-                curr = 0
-                for cfg in grade_configs:
-                    cnt = int(np.round(len(valid) * cfg['percent']))
-                    if cfg['grade'] == 'E': cnt = len(valid) - curr
-                    if cnt <= 0: continue
-                    end = min(curr + cnt, len(valid))
-                    if curr >= end: break
-                    chunk = sorted_scores.iloc[curr:end]
-                    Y2, Y1 = chunk.max(), chunk.min()
-                    T2, T1 = cfg['t_max'], cfg['t_min']
+                # 提取JSON部分
+                json_match = re.search(r'\[(.*?)\]', content, re.DOTALL)
+                if json_match:
+                    json_str = '[' + json_match.group(1) + ']'
+                    self.generated_outline = json.loads(json_str)
                     
-                    def linear(Y): return (T2+T1)/2 if Y2==Y1 else T1 + ((Y-Y1)*(T2-T1))/(Y2-Y1)
-                    
-                    result.loc[chunk.index] = chunk.apply(linear)
-                    curr = end
-                return result.round()
-
-            def calc_ranks(dframe, target_col, rank_base_name):
-                yr_rk = f"{rank_base_name}年排"
-                cl_rk = f"{rank_base_name}班排"
-                dframe[yr_rk] = dframe[target_col].rank(ascending=False, method='min')
-                if self.selected_class_col in dframe.columns:
-                    dframe[cl_rk] = dframe.groupby(self.selected_class_col)[target_col].rank(ascending=False, method='min')
+                    # 在主线程中更新界面
+                    self.root.after(0, self._update_outline_ui)
                 else:
-                    dframe[cl_rk] = None
-                return yr_rk, cl_rk
-
-            cols_for_raw_total = []    
-            cols_for_final_total = []  
-            output_cols_order = []     
-
-            # 1. 原始科目
-            for sub in self.selected_raw:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                yr_rk, cl_rk = calc_ranks(df, sub, sub)
-                cols_for_raw_total.append(sub)
-                cols_for_final_total.append(sub)
-                output_cols_order.extend([sub, yr_rk, cl_rk])
-
-            # 2. 赋分科目
-            for sub in self.selected_assign:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                assigned_col_name = f"{sub}赋分"
-                df[assigned_col_name] = calculate_assigned_score(df[sub])
-                
-                yr_rk, cl_rk = calc_ranks(df, assigned_col_name, assigned_col_name)
-                
-                cols_for_raw_total.append(sub)            
-                cols_for_final_total.append(assigned_col_name) 
-                output_cols_order.extend([sub, assigned_col_name, yr_rk, cl_rk])
-
-            # 3. 原始总分
-            df["原始总分"] = df[cols_for_raw_total].sum(axis=1, min_count=1)
-            raw_yr_rk, raw_cl_rk = calc_ranks(df, "原始总分", "原始总分")
-            raw_total_group = ["原始总分", raw_yr_rk, raw_cl_rk]
-
-            # 4. 最终总分
-            df["总分"] = df[cols_for_final_total].sum(axis=1, min_count=1)
-            final_yr_rk, final_cl_rk = calc_ranks(df, "总分", "总分")
-            final_total_group = ["总分", final_yr_rk, final_cl_rk]
-
-            df = df.sort_values(final_yr_rk)
-
-            all_generated_cols = set(output_cols_order + raw_total_group + final_total_group)
-            base_info_cols = [c for c in df.columns if c not in all_generated_cols]
-            
-            final_order = base_info_cols + output_cols_order + raw_total_group + final_total_group
-            final_order = [c for c in final_order if c in df.columns]
-            self.df_result = df[final_order]
-
-            self.after(0, self.finish_calculation)
-
+                    # 尝试直接解析
+                    try:
+                        self.generated_outline = json.loads(content)
+                        self.root.after(0, self._update_outline_ui)
+                    except:
+                        messagebox.showerror("错误", "无法解析API返回结果")
+            else:
+                error_msg = response.json().get('error', {}).get('message', '未知错误')
+                self.root.after(0, lambda: messagebox.showerror("API错误", f"请求失败: {error_msg}"))
+        
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("计算错误", str(e)))
-            self.after(0, self.stop_loading_ui)
+            self.root.after(0, lambda: messagebox.showerror("错误", f"生成大纲时出错: {str(e)}"))
+        finally:
+            self.root.after(0, lambda: self.progress.stop())
+    
+    def _update_outline_ui(self):
+        """在主线程中更新大纲UI"""
+        # 清空现有内容
+        for item in self.outline_tree.get_children():
+            self.outline_tree.delete(item)
+        
+        # 添加新大纲
+        for i, slide in enumerate(self.generated_outline):
+            self.outline_tree.insert('', 'end', text=f'幻灯片 {i+1}', 
+                                   values=(slide['title'], slide['content']))
+        
+        messagebox.showinfo("成功", "大纲生成完成！您可以进一步编辑大纲内容。")
+    
+    def read_file_content(self, file_path):
+        """读取文件内容"""
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        if ext == '.txt':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        elif ext == '.docx':
+            from docx import Document
+            doc = Document(file_path)
+            full_text = []
+            for para in doc.paragraphs:
+                full_text.append(para.text)
+            return '\n'.join(full_text)
+        elif ext == '.pdf':
+            import PyPDF2
+            with open(file_path, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                full_text = []
+                for page in reader.pages:
+                    full_text.append(page.extract_text())
+                return '\n'.join(full_text)
+        else:
+            return ""
+    
+    def add_slide(self):
+        """添加幻灯片"""
+        item_id = self.outline_tree.selection()[0] if self.outline_tree.selection() else ''
+        self.outline_tree.insert('', 'end', text='新幻灯片', values=('新标题', '新内容'))
+    
+    def delete_slide(self):
+        """删除选中幻灯片"""
+        selected_items = self.outline_tree.selection()
+        if selected_items:
+            for item in selected_items:
+                self.outline_tree.delete(item)
+    
+    def move_up(self):
+        """上移选中项"""
+        selected = self.outline_tree.selection()
+        if selected:
+            item = selected[0]
+            prev_item = self.outline_tree.prev(item)
+            if prev_item:
+                self.outline_tree.move(item, self.outline_tree.parent(item), 
+                                     self.outline_tree.index(prev_item))
+    
+    def move_down(self):
+        """下移选中项"""
+        selected = self.outline_tree.selection()
+        if selected:
+            item = selected[0]
+            next_item = self.outline_tree.next(item)
+            if next_item:
+                self.outline_tree.move(item, self.outline_tree.parent(item), 
+                                     self.outline_tree.index(next_item)+1)
+    
+    def generate_ppt(self):
+        """生成PPT文件"""
+        slides_data = []
+        for item in self.outline_tree.get_children():
+            values = self.outline_tree.item(item, 'values')
+            slides_data.append({
+                'title': values[0],
+                'content': values[1]
+            })
+        
+        if not slides_data:
+            messagebox.showwarning("警告", "请先生成或编辑PPT大纲")
+            return
+        
+        # 选择保存位置
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".pptx",
+            filetypes=[("PowerPoint files", "*.pptx"), ("All files", "*.*")]
+        )
+        
+        if not file_path:
+            return
+        
+        # 启动进度条
+        self.progress.start()
+        
+        # 在新线程中生成PPT
+        thread = threading.Thread(target=self._generate_ppt_thread, args=(slides_data, file_path))
+        thread.daemon = True
+        thread.start()
+    
+    def _generate_ppt_thread(self, slides_data, file_path):
+        try:
+            # 创建PPT
+            prs = pptx.Presentation()
+            
+            # 设置主题颜色
+            prs.slide_master.background.fill.solid()
+            prs.slide_master.background.fill.fore_color.rgb = RGBColor(255, 255, 255)
+            
+            # 为每个幻灯片数据创建幻灯片
+            for i, slide_data in enumerate(slides_data):
+                # 根据内容类型选择布局
+                if i == 0:  # 第一张通常是标题页
+                    slide_layout = prs.slide_layouts[0]  # 标题幻灯片
+                elif "目录" in slide_data['title'] or "概览" in slide_data['title']:
+                    slide_layout = prs.slide_layouts[1]  # 标题和内容
+                elif len(slide_data['content'].split('\n')) > 3:
+                    slide_layout = prs.slide_layouts[1]  # 标题和内容
+                else:
+                    slide_layout = prs.slide_layouts[1]  # 标题和内容
+            
+                slide = prs.slides.add_slide(slide_layout)
+                
+                # 获取占位符
+                for shape in slide.placeholders:
+                    if shape.placeholder_format.type == 0:  # 标题
+                        title = shape
+                        title.text = slide_data['title']
+                        title.text_frame.paragraphs[0].font.size = Pt(32)
+                        title.text_frame.paragraphs[0].font.bold = True
+                        title.text_frame.paragraphs[0].font.color.rgb = RGBColor(0, 51, 102)
+                    elif shape.placeholder_format.type == 1:  # 内容
+                        content = shape
+                        content.text = slide_data['content']
+                        content.text_frame.paragraphs[0].font.size = Pt(18)
+                        # 设置行间距
+                        for paragraph in content.text_frame.paragraphs:
+                            paragraph.line_spacing = 1.2
+            
+            # 保存文件
+            prs.save(file_path)
+            
+            self.root.after(0, lambda: [
+                self.progress.stop(),
+                messagebox.showinfo("成功", f"PPT已保存到: {file_path}")
+            ])
+        
+        except Exception as e:
+            self.root.after(0, lambda: [
+                self.progress.stop(),
+                messagebox.showerror("错误", f"生成PPT时出错: {str(e)}")
+            ])
 
-    def finish_calculation(self):
-        self.stop_loading_ui()
-        self.status_label.configure(text="✅ 计算完成！数据已应用当前赋分标准。")
-        self.btn_export.configure(state="normal", fg_color="#2CC985", text="导出 Excel 结果")
-        messagebox.showinfo("成功", "计算完成！\n请注意：本次计算使用了您在【赋分标准设置】中填写的参数。")
-
-    def stop_loading_ui(self):
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate")
-        self.progressbar.set(1)
-        self.btn_calc.configure(state="normal")
-
-    def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
-        if save_path:
-            try:
-                self.df_result.to_excel(save_path, index=False)
-                messagebox.showinfo("导出成功", f"文件已保存至:\n{save_path}")
-                os.startfile(os.path.dirname(save_path))
-            except Exception as e:
-                messagebox.showerror("保存失败", str(e))
+def main():
+    root = tk.Tk()
+    app = PPTMakerApp(root)
+    root.mainloop()
 
 if __name__ == "__main__":
-    app = GaokaoApp()
-    app.mainloop()
+    main()
