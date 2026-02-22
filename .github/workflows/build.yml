@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:  # <--- 加上这一行，意思是允许手动在网页端点击运行
 
 jobs:
   build:
