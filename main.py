@@ -3,6 +3,7 @@ import sys
 import json
 import subprocess
 import threading
+import multiprocessing
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import ttkbootstrap as ttk
@@ -14,7 +15,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.0 (纯净环境版)")
+        self.title("PyInstaller 打包工具 v5.1 (纯净环境稳定版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -45,7 +46,6 @@ class PyInstallerGUI(ttk.Window):
         self.var_hidden_imports = tk.StringVar()
         self.var_exclude_modules = tk.StringVar()
         
-        # v5.0 新增：虚拟环境选项
         self.var_use_venv = tk.BooleanVar(value=True) 
 
     def _create_menu(self):
@@ -302,14 +302,12 @@ class PyInstallerGUI(ttk.Window):
         # 【阶段一：虚拟环境准备】
         if self.var_use_venv.get():
             venv_dir = os.path.join(script_dir, ".pack_venv")
-            self.log_console(f"🌱 [阶段 1/2] 正在构建纯净沙盒环境...\n路径: {venv_dir}\n")
+            # 强制调用系统底层 python 以防打包程序套娃死循环
+            system_python = "python" if os.name == 'nt' else "python3"
+            self.log_console(f"🌱 [阶段 1/2] 正在调用系统环境构建纯净沙盒...\n路径: {venv_dir}\n")
             
-            try:
-                import venv
-                # clear=True 会在每次打包前清空旧的虚拟环境，保证绝对纯净
-                venv.create(venv_dir, with_pip=True, clear=True) 
-            except Exception as e:
-                self.log_console(f"❌ 虚拟环境创建失败: {e}\n")
+            if not self._run_cmd_blocking([system_python, "-m", "venv", venv_dir, "--clear"]):
+                self.log_console("\n❌ 虚拟环境创建失败！\n(提示: Ubuntu 等 Linux 系统请确保已通过终端执行过 sudo apt install python3-venv)\n")
                 self.after(0, self._unlock_ui)
                 return
                 
@@ -380,5 +378,8 @@ class PyInstallerGUI(ttk.Window):
             self.log_console("\n🛑 正在强制终止进程...\n")
 
 if __name__ == "__main__":
+    # 防御性编程：防止打包为独立软件后发生子进程无限裂变套娃崩溃
+    multiprocessing.freeze_support()
+    
     app = PyInstallerGUI()
     app.mainloop()
