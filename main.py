@@ -16,7 +16,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.3 (智能防错终极版)")
+        self.title("PyInstaller 打包工具 v5.4 (完美典藏版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -38,7 +38,6 @@ class PyInstallerGUI(ttk.Window):
         self.var_icon = tk.StringVar()
         
         self.var_onefile = tk.BooleanVar(value=True)
-        # 【修复 Bug】：默认勾选“隐藏控制台”
         self.var_console = tk.BooleanVar(value=True) 
         self.var_clean = tk.BooleanVar(value=True)
         self.var_upx = tk.BooleanVar(value=False)
@@ -72,14 +71,17 @@ class PyInstallerGUI(ttk.Window):
         self.tab_basic = ttk.Frame(self.notebook)
         self.tab_advanced = ttk.Frame(self.notebook)
         self.tab_env = ttk.Frame(self.notebook)
+        self.tab_about = ttk.Frame(self.notebook) # 新增：关于与说明页面
         
         self.notebook.add(self.tab_basic, text="📦 基础配置")
         self.notebook.add(self.tab_advanced, text="🛠️ 高级设置")
         self.notebook.add(self.tab_env, text="🌱 依赖与隔离环境 (推荐)")
+        self.notebook.add(self.tab_about, text="📖 关于与说明")
         
         self._build_basic_tab()
         self._build_advanced_tab()
         self._build_env_tab()
+        self._build_about_tab()
 
         bottom_frame = ttk.Frame(self)
         bottom_frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
@@ -167,6 +169,30 @@ class PyInstallerGUI(ttk.Window):
         ttk.Entry(row, textvariable=self.var_req).pack(side=LEFT, fill=X, expand=True, padx=5)
         ttk.Button(row, text="浏览...", command=self.browse_req).pack(side=LEFT, padx=(0, 5))
 
+    def _build_about_tab(self):
+        # 使用说明
+        f_guide = ttk.Labelframe(self.tab_about, text="💡 软件使用说明", padding=15)
+        f_guide.pack(fill=X, pady=10, padx=20)
+        
+        guide_text = (
+            "1. 基础配置：选择您编写的 Python 主程序 (.py/.pyw 文件)。如果是带有图形界面的程序，建议保持勾选“隐藏控制台黑框”。\n\n"
+            "2. 极限压缩（推荐）：切换到【🌱 依赖与隔离环境】标签页，勾选“启用纯净虚拟环境”。如果代码使用了第三方库，请务必指定 requirements.txt 文件。工具将在沙盒中独立打包，杜绝体积臃肿。\n\n"
+            "3. 解决报错：如果打包生成的软件在运行时闪退并提示 'ModuleNotFoundError'，请在【🛠️ 高级设置】的“隐式导入”中填入报错缺失的模块名，然后重新打包即可解决。\n\n"
+            "4. 一键执行：配置完成后，点击右下角按钮，静待终端输出“🎉 打包圆满完成”的提示即可提取软件。"
+        )
+        ttk.Label(f_guide, text=guide_text, wraplength=700, justify=LEFT).pack(anchor=W)
+
+        # 作者信息
+        f_author = ttk.Labelframe(self.tab_about, text="👨‍💻 关于作者", padding=15)
+        f_author.pack(fill=X, pady=10, padx=20)
+        
+        author_text = (
+            "开发与维护：俞晋全\n"
+            "个人博客：硫酸铜的遐想\n\n"
+            "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。无论是开发日常的教学辅助脚本、成绩统计分析软件，还是复杂的应用系统，都能通过自动化的沙盒纯净打包机制，彻底告别环境污染和软件体积臃肿的烦恼。"
+        )
+        ttk.Label(f_author, text=author_text, wraplength=700, justify=LEFT).pack(anchor=W)
+
     # --- 主题与配置 ---
     def toggle_theme(self):
         if self.current_theme == "lumen":
@@ -214,7 +240,6 @@ class PyInstallerGUI(ttk.Window):
             self.var_hidden_imports.set(cfg.get("hidden_imports", ""))
             self.var_exclude_modules.set(cfg.get("exclude_modules", ""))
             self.var_onefile.set(cfg.get("onefile", True))
-            # 【同步修复】：加载配置时默认也给 True
             self.var_console.set(cfg.get("console", True)) 
             self.var_clean.set(cfg.get("clean", True))
             self.var_upx.set(cfg.get("upx", False))
@@ -260,7 +285,6 @@ class PyInstallerGUI(ttk.Window):
 
     # --- 环境自检逻辑 ---
     def get_system_python(self):
-        """智能检测当前系统是否存在 Python 环境"""
         if os.name == 'nt':
             return "python" if shutil.which("python") else None
         else:
@@ -320,7 +344,6 @@ class PyInstallerGUI(ttk.Window):
         script_dir = os.path.dirname(self.var_script.get())
         pyinstaller_exe = "pyinstaller"
         
-        # 【阶段一：虚拟环境准备】
         if self.var_use_venv.get():
             venv_dir = os.path.join(script_dir, ".pack_venv")
             self.log_console(f"🌱 [阶段 1/2] 正在调用系统环境构建纯净沙盒...\n路径: {venv_dir}\n")
@@ -351,12 +374,10 @@ class PyInstallerGUI(ttk.Window):
                     self.after(0, self._unlock_ui)
                     return
 
-        # 【阶段二：执行代码打包】
         self.log_console(f"\n🚀 [阶段 2/2] 启动打包引擎...\n{'-'*40}\n")
         cmd = [pyinstaller_exe, "-y"] 
         
         if self.var_onefile.get(): cmd.append("-F")
-        # 【修复 Bug】：把前面的 not 删除了，逻辑彻底纠正！
         if self.var_console.get(): cmd.append("-w") 
         if self.var_clean.get(): cmd.append("--clean")
         if self.var_upx.get(): cmd.append("--upx-dir=.") 
@@ -370,7 +391,6 @@ class PyInstallerGUI(ttk.Window):
         if add_data:
             for data in add_data.split(): cmd.extend(["--add-data", data])
                 
-        # 智能隐式导入 (自动补全防崩溃模块)
         default_hidden = ["PIL._tkinter_finder"]
         for d_imp in default_hidden:
             cmd.extend(["--hidden-import", d_imp])
