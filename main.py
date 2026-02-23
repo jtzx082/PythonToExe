@@ -1,323 +1,384 @@
-import sys
 import os
-import requests
+import sys
 import json
-import docx
-import PyPDF2
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QPushButton, QTextEdit, QLabel, QLineEdit, QFileDialog, QProgressBar, QMessageBox)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from pptx import Presentation
-from pptx.util import Inches
+import subprocess
+import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from ttkbootstrap.scrolled import ScrolledText
 
-# ================= 线程类：调用DeepSeek生成大纲 =================
-class OutlineWorker(QThread):
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str)
+AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 
-    def __init__(self, api_key, content):
-        super().__init__()
-        self.api_key = api_key
-        self.content = content
-
-    def run(self):
-        try:
-            # 使用原生 requests 替代 openai 库，避免代理参数冲突导致崩溃
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            prompt = f"""
-            请根据以下内容/主题生成一份PPT演示文稿大纲。
-            要求格式严格遵守以下Markdown规范，以便后续程序解析：
-            每个幻灯片以 '# ' 开头作为标题。
-            幻灯片的内容要点以 '- ' 开头。
-            在每个幻灯片的最后，提供一个用于生成配图的英文关键词，格式为 '[Image Keyword: 关键词]'。
-            
-            内容/主题：{self.content}
-            
-            示例：
-            # PPT封面：人工智能的未来
-            - 探索AI的无限可能
-            - 演讲者：张三
-            [Image Keyword: Artificial Intelligence Future]
-            """
-            
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [
-                    {"role": "system", "content": "你是一个专业的PPT大纲设计师。"},
-                    {"role": "user", "content": prompt}
-                ]
-            }
-            
-            # 发起请求
-            response = requests.post(
-                "https://api.deepseek.com/chat/completions", 
-                headers=headers, 
-                json=payload,
-                timeout=60 # 设置超时防卡死
-            )
-            
-            # 抛出HTTP错误
-            response.raise_for_status() 
-            
-            # 解析返回数据
-            result_data = response.json()
-            outline = result_data["choices"][0]["message"]["content"]
-            self.finished.emit(outline)
-            
-        except Exception as e:
-            self.error.emit(f"网络请求失败:\n{str(e)}")
-
-# ================= 线程类：生成PPT =================
-class PPTWorker(QThread):
-    progress = pyqtSignal(int)
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str)
-
-    def __init__(self, outline_text, template_path, output_path):
-        super().__init__()
-        self.outline_text = outline_text
-        self.template_path = template_path
-        self.output_path = output_path
-
-    def parse_outline(self, text):
-        slides = []
-        current_slide = None
-        for line in text.split('\n'):
-            line = line.strip()
-            if line.startswith('# '):
-                if current_slide:
-                    slides.append(current_slide)
-                current_slide = {'title': line[2:], 'bullets': [], 'keyword': 'presentation'}
-            elif line.startswith('- '):
-                if current_slide:
-                    current_slide['bullets'].append(line[2:])
-            elif line.startswith('[Image Keyword:'):
-                if current_slide:
-                    current_slide['keyword'] = line.split(':')[1].strip()[:-1]
-        if current_slide:
-            slides.append(current_slide)
-        return slides
-
-    def run(self):
-        try:
-            slides_data = self.parse_outline(self.outline_text)
-            if not slides_data:
-                raise ValueError("大纲格式错误，未找到幻灯片内容。请确保包含'#'标题。")
-
-            if self.template_path and os.path.exists(self.template_path):
-                prs = Presentation(self.template_path)
-            else:
-                prs = Presentation()
-
-            total = len(slides_data)
-            for idx, slide_data in enumerate(slides_data):
-                layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
-                slide = prs.slides.add_slide(layout)
-                
-                if slide.shapes.title:
-                    slide.shapes.title.text = slide_data['title']
-                
-                if len(slide.placeholders) > 1:
-                    tf = slide.placeholders[1].text_frame
-                    tf.text = ""
-                    for bullet in slide_data['bullets']:
-                        p = tf.add_paragraph()
-                        p.text = bullet
-                        p.level = 0
-                
-                try:
-                    img_url = f"https://image.pollinations.ai/prompt/{slide_data['keyword']}?width=400&height=300&nologo=true"
-                    img_data = requests.get(img_url, timeout=10).content
-                    img_path = f"temp_img_{idx}.jpg"
-                    with open(img_path, 'wb') as handler:
-                        handler.write(img_data)
-                    
-                    left = Inches(5)
-                    top = Inches(2)
-                    slide.shapes.add_picture(img_path, left, top, width=Inches(4.5))
-                    os.remove(img_path) 
-                except Exception as img_e:
-                    print(f"无法生成图片: {img_e}")
-
-                self.progress.emit(int(((idx + 1) / total) * 100))
-
-            prs.save(self.output_path)
-            self.finished.emit(self.output_path)
-        except Exception as e:
-            self.error.emit(str(e))
-
-# ================= 主窗口 GUI =================
-class MainWindow(QMainWindow):
+class PyInstallerGUI(ttk.Window):
     def __init__(self):
-        super().__init__()
-        self.setWindowTitle("AI PPT Master - DeepSeek 智能生成器")
-        self.resize(900, 700)
-        self.setStyleSheet("""
-            QMainWindow { background-color: #f4f5f7; }
-            QLabel { font-size: 14px; font-weight: bold; color: #333; }
-            QTextEdit, QLineEdit { background-color: white; border: 1px solid #ccc; border-radius: 5px; padding: 8px; font-size: 14px; }
-            QPushButton { background-color: #0052cc; color: white; border-radius: 5px; padding: 10px; font-size: 14px; font-weight: bold; }
-            QPushButton:hover { background-color: #0043a6; }
-            QPushButton:disabled { background-color: #a5b4fc; }
-            QProgressBar { text-align: center; border: 1px solid #ccc; border-radius: 5px; }
-            QProgressBar::chunk { background-color: #0052cc; }
-        """)
+        super().__init__(themename="lumen")
+        self.title("PyInstaller 打包工具 v5.0 (纯净环境版)")
+        self.geometry("820x800")
+        self.minsize(750, 650)
         
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
+        self.process = None
+        self.current_theme = "lumen"
 
-        # 1. API配置区
-        api_layout = QHBoxLayout()
-        api_layout.addWidget(QLabel("DeepSeek API Key:"))
-        self.api_input = QLineEdit()
-        self.api_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_input.setPlaceholderText("sk-...")
-        api_layout.addWidget(self.api_input)
-        layout.addLayout(api_layout)
+        self._init_vars()
+        self._create_menu()
+        self._create_layout()
 
-        # 2. 输入区
-        input_label = QLabel("输入主题或上传文件 (TXT/DOCX/PDF):")
-        layout.addWidget(input_label)
+        self.load_config(AUTO_CONFIG_FILE, silent=True)
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def _init_vars(self):
+        self.var_req = tk.StringVar()
+        self.var_script = tk.StringVar()
+        self.var_outdir = tk.StringVar()
+        self.var_outname = tk.StringVar()
+        self.var_icon = tk.StringVar()
         
-        self.input_text = QTextEdit()
-        self.input_text.setPlaceholderText("在此输入PPT主题，或点击右侧按钮解析文档内容...")
+        self.var_onefile = tk.BooleanVar(value=True)
+        self.var_console = tk.BooleanVar(value=False)
+        self.var_clean = tk.BooleanVar(value=True)
+        self.var_upx = tk.BooleanVar(value=False)
+        self.var_uac = tk.BooleanVar(value=False)
         
-        btn_layout = QVBoxLayout()
-        self.btn_upload = QPushButton("上传解析文件")
-        self.btn_upload.clicked.connect(self.upload_file)
-        self.btn_gen_outline = QPushButton("第一步: AI 生成大纲")
-        self.btn_gen_outline.clicked.connect(self.generate_outline)
+        self.var_add_data = tk.StringVar()
+        self.var_hidden_imports = tk.StringVar()
+        self.var_exclude_modules = tk.StringVar()
         
-        btn_layout.addWidget(self.btn_upload)
-        btn_layout.addWidget(self.btn_gen_outline)
-        btn_layout.addStretch()
+        # v5.0 新增：虚拟环境选项
+        self.var_use_venv = tk.BooleanVar(value=True) 
 
-        input_box = QHBoxLayout()
-        input_box.addWidget(self.input_text, 4)
-        input_box.addLayout(btn_layout, 1)
-        layout.addLayout(input_box)
+    def _create_menu(self):
+        menubar = tk.Menu(self)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="导入配置...", command=self.import_config)
+        file_menu.add_command(label="导出配置...", command=self.export_config)
+        file_menu.add_separator()
+        file_menu.add_command(label="退出", command=self.on_closing)
+        menubar.add_cascade(label="文件", menu=file_menu)
+        self.config(menu=menubar)
 
-        # 3. 大纲编辑区
-        layout.addWidget(QLabel("PPT 大纲 (支持手动调整修改):"))
-        self.outline_text = QTextEdit()
-        self.outline_text.setPlaceholderText("生成的Markdown大纲将显示在这里，您可以随意修改标题、要点和图片关键词...")
-        layout.addWidget(self.outline_text)
+    def _create_layout(self):
+        toolbar = ttk.Frame(self)
+        toolbar.pack(fill=X, padx=10, pady=(10, 0))
+        ttk.Label(toolbar, text="🚀 Python GUI & 脚本自动化打包引擎", font=("", 12, "bold")).pack(side=LEFT)
+        ttk.Button(toolbar, text="🌓 切换主题", bootstyle=(SECONDARY, OUTLINE), command=self.toggle_theme).pack(side=RIGHT)
 
-        # 4. 生成区
-        bottom_layout = QHBoxLayout()
-        self.btn_template = QPushButton("选择本地 PPT 模板 (可选)")
-        self.btn_template.clicked.connect(self.select_template)
-        self.template_path = ""
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill=BOTH, expand=True, padx=10, pady=10)
         
-        self.btn_generate_ppt = QPushButton("第二步: 一键生成 PPT")
-        self.btn_generate_ppt.clicked.connect(self.generate_ppt)
+        self.tab_basic = ttk.Frame(self.notebook)
+        self.tab_advanced = ttk.Frame(self.notebook)
+        self.tab_env = ttk.Frame(self.notebook)
         
-        bottom_layout.addWidget(self.btn_template)
-        bottom_layout.addWidget(self.btn_generate_ppt)
-        layout.addLayout(bottom_layout)
-
-        # 进度条
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        layout.addWidget(self.progress_bar)
-
-    def upload_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "文档 (*.txt *.docx *.pdf)")
-        if not file_path:
-            return
+        self.notebook.add(self.tab_basic, text="📦 基础配置")
+        self.notebook.add(self.tab_advanced, text="🛠️ 高级设置")
+        self.notebook.add(self.tab_env, text="🌱 依赖与隔离环境 (推荐)")
         
-        ext = file_path.split('.')[-1].lower()
-        content = ""
+        self._build_basic_tab()
+        self._build_advanced_tab()
+        self._build_env_tab()
+
+        bottom_frame = ttk.Frame(self)
+        bottom_frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        
+        btn_bar = ttk.Frame(bottom_frame)
+        btn_bar.pack(fill=X, pady=5)
+        
+        self.btn_open_dir = ttk.Button(btn_bar, text="打开输出目录", bootstyle=INFO, state=DISABLED, command=self.open_output_dir)
+        self.btn_open_dir.pack(side=LEFT)
+        
+        self.btn_cancel = ttk.Button(btn_bar, text="取消操作", bootstyle=DANGER, command=self.cancel_process, state=DISABLED)
+        self.btn_cancel.pack(side=RIGHT, padx=(5, 0))
+        
+        self.btn_start = ttk.Button(btn_bar, text="一键执行打包", bootstyle=PRIMARY, command=self.start_build_thread)
+        self.btn_start.pack(side=RIGHT)
+
+        self.progress = ttk.Progressbar(bottom_frame, mode='indeterminate', bootstyle=INFO)
+        self.progress.pack(fill=X, pady=(5, 10))
+        
+        frame_console = ttk.Labelframe(bottom_frame, text="实时日志终端", padding=5)
+        frame_console.pack(fill=BOTH, expand=True)
+        self.console_text = ScrolledText(frame_console, wrap=WORD, height=8, font=("Consolas", 10))
+        self.console_text.pack(fill=BOTH, expand=True)
+
+    def _build_basic_tab(self):
+        f_script = ttk.Labelframe(self.tab_basic, text="主程序 (必填)", padding=10)
+        f_script.pack(fill=X, pady=10, padx=10)
+        ttk.Entry(f_script, textvariable=self.var_script).pack(side=LEFT, fill=X, expand=True, padx=5)
+        ttk.Button(f_script, text="浏览...", command=self.browse_script).pack(side=LEFT)
+
+        f_out = ttk.Labelframe(self.tab_basic, text="输出与外观 (可选)", padding=10)
+        f_out.pack(fill=X, pady=5, padx=10)
+        
+        ttk.Label(f_out, text="输出目录:").grid(row=0, column=0, sticky=W, pady=5)
+        ttk.Entry(f_out, textvariable=self.var_outdir, bootstyle="info").grid(row=0, column=1, sticky=EW, padx=5)
+        ttk.Button(f_out, text="浏览...", command=self.browse_outdir).grid(row=0, column=2)
+        
+        ttk.Label(f_out, text="应用名称:").grid(row=1, column=0, sticky=W, pady=5)
+        ttk.Entry(f_out, textvariable=self.var_outname).grid(row=1, column=1, sticky=EW, padx=5)
+        
+        ttk.Label(f_out, text="应用图标:").grid(row=2, column=0, sticky=W, pady=5)
+        ttk.Entry(f_out, textvariable=self.var_icon).grid(row=2, column=1, sticky=EW, padx=5)
+        ttk.Button(f_out, text="浏览...", command=self.browse_icon).grid(row=2, column=2)
+        f_out.columnconfigure(1, weight=1)
+
+        f_opt = ttk.Labelframe(self.tab_basic, text="核心模式", padding=10)
+        f_opt.pack(fill=X, pady=5, padx=10)
+        ttk.Checkbutton(f_opt, text="打包为单文件 (-F)", variable=self.var_onefile).pack(side=LEFT, padx=15)
+        ttk.Checkbutton(f_opt, text="隐藏控制台黑框 (-w, 适合 GUI 程序)", variable=self.var_console).pack(side=LEFT, padx=15)
+
+    def _build_advanced_tab(self):
+        f_data = ttk.Labelframe(self.tab_advanced, text="资源与依赖管理", padding=10)
+        f_data.pack(fill=X, pady=10, padx=10)
+        
+        ttk.Label(f_data, text="附加数据:").grid(row=0, column=0, sticky=W, pady=5)
+        ttk.Entry(f_data, textvariable=self.var_add_data).grid(row=0, column=1, sticky=EW, padx=5)
+        ttk.Button(f_data, text="添加...", command=self.browse_add_data).grid(row=0, column=2)
+        
+        ttk.Label(f_data, text="隐式导入:").grid(row=1, column=0, sticky=W, pady=5)
+        ttk.Entry(f_data, textvariable=self.var_hidden_imports).grid(row=1, column=1, columnspan=2, sticky=EW, padx=5)
+
+        ttk.Label(f_data, text="排除模块:").grid(row=2, column=0, sticky=W, pady=5)
+        ttk.Entry(f_data, textvariable=self.var_exclude_modules).grid(row=2, column=1, columnspan=2, sticky=EW, padx=5)
+        f_data.columnconfigure(1, weight=1)
+
+        f_build = ttk.Labelframe(self.tab_advanced, text="构建参数", padding=10)
+        f_build.pack(fill=X, pady=5, padx=10)
+        ttk.Checkbutton(f_build, text="打包后清理临时文件 (--clean)", variable=self.var_clean).pack(anchor=W, pady=2)
+        ttk.Checkbutton(f_build, text="使用 UPX 极致压缩 (--upx-dir)", variable=self.var_upx).pack(anchor=W, pady=2)
+        ttk.Checkbutton(f_build, text="请求管理员权限 (Windows 提权)", variable=self.var_uac).pack(anchor=W, pady=2)
+
+    def _build_env_tab(self):
+        f_env = ttk.Labelframe(self.tab_env, text="沙盒隔离打包 (极限压缩体积)", padding=20)
+        f_env.pack(fill=X, pady=20, padx=20)
+        
+        desc = ("建议启用【纯净虚拟环境】！工具会在后台创建一个隔离的沙盒，"
+                "并仅安装必要的依赖进行打包，彻底杜绝生成的 exe 体积臃肿问题。")
+        ttk.Label(f_env, text=desc, wraplength=700).pack(anchor=W, pady=(0, 15))
+        
+        ttk.Checkbutton(f_env, text="启用纯净虚拟环境打包 (.pack_venv)", variable=self.var_use_venv, bootstyle="success-round-toggle").pack(anchor=W, pady=(0, 15))
+        
+        row = ttk.Frame(f_env)
+        row.pack(fill=X)
+        ttk.Label(row, text="指定专属依赖 (requirements.txt):").pack(side=LEFT)
+        ttk.Entry(row, textvariable=self.var_req).pack(side=LEFT, fill=X, expand=True, padx=5)
+        ttk.Button(row, text="浏览...", command=self.browse_req).pack(side=LEFT, padx=(0, 5))
+
+    # --- 主题与配置 ---
+    def toggle_theme(self):
+        if self.current_theme == "lumen":
+            self.style.theme_use("cyborg")
+            self.current_theme = "cyborg"
+        else:
+            self.style.theme_use("lumen")
+            self.current_theme = "lumen"
+
+    def open_output_dir(self):
+        out_dir = self.var_outdir.get() or os.path.join(os.path.dirname(self.var_script.get()), "dist")
+        if os.path.exists(out_dir):
+            if sys.platform == "win32": os.startfile(out_dir)
+            elif sys.platform == "darwin": subprocess.Popen(["open", out_dir])
+            else: subprocess.Popen(["xdg-open", out_dir])
+        else: messagebox.showwarning("提示", "输出目录不存在！")
+
+    def get_current_config(self):
+        return {
+            "req_path": self.var_req.get(), "script_path": self.var_script.get(),
+            "outdir": self.var_outdir.get(), "outname": self.var_outname.get(),
+            "icon": self.var_icon.get(), "add_data": self.var_add_data.get(),
+            "hidden_imports": self.var_hidden_imports.get(), "exclude_modules": self.var_exclude_modules.get(),
+            "onefile": self.var_onefile.get(), "console": self.var_console.get(),
+            "clean": self.var_clean.get(), "upx": self.var_upx.get(), "uac": self.var_uac.get(),
+            "use_venv": self.var_use_venv.get()
+        }
+
+    def save_config(self, filepath, silent=False):
         try:
-            if ext == 'txt':
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-            elif ext == 'docx':
-                doc = docx.Document(file_path)
-                content = "\n".join([para.text for para in doc.paragraphs])
-            elif ext == 'pdf':
-                with open(file_path, 'rb') as f:
-                    reader = PyPDF2.PdfReader(f)
-                    content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-            self.input_text.setText(content)
+            with open(filepath, 'w', encoding='utf-8') as f: json.dump(self.get_current_config(), f, indent=4, ensure_ascii=False)
+            if not silent: messagebox.showinfo("成功", "配置导出成功！")
+        except: pass
+
+    def load_config(self, filepath, silent=False):
+        if not os.path.exists(filepath): return
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f: cfg = json.load(f)
+            self.var_req.set(cfg.get("req_path", ""))
+            self.var_script.set(cfg.get("script_path", ""))
+            self.var_outdir.set(cfg.get("outdir", ""))
+            self.var_outname.set(cfg.get("outname", ""))
+            self.var_icon.set(cfg.get("icon", ""))
+            self.var_add_data.set(cfg.get("add_data", ""))
+            self.var_hidden_imports.set(cfg.get("hidden_imports", ""))
+            self.var_exclude_modules.set(cfg.get("exclude_modules", ""))
+            self.var_onefile.set(cfg.get("onefile", True))
+            self.var_console.set(cfg.get("console", False))
+            self.var_clean.set(cfg.get("clean", True))
+            self.var_upx.set(cfg.get("upx", False))
+            self.var_uac.set(cfg.get("uac", False))
+            self.var_use_venv.set(cfg.get("use_venv", True))
+        except: pass
+
+    def export_config(self):
+        p = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
+        if p: self.save_config(p)
+
+    def import_config(self):
+        p = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+        if p: self.load_config(p)
+
+    def on_closing(self):
+        self.save_config(AUTO_CONFIG_FILE, silent=True)
+        if self.process: self.process.terminate()
+        self.destroy()
+
+    # --- 浏览文件 ---
+    def browse_req(self):
+        p = filedialog.askopenfilename(filetypes=[("Text", "*.txt")])
+        if p: self.var_req.set(p)
+
+    def browse_script(self):
+        p = filedialog.askopenfilename(filetypes=[("Python", "*.py *.pyw")])
+        if p: self.var_script.set(p)
+
+    def browse_outdir(self):
+        p = filedialog.askdirectory()
+        if p: self.var_outdir.set(p)
+
+    def browse_icon(self):
+        p = filedialog.askopenfilename(filetypes=[("Icon", "*.ico *.icns")])
+        if p: self.var_icon.set(p)
+
+    def browse_add_data(self):
+        p = filedialog.askdirectory(title="选择要包含的文件夹")
+        if p: 
+            sep = ";" if os.name == 'nt' else ":"
+            self.var_add_data.set(f"{self.var_add_data.get()} {p}{sep}{os.path.basename(p)}".strip())
+
+    # --- 核心打包逻辑 ---
+    def log_console(self, text):
+        self.console_text.insert(END, text)
+        self.console_text.see(END)
+
+    def _lock_ui(self):
+        self.btn_start.config(state=DISABLED)
+        self.btn_cancel.config(state=NORMAL)
+        self.btn_open_dir.config(state=DISABLED)
+        self.progress.start(10)
+
+    def _unlock_ui(self):
+        self.progress.stop()
+        self.btn_start.config(state=NORMAL)
+        self.btn_cancel.config(state=DISABLED)
+        self.btn_open_dir.config(state=NORMAL) 
+        self.process = None
+
+    def start_build_thread(self):
+        if not self.var_script.get():
+            messagebox.showwarning("警告", "请先在基础配置中选择需要打包的 Python 脚本！")
+            return
+        self._lock_ui()
+        self.console_text.delete(1.0, END)
+        self.save_config(AUTO_CONFIG_FILE, silent=True) 
+        threading.Thread(target=self._run_build_pipeline, daemon=True).start()
+
+    def _run_cmd_blocking(self, cmd):
+        """执行系统命令并阻塞等待，返回执行是否成功"""
+        try:
+            kwargs = {}
+            if os.name == 'nt': kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, **kwargs)
+            for line in self.process.stdout: self.log_console(line)
+            self.process.wait()
+            return self.process.returncode == 0
         except Exception as e:
-            QMessageBox.critical(self, "读取失败", f"无法解析文件: {str(e)}")
+            self.log_console(f"\n❌ 执行异常: {str(e)}\n")
+            return False
 
-    def generate_outline(self):
-        api_key = self.api_input.text().strip()
-        content = self.input_text.toPlainText().strip()
+    def _run_build_pipeline(self):
+        script_dir = os.path.dirname(self.var_script.get())
+        pyinstaller_exe = "pyinstaller"
         
-        if not api_key:
-            QMessageBox.warning(self, "错误", "请输入 DeepSeek API Key!")
-            return
-        if not content:
-            QMessageBox.warning(self, "错误", "请输入主题或上传文件内容!")
-            return
+        # 【阶段一：虚拟环境准备】
+        if self.var_use_venv.get():
+            venv_dir = os.path.join(script_dir, ".pack_venv")
+            self.log_console(f"🌱 [阶段 1/2] 正在构建纯净沙盒环境...\n路径: {venv_dir}\n")
+            
+            try:
+                import venv
+                # clear=True 会在每次打包前清空旧的虚拟环境，保证绝对纯净
+                venv.create(venv_dir, with_pip=True, clear=True) 
+            except Exception as e:
+                self.log_console(f"❌ 虚拟环境创建失败: {e}\n")
+                self.after(0, self._unlock_ui)
+                return
+                
+            # 根据系统适配执行路径
+            if sys.platform == "win32":
+                v_python = os.path.join(venv_dir, "Scripts", "python.exe")
+                pyinstaller_exe = os.path.join(venv_dir, "Scripts", "pyinstaller.exe")
+            else:
+                v_python = os.path.join(venv_dir, "bin", "python")
+                pyinstaller_exe = os.path.join(venv_dir, "bin", "pyinstaller")
+                
+            self.log_console("\n📦 正在沙盒中静默安装 PyInstaller 核心库...\n")
+            if not self._run_cmd_blocking([v_python, "-m", "pip", "install", "pyinstaller"]):
+                self.log_console("\n❌ 核心库安装失败，终止打包。\n")
+                self.after(0, self._unlock_ui)
+                return
+                
+            req_path = self.var_req.get()
+            if req_path and os.path.exists(req_path):
+                self.log_console(f"\n📥 正在沙盒中注入专属依赖 ({os.path.basename(req_path)})...\n")
+                if not self._run_cmd_blocking([v_python, "-m", "pip", "install", "-r", req_path]):
+                    self.log_console("\n❌ 专属依赖安装失败，终止打包。\n")
+                    self.after(0, self._unlock_ui)
+                    return
 
-        self.btn_gen_outline.setEnabled(False)
-        self.btn_gen_outline.setText("生成中，请稍候...")
-        self.progress_bar.setValue(30)
+        # 【阶段二：执行代码打包】
+        self.log_console(f"\n🚀 [阶段 2/2] 启动打包引擎...\n{'-'*40}\n")
+        cmd = [pyinstaller_exe, "-y"] 
+        
+        if self.var_onefile.get(): cmd.append("-F")
+        if not self.var_console.get(): cmd.append("-w")
+        if self.var_clean.get(): cmd.append("--clean")
+        if self.var_upx.get(): cmd.append("--upx-dir=.") 
+        if self.var_uac.get() and sys.platform == "win32": cmd.append("--uac-admin")
+        
+        if self.var_outdir.get(): cmd.extend(["--distpath", self.var_outdir.get()])
+        if self.var_outname.get(): cmd.extend(["-n", self.var_outname.get()])
+        if self.var_icon.get(): cmd.extend(["-i", self.var_icon.get()])
+            
+        add_data = self.var_add_data.get().strip()
+        if add_data:
+            for data in add_data.split(): cmd.extend(["--add-data", data])
+                
+        hidden_imports = self.var_hidden_imports.get().strip()
+        if hidden_imports:
+            for imp in hidden_imports.replace(" ", "").split(","):
+                if imp: cmd.extend(["--hidden-import", imp])
+                
+        exclude_modules = self.var_exclude_modules.get().strip()
+        if exclude_modules:
+            for exc in exclude_modules.replace(" ", "").split(","):
+                if exc: cmd.extend(["--exclude-module", exc])
+                
+        cmd.append(self.var_script.get())
+        
+        success = self._run_cmd_blocking(cmd)
+        
+        if success:
+            self.log_console("\n🎉 打包圆满完成！(生成的程序体积已得到极限优化)\n您可以点击左下角打开输出目录查看。\n")
+        else:
+            self.log_console("\n❌ 操作失败或被强制取消。\n")
+            
+        self.after(0, self._unlock_ui)
 
-        self.outline_worker = OutlineWorker(api_key, content)
-        self.outline_worker.finished.connect(self.on_outline_finished)
-        self.outline_worker.error.connect(self.on_outline_error)
-        self.outline_worker.start()
-
-    def on_outline_finished(self, text):
-        self.outline_text.setText(text)
-        self.btn_gen_outline.setEnabled(True)
-        self.btn_gen_outline.setText("第一步: AI 生成大纲")
-        self.progress_bar.setValue(100)
-        QMessageBox.information(self, "成功", "大纲已生成，请在文本框中检查并修改！")
-
-    def on_outline_error(self, err):
-        self.btn_gen_outline.setEnabled(True)
-        self.btn_gen_outline.setText("第一步: AI 生成大纲")
-        self.progress_bar.setValue(0)
-        QMessageBox.critical(self, "API请求失败", str(err))
-
-    def select_template(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择PPT模板", "", "PPTX 文件 (*.pptx)")
-        if path:
-            self.template_path = path
-            self.btn_template.setText(f"已选模板: {os.path.basename(path)}")
-
-    def generate_ppt(self):
-        outline = self.outline_text.toPlainText().strip()
-        if not outline:
-            QMessageBox.warning(self, "错误", "大纲为空！请先生成或手动输入。")
-            return
-
-        save_path, _ = QFileDialog.getSaveFileName(self, "保存PPT", "AI_Presentation.pptx", "PPTX 文件 (*.pptx)")
-        if not save_path:
-            return
-
-        self.btn_generate_ppt.setEnabled(False)
-        self.btn_generate_ppt.setText("正在合成PPT与配图...")
-        self.progress_bar.setValue(0)
-
-        self.ppt_worker = PPTWorker(outline, self.template_path, save_path)
-        self.ppt_worker.progress.connect(self.progress_bar.setValue)
-        self.ppt_worker.finished.connect(self.on_ppt_finished)
-        self.ppt_worker.error.connect(self.on_ppt_error)
-        self.ppt_worker.start()
-
-    def on_ppt_finished(self, path):
-        self.btn_generate_ppt.setEnabled(True)
-        self.btn_generate_ppt.setText("第二步: 一键生成 PPT")
-        QMessageBox.information(self, "成功", f"PPT生成完毕！\n保存位置: {path}")
-
-    def on_ppt_error(self, err):
-        self.btn_generate_ppt.setEnabled(True)
-        self.btn_generate_ppt.setText("第二步: 一键生成 PPT")
-        QMessageBox.critical(self, "生成失败", str(err))
+    def cancel_process(self):
+        if self.process:
+            self.process.terminate()
+            self.log_console("\n🛑 正在强制终止进程...\n")
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+    app = PyInstallerGUI()
+    app.mainloop()
