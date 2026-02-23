@@ -16,7 +16,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.2 (智能防错终极版)")
+        self.title("PyInstaller 打包工具 v5.3 (智能防错终极版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -38,7 +38,8 @@ class PyInstallerGUI(ttk.Window):
         self.var_icon = tk.StringVar()
         
         self.var_onefile = tk.BooleanVar(value=True)
-        self.var_console = tk.BooleanVar(value=False)
+        # 【修复 Bug】：默认勾选“隐藏控制台”
+        self.var_console = tk.BooleanVar(value=True) 
         self.var_clean = tk.BooleanVar(value=True)
         self.var_upx = tk.BooleanVar(value=False)
         self.var_uac = tk.BooleanVar(value=False)
@@ -213,7 +214,8 @@ class PyInstallerGUI(ttk.Window):
             self.var_hidden_imports.set(cfg.get("hidden_imports", ""))
             self.var_exclude_modules.set(cfg.get("exclude_modules", ""))
             self.var_onefile.set(cfg.get("onefile", True))
-            self.var_console.set(cfg.get("console", False))
+            # 【同步修复】：加载配置时默认也给 True
+            self.var_console.set(cfg.get("console", True)) 
             self.var_clean.set(cfg.get("clean", True))
             self.var_upx.set(cfg.get("upx", False))
             self.var_uac.set(cfg.get("uac", False))
@@ -256,7 +258,7 @@ class PyInstallerGUI(ttk.Window):
             sep = ";" if os.name == 'nt' else ":"
             self.var_add_data.set(f"{self.var_add_data.get()} {p}{sep}{os.path.basename(p)}".strip())
 
-    # --- 环境自检逻辑 (新增) ---
+    # --- 环境自检逻辑 ---
     def get_system_python(self):
         """智能检测当前系统是否存在 Python 环境"""
         if os.name == 'nt':
@@ -285,12 +287,10 @@ class PyInstallerGUI(ttk.Window):
         self.process = None
 
     def start_build_thread(self):
-        # 1. 基础校验
         if not self.var_script.get():
             messagebox.showwarning("警告", "请先在基础配置中选择需要打包的 Python 脚本！")
             return
             
-        # 2. 核心防御：环境自检拦截
         sys_python = self.get_system_python()
         if not sys_python:
             messagebox.showerror(
@@ -356,7 +356,8 @@ class PyInstallerGUI(ttk.Window):
         cmd = [pyinstaller_exe, "-y"] 
         
         if self.var_onefile.get(): cmd.append("-F")
-        if not self.var_console.get(): cmd.append("-w")
+        # 【修复 Bug】：把前面的 not 删除了，逻辑彻底纠正！
+        if self.var_console.get(): cmd.append("-w") 
         if self.var_clean.get(): cmd.append("--clean")
         if self.var_upx.get(): cmd.append("--upx-dir=.") 
         if self.var_uac.get() and sys.platform == "win32": cmd.append("--uac-admin")
