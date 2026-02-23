@@ -16,7 +16,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.8 (架构自适应版)")
+        self.title("PyInstaller 打包工具 v5.9 (混合环境终极版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -49,7 +49,6 @@ class PyInstallerGUI(ttk.Window):
         self.var_exclude_modules = tk.StringVar()
         
         self.var_use_venv = tk.BooleanVar(value=True) 
-        # 新增：允许沙盒继承系统全局库
         self.var_venv_sys = tk.BooleanVar(value=False) 
 
     def _create_menu(self):
@@ -172,11 +171,9 @@ class PyInstallerGUI(ttk.Window):
         desc_lbl.pack(anchor=W, pady=(0, 15), fill=X)
         desc_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width))
         
-        # 沙盒主开关
         self.cb_venv = ttk.Checkbutton(f_env, text="启用纯净虚拟环境打包 (.pack_venv)", variable=self.var_use_venv, bootstyle="success-round-toggle", command=self._toggle_sys_pkg)
         self.cb_venv.pack(anchor=W, pady=(0, 5))
         
-        # 混合沙盒开关 (架构自适应神器)
         self.cb_sys_pkg = ttk.Checkbutton(f_env, text="↳ 允许继承全局库 (混合模式：专治 ARM 架构/复杂 C++ 依赖编译报错)", variable=self.var_venv_sys)
         self.cb_sys_pkg.pack(anchor=W, padx=25, pady=(0, 15))
         
@@ -186,10 +183,9 @@ class PyInstallerGUI(ttk.Window):
         ttk.Entry(row, textvariable=self.var_req).pack(side=LEFT, fill=X, expand=True, padx=5)
         ttk.Button(row, text="浏览...", command=self.browse_req).pack(side=LEFT, padx=(0, 5))
         
-        self._toggle_sys_pkg() # 初始化状态
+        self._toggle_sys_pkg()
 
     def _toggle_sys_pkg(self):
-        """控制系统包继承复选框的可用状态"""
         if self.var_use_venv.get():
             self.cb_sys_pkg.config(state=NORMAL)
         else:
@@ -404,13 +400,12 @@ class PyInstallerGUI(ttk.Window):
 
     def _run_build_pipeline(self, system_python):
         script_dir = os.path.dirname(self.var_script.get())
-        pyinstaller_exe = "pyinstaller"
+        v_python = system_python # 默认使用系统 Python
         
         if self.var_use_venv.get():
             venv_dir = os.path.join(script_dir, ".pack_venv")
             self.log_console(f"🌱 [阶段 1/2] 正在调用系统环境构建隔离沙盒...\n")
             
-            # 【核心优化】：根据是否允许继承全局库，动态添加 --system-site-packages 参数
             venv_cmd = [system_python, "-m", "venv", venv_dir, "--clear"]
             if self.var_venv_sys.get():
                 venv_cmd.append("--system-site-packages")
@@ -421,12 +416,11 @@ class PyInstallerGUI(ttk.Window):
                 self.after(0, self._unlock_ui)
                 return
                 
+            # 获取沙盒内的 Python 路径
             if sys.platform == "win32":
                 v_python = os.path.join(venv_dir, "Scripts", "python.exe")
-                pyinstaller_exe = os.path.join(venv_dir, "Scripts", "pyinstaller.exe")
             else:
                 v_python = os.path.join(venv_dir, "bin", "python")
-                pyinstaller_exe = os.path.join(venv_dir, "bin", "pyinstaller")
                 
             self.log_console("\n📦 正在沙盒中静默安装/校验 PyInstaller 核心库...\n")
             if not self._run_cmd_blocking([v_python, "-m", "pip", "install", "pyinstaller"]):
@@ -443,7 +437,9 @@ class PyInstallerGUI(ttk.Window):
                     return
 
         self.log_console(f"\n🚀 [阶段 2/2] 启动打包引擎...\n{'-'*40}\n")
-        cmd = [pyinstaller_exe, "-y"] 
+        
+        # 【核心修复】：不再调用可能缺失的 pyinstaller.exe，而是直接使用模块调用模式，万无一失！
+        cmd = [v_python, "-m", "PyInstaller", "-y"] 
         
         if self.var_onefile.get(): cmd.append("-F")
         if self.var_console.get(): cmd.append("-w") 
