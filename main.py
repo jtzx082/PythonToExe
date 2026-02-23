@@ -16,7 +16,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.4 (完美典藏版)")
+        self.title("PyInstaller 打包工具 v5.5 (视觉自适应版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -65,13 +65,14 @@ class PyInstallerGUI(ttk.Window):
         ttk.Label(toolbar, text="🚀 Python GUI & 脚本自动化打包引擎", font=("", 12, "bold")).pack(side=LEFT)
         ttk.Button(toolbar, text="🌓 切换主题", bootstyle=(SECONDARY, OUTLINE), command=self.toggle_theme).pack(side=RIGHT)
 
+        # 优化点 1：将 notebook 的 expand 设为 False，让它紧密包裹内容，不再垂直拉伸留白
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        self.notebook.pack(fill=BOTH, expand=False, padx=10, pady=10)
         
         self.tab_basic = ttk.Frame(self.notebook)
         self.tab_advanced = ttk.Frame(self.notebook)
         self.tab_env = ttk.Frame(self.notebook)
-        self.tab_about = ttk.Frame(self.notebook) # 新增：关于与说明页面
+        self.tab_about = ttk.Frame(self.notebook)
         
         self.notebook.add(self.tab_basic, text="📦 基础配置")
         self.notebook.add(self.tab_advanced, text="🛠️ 高级设置")
@@ -83,6 +84,7 @@ class PyInstallerGUI(ttk.Window):
         self._build_env_tab()
         self._build_about_tab()
 
+        # 优化点 2：底部区域 expand=True，最大化时日志终端将接管所有多余空间
         bottom_frame = ttk.Frame(self)
         bottom_frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
         
@@ -103,7 +105,7 @@ class PyInstallerGUI(ttk.Window):
         
         frame_console = ttk.Labelframe(bottom_frame, text="实时日志终端", padding=5)
         frame_console.pack(fill=BOTH, expand=True)
-        self.console_text = ScrolledText(frame_console, wrap=WORD, height=8, font=("Consolas", 10))
+        self.console_text = ScrolledText(frame_console, wrap=WORD, font=("Consolas", 10))
         self.console_text.pack(fill=BOTH, expand=True)
 
     def _build_basic_tab(self):
@@ -115,16 +117,17 @@ class PyInstallerGUI(ttk.Window):
         f_out = ttk.Labelframe(self.tab_basic, text="输出与外观 (可选)", padding=10)
         f_out.pack(fill=X, pady=5, padx=10)
         
+        # 优化点 3：增加 pady=5，让表格布局更有呼吸感，避免拥挤
         ttk.Label(f_out, text="输出目录:").grid(row=0, column=0, sticky=W, pady=5)
-        ttk.Entry(f_out, textvariable=self.var_outdir, bootstyle="info").grid(row=0, column=1, sticky=EW, padx=5)
-        ttk.Button(f_out, text="浏览...", command=self.browse_outdir).grid(row=0, column=2)
+        ttk.Entry(f_out, textvariable=self.var_outdir, bootstyle="info").grid(row=0, column=1, sticky=EW, padx=5, pady=5)
+        ttk.Button(f_out, text="浏览...", command=self.browse_outdir).grid(row=0, column=2, pady=5)
         
         ttk.Label(f_out, text="应用名称:").grid(row=1, column=0, sticky=W, pady=5)
-        ttk.Entry(f_out, textvariable=self.var_outname).grid(row=1, column=1, sticky=EW, padx=5)
+        ttk.Entry(f_out, textvariable=self.var_outname).grid(row=1, column=1, sticky=EW, padx=5, pady=5)
         
         ttk.Label(f_out, text="应用图标:").grid(row=2, column=0, sticky=W, pady=5)
-        ttk.Entry(f_out, textvariable=self.var_icon).grid(row=2, column=1, sticky=EW, padx=5)
-        ttk.Button(f_out, text="浏览...", command=self.browse_icon).grid(row=2, column=2)
+        ttk.Entry(f_out, textvariable=self.var_icon).grid(row=2, column=1, sticky=EW, padx=5, pady=5)
+        ttk.Button(f_out, text="浏览...", command=self.browse_icon).grid(row=2, column=2, pady=5)
         f_out.columnconfigure(1, weight=1)
 
         f_opt = ttk.Labelframe(self.tab_basic, text="核心模式", padding=10)
@@ -137,21 +140,21 @@ class PyInstallerGUI(ttk.Window):
         f_data.pack(fill=X, pady=10, padx=10)
         
         ttk.Label(f_data, text="附加数据:").grid(row=0, column=0, sticky=W, pady=5)
-        ttk.Entry(f_data, textvariable=self.var_add_data).grid(row=0, column=1, sticky=EW, padx=5)
-        ttk.Button(f_data, text="添加...", command=self.browse_add_data).grid(row=0, column=2)
+        ttk.Entry(f_data, textvariable=self.var_add_data).grid(row=0, column=1, sticky=EW, padx=5, pady=5)
+        ttk.Button(f_data, text="添加...", command=self.browse_add_data).grid(row=0, column=2, pady=5)
         
         ttk.Label(f_data, text="隐式导入:").grid(row=1, column=0, sticky=W, pady=5)
-        ttk.Entry(f_data, textvariable=self.var_hidden_imports).grid(row=1, column=1, columnspan=2, sticky=EW, padx=5)
+        ttk.Entry(f_data, textvariable=self.var_hidden_imports).grid(row=1, column=1, columnspan=2, sticky=EW, padx=5, pady=5)
 
         ttk.Label(f_data, text="排除模块:").grid(row=2, column=0, sticky=W, pady=5)
-        ttk.Entry(f_data, textvariable=self.var_exclude_modules).grid(row=2, column=1, columnspan=2, sticky=EW, padx=5)
+        ttk.Entry(f_data, textvariable=self.var_exclude_modules).grid(row=2, column=1, columnspan=2, sticky=EW, padx=5, pady=5)
         f_data.columnconfigure(1, weight=1)
 
         f_build = ttk.Labelframe(self.tab_advanced, text="构建参数", padding=10)
         f_build.pack(fill=X, pady=5, padx=10)
-        ttk.Checkbutton(f_build, text="打包后清理临时文件 (--clean)", variable=self.var_clean).pack(anchor=W, pady=2)
-        ttk.Checkbutton(f_build, text="使用 UPX 极致压缩 (--upx-dir)", variable=self.var_upx).pack(anchor=W, pady=2)
-        ttk.Checkbutton(f_build, text="请求管理员权限 (Windows 提权)", variable=self.var_uac).pack(anchor=W, pady=2)
+        ttk.Checkbutton(f_build, text="打包后清理临时文件 (--clean)", variable=self.var_clean).pack(anchor=W, pady=3)
+        ttk.Checkbutton(f_build, text="使用 UPX 极致压缩 (--upx-dir)", variable=self.var_upx).pack(anchor=W, pady=3)
+        ttk.Checkbutton(f_build, text="请求管理员权限 (Windows 提权)", variable=self.var_uac).pack(anchor=W, pady=3)
 
     def _build_env_tab(self):
         f_env = ttk.Labelframe(self.tab_env, text="沙盒隔离打包 (极限压缩体积)", padding=20)
@@ -159,7 +162,10 @@ class PyInstallerGUI(ttk.Window):
         
         desc = ("建议启用【纯净虚拟环境】！工具会在后台创建一个隔离的沙盒，"
                 "并仅安装必要的依赖进行打包，彻底杜绝生成的 exe 体积臃肿问题。")
-        ttk.Label(f_env, text=desc, wraplength=700).pack(anchor=W, pady=(0, 15))
+        # 优化点 4：绑定 <Configure> 事件实现文字动态适应换行
+        desc_lbl = ttk.Label(f_env, text=desc, justify=LEFT)
+        desc_lbl.pack(anchor=W, pady=(0, 15), fill=X)
+        desc_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width))
         
         ttk.Checkbutton(f_env, text="启用纯净虚拟环境打包 (.pack_venv)", variable=self.var_use_venv, bootstyle="success-round-toggle").pack(anchor=W, pady=(0, 15))
         
@@ -170,7 +176,6 @@ class PyInstallerGUI(ttk.Window):
         ttk.Button(row, text="浏览...", command=self.browse_req).pack(side=LEFT, padx=(0, 5))
 
     def _build_about_tab(self):
-        # 使用说明
         f_guide = ttk.Labelframe(self.tab_about, text="💡 软件使用说明", padding=15)
         f_guide.pack(fill=X, pady=10, padx=20)
         
@@ -180,18 +185,21 @@ class PyInstallerGUI(ttk.Window):
             "3. 解决报错：如果打包生成的软件在运行时闪退并提示 'ModuleNotFoundError'，请在【🛠️ 高级设置】的“隐式导入”中填入报错缺失的模块名，然后重新打包即可解决。\n\n"
             "4. 一键执行：配置完成后，点击右下角按钮，静待终端输出“🎉 打包圆满完成”的提示即可提取软件。"
         )
-        ttk.Label(f_guide, text=guide_text, wraplength=700, justify=LEFT).pack(anchor=W)
+        guide_lbl = ttk.Label(f_guide, text=guide_text, justify=LEFT)
+        guide_lbl.pack(anchor=W, fill=X)
+        guide_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width)) # 动态换行
 
-        # 作者信息
         f_author = ttk.Labelframe(self.tab_about, text="👨‍💻 关于作者", padding=15)
         f_author.pack(fill=X, pady=10, padx=20)
         
         author_text = (
             "开发与维护：俞晋全\n"
-            "个人博客：硫酸铜的遐想\n\n"
+            "个人博客：电子云\n\n"
             "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。无论是开发日常的教学辅助脚本、成绩统计分析软件，还是复杂的应用系统，都能通过自动化的沙盒纯净打包机制，彻底告别环境污染和软件体积臃肿的烦恼。"
         )
-        ttk.Label(f_author, text=author_text, wraplength=700, justify=LEFT).pack(anchor=W)
+        author_lbl = ttk.Label(f_author, text=author_text, justify=LEFT)
+        author_lbl.pack(anchor=W, fill=X)
+        author_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width)) # 动态换行
 
     # --- 主题与配置 ---
     def toggle_theme(self):
