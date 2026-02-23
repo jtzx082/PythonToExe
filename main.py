@@ -193,8 +193,8 @@ class PyInstallerGUI(ttk.Window):
         f_author.pack(fill=X, pady=10, padx=20)
         
         author_text = (
-            "开发与维护：俞晋全\n"
-            "个人博客：电子云\n\n"
+            "开发与维护：JinQuan Yu\n"
+            "个人博客：硫酸铜的遐想\n\n"
             "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。无论是开发日常的教学辅助脚本、成绩统计分析软件，还是复杂的应用系统，都能通过自动化的沙盒纯净打包机制，彻底告别环境污染和软件体积臃肿的烦恼。"
         )
         author_lbl = ttk.Label(f_author, text=author_text, justify=LEFT)
