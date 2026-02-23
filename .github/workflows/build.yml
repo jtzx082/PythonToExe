@@ -3,7 +3,7 @@ name: Cross-Platform Build
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # 允许在 GitHub Actions 页面手动触发构建
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -31,21 +31,21 @@ jobs:
 
     - name: Build executable with PyInstaller
       run: |
-        # 这里的 --hidden-import 是关键，它强制让 GitHub 服务器在编译此工具本身时，带上底层界面的图像依赖库
-        pyinstaller -F -w --hidden-import="PIL._tkinter_finder" -n PyInstaller-GUI-v5 main.py
+        # 强制添加 GUI 图像依赖的隐式导入，确保云端交叉编译的成功率
+        pyinstaller -F -w --hidden-import="PIL._tkinter_finder" -n PyInstaller-GUI-Final main.py
 
     - name: Prepare Artifacts (Linux / Windows)
       if: runner.os != 'macOS'
       run: |
         mkdir -p release
-        cp dist/PyInstaller-GUI-v5* release/
+        cp dist/PyInstaller-GUI-Final* release/
 
     - name: Prepare Artifacts (macOS)
       if: runner.os == 'macOS'
       run: |
         mkdir -p release
         cd dist
-        tar -czf ../release/PyInstaller-GUI-v5-macOS.tar.gz PyInstaller-GUI-v5.app
+        tar -czf ../release/PyInstaller-GUI-Final-macOS.tar.gz PyInstaller-GUI-Final.app
         cd ..
 
     - name: Upload Artifacts
