@@ -16,7 +16,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.5 (视觉自适应版)")
+        self.title("PyInstaller 打包工具 v5.6 (完美典藏版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -65,7 +65,6 @@ class PyInstallerGUI(ttk.Window):
         ttk.Label(toolbar, text="🚀 Python GUI & 脚本自动化打包引擎", font=("", 12, "bold")).pack(side=LEFT)
         ttk.Button(toolbar, text="🌓 切换主题", bootstyle=(SECONDARY, OUTLINE), command=self.toggle_theme).pack(side=RIGHT)
 
-        # 优化点 1：将 notebook 的 expand 设为 False，让它紧密包裹内容，不再垂直拉伸留白
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill=BOTH, expand=False, padx=10, pady=10)
         
@@ -84,7 +83,6 @@ class PyInstallerGUI(ttk.Window):
         self._build_env_tab()
         self._build_about_tab()
 
-        # 优化点 2：底部区域 expand=True，最大化时日志终端将接管所有多余空间
         bottom_frame = ttk.Frame(self)
         bottom_frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
         
@@ -93,6 +91,10 @@ class PyInstallerGUI(ttk.Window):
         
         self.btn_open_dir = ttk.Button(btn_bar, text="打开输出目录", bootstyle=INFO, state=DISABLED, command=self.open_output_dir)
         self.btn_open_dir.pack(side=LEFT)
+        
+        # 新增：一键清空按钮
+        self.btn_clear = ttk.Button(btn_bar, text="🧹 一键清空", bootstyle=(SECONDARY, OUTLINE), command=self.clear_all_inputs)
+        self.btn_clear.pack(side=LEFT, padx=(10, 0))
         
         self.btn_cancel = ttk.Button(btn_bar, text="取消操作", bootstyle=DANGER, command=self.cancel_process, state=DISABLED)
         self.btn_cancel.pack(side=RIGHT, padx=(5, 0))
@@ -117,7 +119,6 @@ class PyInstallerGUI(ttk.Window):
         f_out = ttk.Labelframe(self.tab_basic, text="输出与外观 (可选)", padding=10)
         f_out.pack(fill=X, pady=5, padx=10)
         
-        # 优化点 3：增加 pady=5，让表格布局更有呼吸感，避免拥挤
         ttk.Label(f_out, text="输出目录:").grid(row=0, column=0, sticky=W, pady=5)
         ttk.Entry(f_out, textvariable=self.var_outdir, bootstyle="info").grid(row=0, column=1, sticky=EW, padx=5, pady=5)
         ttk.Button(f_out, text="浏览...", command=self.browse_outdir).grid(row=0, column=2, pady=5)
@@ -162,7 +163,6 @@ class PyInstallerGUI(ttk.Window):
         
         desc = ("建议启用【纯净虚拟环境】！工具会在后台创建一个隔离的沙盒，"
                 "并仅安装必要的依赖进行打包，彻底杜绝生成的 exe 体积臃肿问题。")
-        # 优化点 4：绑定 <Configure> 事件实现文字动态适应换行
         desc_lbl = ttk.Label(f_env, text=desc, justify=LEFT)
         desc_lbl.pack(anchor=W, pady=(0, 15), fill=X)
         desc_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width))
@@ -187,21 +187,21 @@ class PyInstallerGUI(ttk.Window):
         )
         guide_lbl = ttk.Label(f_guide, text=guide_text, justify=LEFT)
         guide_lbl.pack(anchor=W, fill=X)
-        guide_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width)) # 动态换行
+        guide_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width)) 
 
         f_author = ttk.Labelframe(self.tab_about, text="👨‍💻 关于作者", padding=15)
         f_author.pack(fill=X, pady=10, padx=20)
         
         author_text = (
-            "开发与维护：JinQuan Yu\n"
-            "个人博客：硫酸铜的遐想\n\n"
+            "开发与维护：俞晋全\n"
+            "个人博客：电子云\n\n"
             "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。无论是开发日常的教学辅助脚本、成绩统计分析软件，还是复杂的应用系统，都能通过自动化的沙盒纯净打包机制，彻底告别环境污染和软件体积臃肿的烦恼。"
         )
         author_lbl = ttk.Label(f_author, text=author_text, justify=LEFT)
         author_lbl.pack(anchor=W, fill=X)
-        author_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width)) # 动态换行
+        author_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width)) 
 
-    # --- 主题与配置 ---
+    # --- 界面控制与配置 ---
     def toggle_theme(self):
         if self.current_theme == "lumen":
             self.style.theme_use("cyborg")
@@ -217,6 +217,31 @@ class PyInstallerGUI(ttk.Window):
             elif sys.platform == "darwin": subprocess.Popen(["open", out_dir])
             else: subprocess.Popen(["xdg-open", out_dir])
         else: messagebox.showwarning("提示", "输出目录不存在！")
+
+    def clear_all_inputs(self):
+        """一键清空所有输入框和选项，恢复初始状态"""
+        if messagebox.askyesno("确认清空", "确定要清空当前所有填写的路径和配置参数吗？\n(此操作方便您准备打包下一个新项目)"):
+            # 清空文本路径
+            self.var_req.set("")
+            self.var_script.set("")
+            self.var_outdir.set("")
+            self.var_outname.set("")
+            self.var_icon.set("")
+            self.var_add_data.set("")
+            self.var_hidden_imports.set("")
+            self.var_exclude_modules.set("")
+            
+            # 恢复默认勾选项
+            self.var_onefile.set(True)
+            self.var_console.set(True)
+            self.var_clean.set(True)
+            self.var_use_venv.set(True)
+            self.var_upx.set(False)
+            self.var_uac.set(False)
+            
+            # 清空控制台
+            self.console_text.delete(1.0, END)
+            self.log_console("✨ 所有配置已清空，您可以开始配置下一个打包项目了。\n")
 
     def get_current_config(self):
         return {
@@ -309,6 +334,7 @@ class PyInstallerGUI(ttk.Window):
         self.btn_start.config(state=DISABLED)
         self.btn_cancel.config(state=NORMAL)
         self.btn_open_dir.config(state=DISABLED)
+        self.btn_clear.config(state=DISABLED) # 打包时锁定清空按钮
         self.progress.start(10)
 
     def _unlock_ui(self):
@@ -316,6 +342,7 @@ class PyInstallerGUI(ttk.Window):
         self.btn_start.config(state=NORMAL)
         self.btn_cancel.config(state=DISABLED)
         self.btn_open_dir.config(state=NORMAL) 
+        self.btn_clear.config(state=NORMAL) # 恢复清空按钮
         self.process = None
 
     def start_build_thread(self):
