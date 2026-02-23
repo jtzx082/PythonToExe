@@ -31,8 +31,8 @@ jobs:
 
     - name: Build executable with PyInstaller
       run: |
-        # 将我们写的 main.py 自身打包为无控制台的独立程序
-        pyinstaller -F -w -n PyInstaller-GUI-v4 main.py
+        # 将我们写的 main.py 自身打包为无控制台的独立程序，并强制打包隐式依赖
+        pyinstaller -F -w --hidden-import="PIL._tkinter_finder" -n PyInstaller-GUI-v4 main.py
 
     - name: Prepare Artifacts (Linux / Windows)
       if: runner.os != 'macOS'
