@@ -1,4 +1,4 @@
-# 🚀 PyInstaller GUI 自动化打包引擎 v5.0
+# 🚀 PyInstaller GUI 自动化打包引擎 v5.4
 
 一个基于 `ttkbootstrap` 开发的跨平台 PyInstaller 图形化界面工具。
 告别繁琐的命令行参数，通过直观的 UI 界面，一键将您的 Python 脚本打包为 Windows、macOS 和 Linux 下的独立可执行文件。
