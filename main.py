@@ -16,7 +16,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.6 (完美典藏版)")
+        self.title("PyInstaller 打包工具 v5.8 (架构自适应版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -45,9 +45,12 @@ class PyInstallerGUI(ttk.Window):
         
         self.var_add_data = tk.StringVar()
         self.var_hidden_imports = tk.StringVar()
+        self.var_collect_all = tk.StringVar() 
         self.var_exclude_modules = tk.StringVar()
         
         self.var_use_venv = tk.BooleanVar(value=True) 
+        # 新增：允许沙盒继承系统全局库
+        self.var_venv_sys = tk.BooleanVar(value=False) 
 
     def _create_menu(self):
         menubar = tk.Menu(self)
@@ -92,7 +95,6 @@ class PyInstallerGUI(ttk.Window):
         self.btn_open_dir = ttk.Button(btn_bar, text="打开输出目录", bootstyle=INFO, state=DISABLED, command=self.open_output_dir)
         self.btn_open_dir.pack(side=LEFT)
         
-        # 新增：一键清空按钮
         self.btn_clear = ttk.Button(btn_bar, text="🧹 一键清空", bootstyle=(SECONDARY, OUTLINE), command=self.clear_all_inputs)
         self.btn_clear.pack(side=LEFT, padx=(10, 0))
         
@@ -147,8 +149,11 @@ class PyInstallerGUI(ttk.Window):
         ttk.Label(f_data, text="隐式导入:").grid(row=1, column=0, sticky=W, pady=5)
         ttk.Entry(f_data, textvariable=self.var_hidden_imports).grid(row=1, column=1, columnspan=2, sticky=EW, padx=5, pady=5)
 
-        ttk.Label(f_data, text="排除模块:").grid(row=2, column=0, sticky=W, pady=5)
-        ttk.Entry(f_data, textvariable=self.var_exclude_modules).grid(row=2, column=1, columnspan=2, sticky=EW, padx=5, pady=5)
+        ttk.Label(f_data, text="全量收集包:").grid(row=2, column=0, sticky=W, pady=5)
+        ttk.Entry(f_data, textvariable=self.var_collect_all).grid(row=2, column=1, columnspan=2, sticky=EW, padx=5, pady=5)
+
+        ttk.Label(f_data, text="排除模块:").grid(row=3, column=0, sticky=W, pady=5)
+        ttk.Entry(f_data, textvariable=self.var_exclude_modules).grid(row=3, column=1, columnspan=2, sticky=EW, padx=5, pady=5)
         f_data.columnconfigure(1, weight=1)
 
         f_build = ttk.Labelframe(self.tab_advanced, text="构建参数", padding=10)
@@ -161,29 +166,48 @@ class PyInstallerGUI(ttk.Window):
         f_env = ttk.Labelframe(self.tab_env, text="沙盒隔离打包 (极限压缩体积)", padding=20)
         f_env.pack(fill=X, pady=20, padx=20)
         
-        desc = ("建议启用【纯净虚拟环境】！工具会在后台创建一个隔离的沙盒，"
-                "并仅安装必要的依赖进行打包，彻底杜绝生成的 exe 体积臃肿问题。")
+        desc = ("建议启用【纯净虚拟环境】！工具会在后台创建一个隔离的沙盒并静默安装依赖。\n"
+                "如果您在 ARM 架构系统运行，或项目包含极其庞大的 C++ 底层库（如 OpenCV, Pygame 等），建议勾选“允许继承全局库”。")
         desc_lbl = ttk.Label(f_env, text=desc, justify=LEFT)
         desc_lbl.pack(anchor=W, pady=(0, 15), fill=X)
         desc_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width))
         
-        ttk.Checkbutton(f_env, text="启用纯净虚拟环境打包 (.pack_venv)", variable=self.var_use_venv, bootstyle="success-round-toggle").pack(anchor=W, pady=(0, 15))
+        # 沙盒主开关
+        self.cb_venv = ttk.Checkbutton(f_env, text="启用纯净虚拟环境打包 (.pack_venv)", variable=self.var_use_venv, bootstyle="success-round-toggle", command=self._toggle_sys_pkg)
+        self.cb_venv.pack(anchor=W, pady=(0, 5))
+        
+        # 混合沙盒开关 (架构自适应神器)
+        self.cb_sys_pkg = ttk.Checkbutton(f_env, text="↳ 允许继承全局库 (混合模式：专治 ARM 架构/复杂 C++ 依赖编译报错)", variable=self.var_venv_sys)
+        self.cb_sys_pkg.pack(anchor=W, padx=25, pady=(0, 15))
         
         row = ttk.Frame(f_env)
         row.pack(fill=X)
         ttk.Label(row, text="指定专属依赖 (requirements.txt):").pack(side=LEFT)
         ttk.Entry(row, textvariable=self.var_req).pack(side=LEFT, fill=X, expand=True, padx=5)
         ttk.Button(row, text="浏览...", command=self.browse_req).pack(side=LEFT, padx=(0, 5))
+        
+        self._toggle_sys_pkg() # 初始化状态
+
+    def _toggle_sys_pkg(self):
+        """控制系统包继承复选框的可用状态"""
+        if self.var_use_venv.get():
+            self.cb_sys_pkg.config(state=NORMAL)
+        else:
+            self.cb_sys_pkg.config(state=DISABLED)
 
     def _build_about_tab(self):
         f_guide = ttk.Labelframe(self.tab_about, text="💡 软件使用说明", padding=15)
         f_guide.pack(fill=X, pady=10, padx=20)
         
         guide_text = (
-            "1. 基础配置：选择您编写的 Python 主程序 (.py/.pyw 文件)。如果是带有图形界面的程序，建议保持勾选“隐藏控制台黑框”。\n\n"
-            "2. 极限压缩（推荐）：切换到【🌱 依赖与隔离环境】标签页，勾选“启用纯净虚拟环境”。如果代码使用了第三方库，请务必指定 requirements.txt 文件。工具将在沙盒中独立打包，杜绝体积臃肿。\n\n"
-            "3. 解决报错：如果打包生成的软件在运行时闪退并提示 'ModuleNotFoundError'，请在【🛠️ 高级设置】的“隐式导入”中填入报错缺失的模块名，然后重新打包即可解决。\n\n"
-            "4. 一键执行：配置完成后，点击右下角按钮，静待终端输出“🎉 打包圆满完成”的提示即可提取软件。"
+            "1. 基础配置：选择您的 Python 主程序。如果带界面，建议勾选“隐藏控制台黑框”。\n\n"
+            "2. 沙盒机制：在【🌱 依赖与隔离环境】中勾选“纯净虚拟环境”，杜绝软件体积臃肿。\n"
+            "   ⚠️ AMD / Intel 架构：仅勾选纯净沙盒即可完美打包。\n"
+            "   ⚠️ ARM 架构 (或强依赖库)：务必同时勾选“允许继承全局库”，避免沙盒内 C++ 现场编译报错。\n\n"
+            "3. 解决报错神技：\n"
+            "   • 报 ModuleNotFoundError: 在“隐式导入”填入缺失模块。\n"
+            "   • 报 DLL / 核心库缺失 (如 Azure, OpenCV): 在“全量收集包”中填入对应库名，强制打包底层库！\n\n"
+            "4. 一键执行：点击打包，静待“🎉 打包圆满完成”即可。"
         )
         guide_lbl = ttk.Label(f_guide, text=guide_text, justify=LEFT)
         guide_lbl.pack(anchor=W, fill=X)
@@ -195,7 +219,7 @@ class PyInstallerGUI(ttk.Window):
         author_text = (
             "开发与维护：俞晋全\n"
             "个人博客：电子云\n\n"
-            "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。无论是开发日常的教学辅助脚本、成绩统计分析软件，还是复杂的应用系统，都能通过自动化的沙盒纯净打包机制，彻底告别环境污染和软件体积臃肿的烦恼。"
+            "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。具有混合架构自适应编译能力，彻底告别环境污染和底层 DLL 丢失烦恼。"
         )
         author_lbl = ttk.Label(f_author, text=author_text, justify=LEFT)
         author_lbl.pack(anchor=W, fill=X)
@@ -219,9 +243,7 @@ class PyInstallerGUI(ttk.Window):
         else: messagebox.showwarning("提示", "输出目录不存在！")
 
     def clear_all_inputs(self):
-        """一键清空所有输入框和选项，恢复初始状态"""
         if messagebox.askyesno("确认清空", "确定要清空当前所有填写的路径和配置参数吗？\n(此操作方便您准备打包下一个新项目)"):
-            # 清空文本路径
             self.var_req.set("")
             self.var_script.set("")
             self.var_outdir.set("")
@@ -229,17 +251,18 @@ class PyInstallerGUI(ttk.Window):
             self.var_icon.set("")
             self.var_add_data.set("")
             self.var_hidden_imports.set("")
+            self.var_collect_all.set("")
             self.var_exclude_modules.set("")
             
-            # 恢复默认勾选项
             self.var_onefile.set(True)
             self.var_console.set(True)
             self.var_clean.set(True)
             self.var_use_venv.set(True)
+            self.var_venv_sys.set(False)
             self.var_upx.set(False)
             self.var_uac.set(False)
+            self._toggle_sys_pkg()
             
-            # 清空控制台
             self.console_text.delete(1.0, END)
             self.log_console("✨ 所有配置已清空，您可以开始配置下一个打包项目了。\n")
 
@@ -248,10 +271,11 @@ class PyInstallerGUI(ttk.Window):
             "req_path": self.var_req.get(), "script_path": self.var_script.get(),
             "outdir": self.var_outdir.get(), "outname": self.var_outname.get(),
             "icon": self.var_icon.get(), "add_data": self.var_add_data.get(),
-            "hidden_imports": self.var_hidden_imports.get(), "exclude_modules": self.var_exclude_modules.get(),
+            "hidden_imports": self.var_hidden_imports.get(), "collect_all": self.var_collect_all.get(),
+            "exclude_modules": self.var_exclude_modules.get(),
             "onefile": self.var_onefile.get(), "console": self.var_console.get(),
             "clean": self.var_clean.get(), "upx": self.var_upx.get(), "uac": self.var_uac.get(),
-            "use_venv": self.var_use_venv.get()
+            "use_venv": self.var_use_venv.get(), "use_venv_sys": self.var_venv_sys.get()
         }
 
     def save_config(self, filepath, silent=False):
@@ -271,6 +295,7 @@ class PyInstallerGUI(ttk.Window):
             self.var_icon.set(cfg.get("icon", ""))
             self.var_add_data.set(cfg.get("add_data", ""))
             self.var_hidden_imports.set(cfg.get("hidden_imports", ""))
+            self.var_collect_all.set(cfg.get("collect_all", ""))
             self.var_exclude_modules.set(cfg.get("exclude_modules", ""))
             self.var_onefile.set(cfg.get("onefile", True))
             self.var_console.set(cfg.get("console", True)) 
@@ -278,6 +303,8 @@ class PyInstallerGUI(ttk.Window):
             self.var_upx.set(cfg.get("upx", False))
             self.var_uac.set(cfg.get("uac", False))
             self.var_use_venv.set(cfg.get("use_venv", True))
+            self.var_venv_sys.set(cfg.get("use_venv_sys", False))
+            self._toggle_sys_pkg()
         except: pass
 
     def export_config(self):
@@ -334,7 +361,7 @@ class PyInstallerGUI(ttk.Window):
         self.btn_start.config(state=DISABLED)
         self.btn_cancel.config(state=NORMAL)
         self.btn_open_dir.config(state=DISABLED)
-        self.btn_clear.config(state=DISABLED) # 打包时锁定清空按钮
+        self.btn_clear.config(state=DISABLED) 
         self.progress.start(10)
 
     def _unlock_ui(self):
@@ -342,7 +369,7 @@ class PyInstallerGUI(ttk.Window):
         self.btn_start.config(state=NORMAL)
         self.btn_cancel.config(state=DISABLED)
         self.btn_open_dir.config(state=NORMAL) 
-        self.btn_clear.config(state=NORMAL) # 恢复清空按钮
+        self.btn_clear.config(state=NORMAL) 
         self.process = None
 
     def start_build_thread(self):
@@ -381,9 +408,15 @@ class PyInstallerGUI(ttk.Window):
         
         if self.var_use_venv.get():
             venv_dir = os.path.join(script_dir, ".pack_venv")
-            self.log_console(f"🌱 [阶段 1/2] 正在调用系统环境构建纯净沙盒...\n路径: {venv_dir}\n")
+            self.log_console(f"🌱 [阶段 1/2] 正在调用系统环境构建隔离沙盒...\n")
             
-            if not self._run_cmd_blocking([system_python, "-m", "venv", venv_dir, "--clear"]):
+            # 【核心优化】：根据是否允许继承全局库，动态添加 --system-site-packages 参数
+            venv_cmd = [system_python, "-m", "venv", venv_dir, "--clear"]
+            if self.var_venv_sys.get():
+                venv_cmd.append("--system-site-packages")
+                self.log_console("🔧 混合模式已开启：沙盒将继承全局底层库 (适配 ARM/复杂环境)\n")
+            
+            if not self._run_cmd_blocking(venv_cmd):
                 self.log_console("\n❌ 虚拟环境创建失败！\n(提示: Ubuntu 等 Linux 系统请确保已通过终端执行过 sudo apt install python3-venv)\n")
                 self.after(0, self._unlock_ui)
                 return
@@ -395,7 +428,7 @@ class PyInstallerGUI(ttk.Window):
                 v_python = os.path.join(venv_dir, "bin", "python")
                 pyinstaller_exe = os.path.join(venv_dir, "bin", "pyinstaller")
                 
-            self.log_console("\n📦 正在沙盒中静默安装 PyInstaller 核心库...\n")
+            self.log_console("\n📦 正在沙盒中静默安装/校验 PyInstaller 核心库...\n")
             if not self._run_cmd_blocking([v_python, "-m", "pip", "install", "pyinstaller"]):
                 self.log_console("\n❌ 核心库安装失败，终止打包。\n")
                 self.after(0, self._unlock_ui)
@@ -403,7 +436,7 @@ class PyInstallerGUI(ttk.Window):
                 
             req_path = self.var_req.get()
             if req_path and os.path.exists(req_path):
-                self.log_console(f"\n📥 正在沙盒中注入专属依赖 ({os.path.basename(req_path)})...\n")
+                self.log_console(f"\n📥 正在沙盒中处理专属依赖 ({os.path.basename(req_path)})...\n")
                 if not self._run_cmd_blocking([v_python, "-m", "pip", "install", "-r", req_path]):
                     self.log_console("\n❌ 专属依赖安装失败，终止打包。\n")
                     self.after(0, self._unlock_ui)
@@ -435,6 +468,11 @@ class PyInstallerGUI(ttk.Window):
             for imp in hidden_imports.replace(" ", "").split(","):
                 if imp and imp not in default_hidden: 
                     cmd.extend(["--hidden-import", imp])
+        
+        collect_all = self.var_collect_all.get().strip()
+        if collect_all:
+            for pkg in collect_all.replace(" ", "").split(","):
+                if pkg: cmd.extend(["--collect-all", pkg])
                 
         exclude_modules = self.var_exclude_modules.get().strip()
         if exclude_modules:
