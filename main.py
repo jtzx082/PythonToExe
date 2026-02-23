@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import shutil
 import subprocess
 import threading
 import multiprocessing
@@ -15,7 +16,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.1 (纯净环境稳定版)")
+        self.title("PyInstaller 打包工具 v5.2 (智能防错终极版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -255,6 +256,16 @@ class PyInstallerGUI(ttk.Window):
             sep = ";" if os.name == 'nt' else ":"
             self.var_add_data.set(f"{self.var_add_data.get()} {p}{sep}{os.path.basename(p)}".strip())
 
+    # --- 环境自检逻辑 (新增) ---
+    def get_system_python(self):
+        """智能检测当前系统是否存在 Python 环境"""
+        if os.name == 'nt':
+            return "python" if shutil.which("python") else None
+        else:
+            if shutil.which("python3"): return "python3"
+            if shutil.which("python"): return "python"
+            return None
+
     # --- 核心打包逻辑 ---
     def log_console(self, text):
         self.console_text.insert(END, text)
@@ -274,16 +285,26 @@ class PyInstallerGUI(ttk.Window):
         self.process = None
 
     def start_build_thread(self):
+        # 1. 基础校验
         if not self.var_script.get():
             messagebox.showwarning("警告", "请先在基础配置中选择需要打包的 Python 脚本！")
             return
+            
+        # 2. 核心防御：环境自检拦截
+        sys_python = self.get_system_python()
+        if not sys_python:
+            messagebox.showerror(
+                "环境缺失", 
+                "⚠️ 未检测到本机的 Python 环境！\n\n本工具依赖底层 Python 解释器运行打包逻辑，请先在此电脑上安装 Python 并配置环境变量。"
+            )
+            return
+
         self._lock_ui()
         self.console_text.delete(1.0, END)
         self.save_config(AUTO_CONFIG_FILE, silent=True) 
-        threading.Thread(target=self._run_build_pipeline, daemon=True).start()
+        threading.Thread(target=self._run_build_pipeline, args=(sys_python,), daemon=True).start()
 
     def _run_cmd_blocking(self, cmd):
-        """执行系统命令并阻塞等待，返回执行是否成功"""
         try:
             kwargs = {}
             if os.name == 'nt': kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
@@ -295,15 +316,13 @@ class PyInstallerGUI(ttk.Window):
             self.log_console(f"\n❌ 执行异常: {str(e)}\n")
             return False
 
-    def _run_build_pipeline(self):
+    def _run_build_pipeline(self, system_python):
         script_dir = os.path.dirname(self.var_script.get())
         pyinstaller_exe = "pyinstaller"
         
         # 【阶段一：虚拟环境准备】
         if self.var_use_venv.get():
             venv_dir = os.path.join(script_dir, ".pack_venv")
-            # 强制调用系统底层 python 以防打包程序套娃死循环
-            system_python = "python" if os.name == 'nt' else "python3"
             self.log_console(f"🌱 [阶段 1/2] 正在调用系统环境构建纯净沙盒...\n路径: {venv_dir}\n")
             
             if not self._run_cmd_blocking([system_python, "-m", "venv", venv_dir, "--clear"]):
@@ -311,7 +330,6 @@ class PyInstallerGUI(ttk.Window):
                 self.after(0, self._unlock_ui)
                 return
                 
-            # 根据系统适配执行路径
             if sys.platform == "win32":
                 v_python = os.path.join(venv_dir, "Scripts", "python.exe")
                 pyinstaller_exe = os.path.join(venv_dir, "Scripts", "pyinstaller.exe")
@@ -351,10 +369,16 @@ class PyInstallerGUI(ttk.Window):
         if add_data:
             for data in add_data.split(): cmd.extend(["--add-data", data])
                 
+        # 智能隐式导入 (自动补全防崩溃模块)
+        default_hidden = ["PIL._tkinter_finder"]
+        for d_imp in default_hidden:
+            cmd.extend(["--hidden-import", d_imp])
+            
         hidden_imports = self.var_hidden_imports.get().strip()
         if hidden_imports:
             for imp in hidden_imports.replace(" ", "").split(","):
-                if imp: cmd.extend(["--hidden-import", imp])
+                if imp and imp not in default_hidden: 
+                    cmd.extend(["--hidden-import", imp])
                 
         exclude_modules = self.var_exclude_modules.get().strip()
         if exclude_modules:
@@ -378,8 +402,6 @@ class PyInstallerGUI(ttk.Window):
             self.log_console("\n🛑 正在强制终止进程...\n")
 
 if __name__ == "__main__":
-    # 防御性编程：防止打包为独立软件后发生子进程无限裂变套娃崩溃
     multiprocessing.freeze_support()
-    
     app = PyInstallerGUI()
     app.mainloop()
