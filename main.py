@@ -64,7 +64,7 @@ class PackagerApp(TkinterDnD_CTk):
         self.var_noconsole = ctk.BooleanVar(value=True)
         self.var_admin = ctk.BooleanVar(value=False)
         self.var_venv = ctk.BooleanVar(value=True)
-        self.var_auto_fix = ctk.BooleanVar(value=True) # 🌟 核心：智能修复开关
+        self.var_auto_fix = ctk.BooleanVar(value=True) 
         self.var_open_folder = ctk.BooleanVar(value=True)
 
         ctk.CTkCheckBox(grid_frame, text="单文件模式 (-F)", variable=self.var_onefile).grid(row=0, column=0, padx=(0, 20), pady=10, sticky="w")
@@ -193,13 +193,12 @@ class PackagerApp(TkinterDnD_CTk):
         except Exception as e:
             pass
 
-    # ================= 🌟 核心新功能：智能分析器 =================
+    # ================= 🌟 核心新功能：智能分析器 (彻底修复多重传参合并Bug) =================
     def smart_analyze_dependencies(self, script_path, req_path):
         """扫描代码，自动识别坑位，并返回需要补全的打包参数"""
-        auto_args = []
+        auto_args_set = set() # 🌟 使用 Set 存储 Tuple，防止键名覆盖！
         content = ""
         
-        # 1. 读取脚本和依赖文件
         if script_path and os.path.exists(script_path):
             try:
                 with open(script_path, 'r', encoding='utf-8') as f:
@@ -212,47 +211,38 @@ class PackagerApp(TkinterDnD_CTk):
                     content += "\n" + f.read()
             except Exception: pass
 
-        # 2. 🎯 专家级特征匹配 (强化版连坐机制 + Azure专属补丁)
-        
-        # 只要用了 ttkbootstrap，底层必定会调用 PIL 画图，必须强行带上补丁！
         if "ttkbootstrap" in content:
-            auto_args.extend([
-                "--collect-all", "ttkbootstrap",
-                "--hidden-import", "PIL._tkinter_finder"
-            ])
+            auto_args_set.add(("--collect-all", "ttkbootstrap"))
+            auto_args_set.add(("--hidden-import", "PIL._tkinter_finder"))
             
-        # customtkinter 同理，为了稳妥也加上
         if "customtkinter" in content:
-            auto_args.extend([
-                "--collect-all", "customtkinter",
-                "--hidden-import", "PIL._tkinter_finder"
-            ])
+            auto_args_set.add(("--collect-all", "customtkinter"))
+            auto_args_set.add(("--hidden-import", "PIL._tkinter_finder"))
 
-        # 如果直接导入了 PIL
         if "PIL" in content or "Pillow" in content or "pillow" in content:
-            auto_args.extend(["--hidden-import", "PIL._tkinter_finder"])
+            auto_args_set.add(("--hidden-import", "PIL._tkinter_finder"))
             
         if "tkinterdnd2" in content:
-            auto_args.extend(["--collect-all", "tkinterdnd2"])
+            auto_args_set.add(("--collect-all", "tkinterdnd2"))
             
-        # 文本转语音的超级大坑，必须把所有系统的底层发音驱动全包进去
         if "pyttsx3" in content:
-            auto_args.extend([
-                "--hidden-import", "pyttsx3.drivers", 
-                "--hidden-import", "pyttsx3.drivers.sapi5", 
-                "--hidden-import", "pyttsx3.drivers.nsss", 
-                "--hidden-import", "pyttsx3.drivers.dummy"
-            ])
+            auto_args_set.add(("--hidden-import", "pyttsx3.drivers"))
+            auto_args_set.add(("--hidden-import", "pyttsx3.drivers.sapi5"))
+            auto_args_set.add(("--hidden-import", "pyttsx3.drivers.nsss"))
+            auto_args_set.add(("--hidden-import", "pyttsx3.drivers.dummy"))
             
         if "pandas" in content:
-            auto_args.extend(["--hidden-import", "pandas._libs.tslibs.timedeltas"])
+            auto_args_set.add(("--hidden-import", "pandas._libs.tslibs.timedeltas"))
 
-        # 🔥 Azure 语音引擎终极防御：强制收集 C++ 底层动态库 (.so / .dll)
         if "azure.cognitiveservices.speech" in content or "azure" in content:
-            auto_args.extend(["--collect-all", "azure.cognitiveservices.speech"])
+            auto_args_set.add(("--collect-all", "azure.cognitiveservices.speech"))
 
-        # 去重并保持顺序
-        return list(dict.fromkeys(auto_args))
+        # 🌟 安全地将 Set 拆解为 PyInstaller 认识的平铺列表
+        final_args = []
+        for flag, val in auto_args_set:
+            final_args.extend([flag, val])
+            
+        return final_args
 
     def start_pack(self):
         self.btn_pack.configure(state="disabled", text="⏳ 打包进行中 (请勿关闭)...")
