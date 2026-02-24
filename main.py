@@ -21,10 +21,9 @@ ctk.set_default_color_theme("blue")
 class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Python脚本打包工具 - 终极纯净版")
-        # 稍微加大了整体窗口高度，配合新的宽敞布局
-        self.geometry("860x920")
-        self.minsize(800, 800)
+        self.title("Python脚本打包工具 - 智能守护版")
+        self.geometry("880x920")
+        self.minsize(820, 800)
 
         lbl_title = ctk.CTkLabel(self, text="Python脚本打包 “EXE” 工具", font=("Microsoft YaHei UI", 22, "bold"), text_color="#1f538d")
         lbl_title.pack(pady=(15, 10))
@@ -32,10 +31,9 @@ class PackagerApp(TkinterDnD_CTk):
         # ==================== 1. 文件与配置 ====================
         self.frame_files = ctk.CTkFrame(self, corner_radius=10)
         self.frame_files.pack(pady=5, padx=15, fill="x")
-        ctk.CTkLabel(self.frame_files, text="📁 核心配置 (支持拖拽文件输入)", font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=8, sticky="w")
+        ctk.CTkLabel(self.frame_files, text="📁 核心配置 (支持拖拽)", font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=8, sticky="w")
 
         self.entry_name = ctk.CTkEntry(self.frame_files, placeholder_text="可选: 自动提取或自定义程序名 (如: 我的软件)")
-        
         self.entry_script = self.create_file_row(self.frame_files, "选择脚本(*):", 1, "必须: 支持拖拽主 .py 文件", self.browse_script)
         self.entry_req = self.create_file_row(self.frame_files, "依赖文件:", 2, "可选: requirements.txt (自动安装依赖)", self.browse_req)
         
@@ -43,7 +41,7 @@ class PackagerApp(TkinterDnD_CTk):
         self.entry_name.grid(row=3, column=1, columnspan=2, padx=5, pady=6, sticky="ew")
 
         ctk.CTkLabel(self.frame_files, text="额外参数:").grid(row=4, column=0, padx=15, pady=6, sticky="e")
-        self.entry_extra = ctk.CTkEntry(self.frame_files, placeholder_text="可选: 输入额外的指令 (如: --hidden-import=PIL._tkinter_finder)")
+        self.entry_extra = ctk.CTkEntry(self.frame_files, placeholder_text="可选: 用户自定义指令 (有了智能修复，通常这里可留空)")
         self.entry_extra.grid(row=4, column=1, columnspan=2, padx=5, pady=6, sticky="ew")
         
         ctk.CTkFrame(self.frame_files, height=2, fg_color="gray80").grid(row=5, column=0, columnspan=3, sticky="ew", padx=15, pady=10)
@@ -52,14 +50,12 @@ class PackagerApp(TkinterDnD_CTk):
         self.entry_outdir = self.create_file_row(self.frame_files, "输出目录:", 7, "可选: 默认当前目录下的 dist 文件夹", self.browse_dir)
         self.entry_adddata = self.create_file_row(self.frame_files, "附加资源:", 8, "可选: 需要打包的额外文件/文件夹", self.browse_adddata)
 
-        # ==================== 2. 打包选项 (🔥排版全面优化) ====================
+        # ==================== 2. 打包选项 ====================
         self.frame_opts = ctk.CTkFrame(self, corner_radius=10)
         self.frame_opts.pack(pady=10, padx=15, fill="x")
         
-        # 标题栏
-        ctk.CTkLabel(self.frame_opts, text="⚙️ 环境与选项", font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(self.frame_opts, text="⚙️ 环境与智能选项", font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w", padx=15, pady=(10, 5))
 
-        # 内部选项网格化容器：增加呼吸感
         grid_frame = ctk.CTkFrame(self.frame_opts, fg_color="transparent")
         grid_frame.pack(fill="x", padx=15, pady=5)
 
@@ -67,18 +63,17 @@ class PackagerApp(TkinterDnD_CTk):
         self.var_noconsole = ctk.BooleanVar(value=True)
         self.var_admin = ctk.BooleanVar(value=False)
         self.var_venv = ctk.BooleanVar(value=True)
+        self.var_auto_fix = ctk.BooleanVar(value=True) # 🌟 核心：智能修复开关
         self.var_open_folder = ctk.BooleanVar(value=True)
 
-        # 第一行：基础参数 (加大了 padx 水平间距和 pady 垂直间距)
-        ctk.CTkCheckBox(grid_frame, text="单文件模式 (-F)", variable=self.var_onefile).grid(row=0, column=0, padx=(0, 40), pady=10, sticky="w")
-        ctk.CTkCheckBox(grid_frame, text="隐藏控制台 (-w)", variable=self.var_noconsole).grid(row=0, column=1, padx=(0, 40), pady=10, sticky="w")
+        ctk.CTkCheckBox(grid_frame, text="单文件模式 (-F)", variable=self.var_onefile).grid(row=0, column=0, padx=(0, 20), pady=10, sticky="w")
+        ctk.CTkCheckBox(grid_frame, text="隐藏控制台 (-w)", variable=self.var_noconsole).grid(row=0, column=1, padx=(0, 20), pady=10, sticky="w")
         ctk.CTkCheckBox(grid_frame, text="请求管理员权限", variable=self.var_admin).grid(row=0, column=2, padx=(0, 20), pady=10, sticky="w")
         
-        # 第二行：环境参数
-        ctk.CTkCheckBox(grid_frame, text="🟢 每次新建干净虚拟环境", variable=self.var_venv, text_color="green").grid(row=1, column=0, columnspan=2, padx=(0, 40), pady=10, sticky="w")
-        ctk.CTkCheckBox(grid_frame, text="📂 打包完自动打开目录", variable=self.var_open_folder, text_color="#1f538d").grid(row=1, column=2, padx=(0, 20), pady=10, sticky="w")
+        ctk.CTkCheckBox(grid_frame, text="🟢 每次新建干净环境", variable=self.var_venv, text_color="green").grid(row=1, column=0, padx=(0, 20), pady=10, sticky="w")
+        ctk.CTkCheckBox(grid_frame, text="🤖 智能防报错修复", variable=self.var_auto_fix, text_color="#d97706").grid(row=1, column=1, padx=(0, 20), pady=10, sticky="w")
+        ctk.CTkCheckBox(grid_frame, text="📂 打包完打开目录", variable=self.var_open_folder, text_color="#1f538d").grid(row=1, column=2, padx=(0, 20), pady=10, sticky="w")
 
-        # 排除模块独立容器
         adv_frame = ctk.CTkFrame(self.frame_opts, fg_color="transparent")
         adv_frame.pack(fill="x", padx=15, pady=(5, 15))
         ctk.CTkLabel(adv_frame, text="🚫 排除模块:").pack(side="left", padx=(0, 10))
@@ -89,7 +84,7 @@ class PackagerApp(TkinterDnD_CTk):
         self.frame_btns = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_btns.pack(pady=5, padx=20, fill="x")
 
-        self.btn_pack = ctk.CTkButton(self.frame_btns, text="🚀 开始纯净隔离打包", font=("Microsoft YaHei UI", 16, "bold"), fg_color="#28a745", hover_color="#218838", height=45, command=self.start_pack)
+        self.btn_pack = ctk.CTkButton(self.frame_btns, text="🚀 开始智能隔离打包", font=("Microsoft YaHei UI", 16, "bold"), fg_color="#28a745", hover_color="#218838", height=45, command=self.start_pack)
         self.btn_pack.pack(side="left", expand=True, fill="x", padx=(0, 10))
 
         ctk.CTkButton(self.frame_btns, text="🗑️ 清空日志", font=("Microsoft YaHei UI", 16), fg_color="#dc3545", hover_color="#c82333", height=45, width=120, command=self.clear_log).pack(side="right")
@@ -197,10 +192,53 @@ class PackagerApp(TkinterDnD_CTk):
         except Exception as e:
             pass
 
+    # ================= 🌟 核心新功能：智能分析器 =================
+    def smart_analyze_dependencies(self, script_path, req_path):
+        """扫描代码，自动识别坑位，并返回需要补全的打包参数"""
+        auto_args = []
+        content = ""
+        
+        # 1. 粗略读取脚本源码
+        if script_path and os.path.exists(script_path):
+            try:
+                with open(script_path, 'r', encoding='utf-8') as f:
+                    content += f.read()
+            except Exception: pass
+            
+        # 2. 读取 requirements.txt
+        if req_path and os.path.exists(req_path):
+            try:
+                with open(req_path, 'r', encoding='utf-8') as f:
+                    content += "\n" + f.read()
+            except Exception: pass
+
+        # 3. 专家级特征匹配：根据常见的易错库自动打补丁
+        if "ttkbootstrap" in content:
+            auto_args.extend(["--collect-all", "ttkbootstrap"])
+        if "PIL" in content or "Pillow" in content or "pillow" in content:
+            auto_args.extend(["--hidden-import", "PIL._tkinter_finder"])
+        if "customtkinter" in content:
+            auto_args.extend(["--collect-all", "customtkinter"])
+        if "tkinterdnd2" in content:
+            auto_args.extend(["--collect-all", "tkinterdnd2"])
+        if "pyttsx3" in content:
+            # pyttsx3 这个库非常坑，必须包含底层的驱动文件
+            auto_args.extend([
+                "--hidden-import", "pyttsx3.drivers", 
+                "--hidden-import", "pyttsx3.drivers.sapi5", 
+                "--hidden-import", "pyttsx3.drivers.nsss", 
+                "--hidden-import", "pyttsx3.drivers.dummy"
+            ])
+        if "pandas" in content:
+            auto_args.extend(["--hidden-import", "pandas._libs.tslibs.timedeltas"])
+
+        # 去重并保持顺序
+        return list(dict.fromkeys(auto_args))
+
     def start_pack(self):
         self.btn_pack.configure(state="disabled", text="⏳ 打包进行中 (请勿关闭)...")
         self.log("="*60)
-        self.log("🚀 开始全自动纯净打包流程...")
+        self.log("🚀 开始全自动智能打包流程...")
         threading.Thread(target=self.orchestrate_packaging, daemon=True).start()
 
     def orchestrate_packaging(self):
@@ -286,6 +324,16 @@ class PackagerApp(TkinterDnD_CTk):
                 for mod in excludes.split(","):
                     cmd.extend(["--exclude-module", mod.strip()])
 
+            # 🌟 核心触发：智能修复补丁
+            if self.var_auto_fix.get():
+                self.log("🤖 正在进行代码深度扫描，寻找常见报错库...")
+                smart_fixes = self.smart_analyze_dependencies(script, req_file)
+                if smart_fixes:
+                    self.log(f"✨ 检测到易错库，已自动注入免疫补丁: {' '.join(smart_fixes)}")
+                    cmd.extend(smart_fixes)
+                else:
+                    self.log("✨ 扫描完毕，代码很干净，无需补丁。")
+
             extra = self.entry_extra.get().strip()
             if extra:
                 cmd.extend(shlex.split(extra))
@@ -306,7 +354,7 @@ class PackagerApp(TkinterDnD_CTk):
             self.log(f"\n❌ 发生严重异常: {str(e)}")
             
         finally:
-            self.btn_pack.configure(state="normal", text="🚀 开始纯净隔离打包")
+            self.btn_pack.configure(state="normal", text="🚀 开始智能隔离打包")
             self.log("\n✨ 任务彻底结束，工具已释放！")
             self.bring_window_to_front()
 
