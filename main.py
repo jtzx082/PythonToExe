@@ -21,7 +21,7 @@ ctk.set_default_color_theme("blue")
 class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Python脚本打包工具 - 智能守护版")
+        self.title("Python脚本打包工具 - 智能守护终极版")
         self.geometry("860x920")
         self.minsize(800, 800)
 
@@ -212,7 +212,7 @@ class PackagerApp(TkinterDnD_CTk):
                     content += "\n" + f.read()
             except Exception: pass
 
-        # 2. 🎯 专家级特征匹配 (强化版连坐机制)
+        # 2. 🎯 专家级特征匹配 (强化版连坐机制 + Azure专属补丁)
         
         # 只要用了 ttkbootstrap，底层必定会调用 PIL 画图，必须强行带上补丁！
         if "ttkbootstrap" in content:
@@ -246,6 +246,10 @@ class PackagerApp(TkinterDnD_CTk):
             
         if "pandas" in content:
             auto_args.extend(["--hidden-import", "pandas._libs.tslibs.timedeltas"])
+
+        # 🔥 Azure 语音引擎终极防御：强制收集 C++ 底层动态库 (.so / .dll)
+        if "azure.cognitiveservices.speech" in content or "azure" in content:
+            auto_args.extend(["--collect-all", "azure.cognitiveservices.speech"])
 
         # 去重并保持顺序
         return list(dict.fromkeys(auto_args))
