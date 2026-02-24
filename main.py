@@ -22,8 +22,8 @@ class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
         self.title("Python脚本打包工具 - 智能守护版")
-        self.geometry("880x920")
-        self.minsize(820, 800)
+        self.geometry("860x920")
+        self.minsize(800, 800)
 
         lbl_title = ctk.CTkLabel(self, text="Python脚本打包 “EXE” 工具", font=("Microsoft YaHei UI", 22, "bold"), text_color="#1f538d")
         lbl_title.pack(pady=(15, 10))
@@ -31,9 +31,10 @@ class PackagerApp(TkinterDnD_CTk):
         # ==================== 1. 文件与配置 ====================
         self.frame_files = ctk.CTkFrame(self, corner_radius=10)
         self.frame_files.pack(pady=5, padx=15, fill="x")
-        ctk.CTkLabel(self.frame_files, text="📁 核心配置 (支持拖拽)", font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=8, sticky="w")
+        ctk.CTkLabel(self.frame_files, text="📁 核心配置 (支持拖拽文件输入)", font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=8, sticky="w")
 
         self.entry_name = ctk.CTkEntry(self.frame_files, placeholder_text="可选: 自动提取或自定义程序名 (如: 我的软件)")
+        
         self.entry_script = self.create_file_row(self.frame_files, "选择脚本(*):", 1, "必须: 支持拖拽主 .py 文件", self.browse_script)
         self.entry_req = self.create_file_row(self.frame_files, "依赖文件:", 2, "可选: requirements.txt (自动安装依赖)", self.browse_req)
         
@@ -41,7 +42,7 @@ class PackagerApp(TkinterDnD_CTk):
         self.entry_name.grid(row=3, column=1, columnspan=2, padx=5, pady=6, sticky="ew")
 
         ctk.CTkLabel(self.frame_files, text="额外参数:").grid(row=4, column=0, padx=15, pady=6, sticky="e")
-        self.entry_extra = ctk.CTkEntry(self.frame_files, placeholder_text="可选: 用户自定义指令 (有了智能修复，通常这里可留空)")
+        self.entry_extra = ctk.CTkEntry(self.frame_files, placeholder_text="可选: 输入额外的指令 (有了智能修复，通常这里可留空)")
         self.entry_extra.grid(row=4, column=1, columnspan=2, padx=5, pady=6, sticky="ew")
         
         ctk.CTkFrame(self.frame_files, height=2, fg_color="gray80").grid(row=5, column=0, columnspan=3, sticky="ew", padx=15, pady=10)
@@ -198,37 +199,51 @@ class PackagerApp(TkinterDnD_CTk):
         auto_args = []
         content = ""
         
-        # 1. 粗略读取脚本源码
+        # 1. 读取脚本和依赖文件
         if script_path and os.path.exists(script_path):
             try:
                 with open(script_path, 'r', encoding='utf-8') as f:
                     content += f.read()
             except Exception: pass
             
-        # 2. 读取 requirements.txt
         if req_path and os.path.exists(req_path):
             try:
                 with open(req_path, 'r', encoding='utf-8') as f:
                     content += "\n" + f.read()
             except Exception: pass
 
-        # 3. 专家级特征匹配：根据常见的易错库自动打补丁
+        # 2. 🎯 专家级特征匹配 (强化版连坐机制)
+        
+        # 只要用了 ttkbootstrap，底层必定会调用 PIL 画图，必须强行带上补丁！
         if "ttkbootstrap" in content:
-            auto_args.extend(["--collect-all", "ttkbootstrap"])
+            auto_args.extend([
+                "--collect-all", "ttkbootstrap",
+                "--hidden-import", "PIL._tkinter_finder"
+            ])
+            
+        # customtkinter 同理，为了稳妥也加上
+        if "customtkinter" in content:
+            auto_args.extend([
+                "--collect-all", "customtkinter",
+                "--hidden-import", "PIL._tkinter_finder"
+            ])
+
+        # 如果直接导入了 PIL
         if "PIL" in content or "Pillow" in content or "pillow" in content:
             auto_args.extend(["--hidden-import", "PIL._tkinter_finder"])
-        if "customtkinter" in content:
-            auto_args.extend(["--collect-all", "customtkinter"])
+            
         if "tkinterdnd2" in content:
             auto_args.extend(["--collect-all", "tkinterdnd2"])
+            
+        # 文本转语音的超级大坑，必须把所有系统的底层发音驱动全包进去
         if "pyttsx3" in content:
-            # pyttsx3 这个库非常坑，必须包含底层的驱动文件
             auto_args.extend([
                 "--hidden-import", "pyttsx3.drivers", 
                 "--hidden-import", "pyttsx3.drivers.sapi5", 
                 "--hidden-import", "pyttsx3.drivers.nsss", 
                 "--hidden-import", "pyttsx3.drivers.dummy"
             ])
+            
         if "pandas" in content:
             auto_args.extend(["--hidden-import", "pandas._libs.tslibs.timedeltas"])
 
