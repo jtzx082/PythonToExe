@@ -1,287 +1,315 @@
 import os
 import sys
-import platform
-import subprocess
 import threading
-import queue
+import subprocess
+import shutil
+import shlex
+import time
 import customtkinter as ctk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, END
+from tkinterdnd2 import TkinterDnD, DND_FILES
 
-# 界面初始化配置
-ctk.set_appearance_mode("System")
+# --- 让 CustomTkinter 支持完美拖拽 ---
+class TkinterDnD_CTk(ctk.CTk, TkinterDnD.DnDWrapper):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.TkdndVersion = TkinterDnD._require(self)
+
+ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
 
-class PyPackagerPro(ctk.CTk):
+class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
+        self.title("Python脚本打包工具 - 终极纯净版")
+        # 稍微加大了整体窗口高度，配合新的宽敞布局
+        self.geometry("860x920")
+        self.minsize(800, 800)
 
-        self.title("PyPackager Pro - Ubuntu 跨平台打包引擎")
-        self.geometry("900x750")
-        self.minsize(800, 700)
+        lbl_title = ctk.CTkLabel(self, text="Python脚本打包 “EXE” 工具", font=("Microsoft YaHei UI", 22, "bold"), text_color="#1f538d")
+        lbl_title.pack(pady=(15, 10))
+
+        # ==================== 1. 文件与配置 ====================
+        self.frame_files = ctk.CTkFrame(self, corner_radius=10)
+        self.frame_files.pack(pady=5, padx=15, fill="x")
+        ctk.CTkLabel(self.frame_files, text="📁 核心配置 (支持拖拽文件输入)", font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=8, sticky="w")
+
+        self.entry_name = ctk.CTkEntry(self.frame_files, placeholder_text="可选: 自动提取或自定义程序名 (如: 我的软件)")
         
-        self.assets_list = []
-        self.log_queue = queue.Queue()
-        self.after(100, self.process_log_queue) # 启动安全队列
+        self.entry_script = self.create_file_row(self.frame_files, "选择脚本(*):", 1, "必须: 支持拖拽主 .py 文件", self.browse_script)
+        self.entry_req = self.create_file_row(self.frame_files, "依赖文件:", 2, "可选: requirements.txt (自动安装依赖)", self.browse_req)
         
-        # ============ 界面布局 ============
-        self.title_label = ctk.CTkLabel(self, text="PyPackager Pro", font=ctk.CTkFont(size=28, weight="bold"))
-        self.title_label.pack(pady=(20, 10))
+        ctk.CTkLabel(self.frame_files, text="程序命名:").grid(row=3, column=0, padx=15, pady=6, sticky="e")
+        self.entry_name.grid(row=3, column=1, columnspan=2, padx=5, pady=6, sticky="ew")
 
-        self.tabview = ctk.CTkTabview(self, width=850, height=350)
-        self.tabview.pack(padx=20, pady=10, fill="x")
+        ctk.CTkLabel(self.frame_files, text="额外参数:").grid(row=4, column=0, padx=15, pady=6, sticky="e")
+        self.entry_extra = ctk.CTkEntry(self.frame_files, placeholder_text="可选: 输入额外的指令 (如: --hidden-import=PIL._tkinter_finder)")
+        self.entry_extra.grid(row=4, column=1, columnspan=2, padx=5, pady=6, sticky="ew")
         
-        self.tab_basic = self.tabview.add("基础配置")
-        self.tab_env = self.tabview.add("环境与依赖 (高级)")
-        self.tab_assets = self.tabview.add("资源与数据")
-        self.tab_cloud = self.tabview.add("云端跨平台 (CI/CD)")
+        ctk.CTkFrame(self.frame_files, height=2, fg_color="gray80").grid(row=5, column=0, columnspan=3, sticky="ew", padx=15, pady=10)
 
-        self.setup_basic_tab()
-        self.setup_env_tab()
-        self.setup_assets_tab()
-        self.setup_cloud_tab()
+        self.entry_icon = self.create_file_row(self.frame_files, "程序图标:", 6, "可选: .ico 或 .icns 格式", self.browse_icon)
+        self.entry_outdir = self.create_file_row(self.frame_files, "输出目录:", 7, "可选: 默认当前目录下的 dist 文件夹", self.browse_dir)
+        self.entry_adddata = self.create_file_row(self.frame_files, "附加资源:", 8, "可选: 需要打包的额外文件/文件夹", self.browse_adddata)
 
-        self.log_label = ctk.CTkLabel(self, text="实时终端日志输出:", font=ctk.CTkFont(weight="bold"))
-        self.log_label.pack(padx=20, pady=(10, 0), anchor="w")
-
-        self.log_textbox = ctk.CTkTextbox(self, state="disabled", wrap="word", height=150, font=ctk.CTkFont(family="Consolas", size=12))
-        self.log_textbox.pack(padx=20, pady=5, fill="both", expand=True)
-
-        self.build_btn = ctk.CTkButton(self, text="🚀 启动智能打包", font=ctk.CTkFont(size=18, weight="bold"), height=50, command=self.start_build_thread)
-        self.build_btn.pack(padx=20, pady=20, fill="x")
-
-    # ------------------ UI 布局搭建 ------------------
-    def setup_basic_tab(self):
-        ctk.CTkLabel(self.tab_basic, text="Python 主程序 (.py):").grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.script_entry = ctk.CTkEntry(self.tab_basic, width=500)
-        self.script_entry.grid(row=0, column=1, padx=10, pady=10)
-        ctk.CTkButton(self.tab_basic, text="浏览", width=80, command=lambda: self.select_file(self.script_entry, [("Python", "*.py")])).grid(row=0, column=2, padx=10, pady=10)
-
-        ctk.CTkLabel(self.tab_basic, text="软件图标 (.ico/.icns):").grid(row=1, column=0, padx=10, pady=10, sticky="w")
-        self.icon_entry = ctk.CTkEntry(self.tab_basic, width=500)
-        self.icon_entry.grid(row=1, column=1, padx=10, pady=10)
-        ctk.CTkButton(self.tab_basic, text="浏览", width=80, command=lambda: self.select_file(self.icon_entry, [("Icon", "*.ico *.icns")])).grid(row=1, column=2, padx=10, pady=10)
+        # ==================== 2. 打包选项 (🔥排版全面优化) ====================
+        self.frame_opts = ctk.CTkFrame(self, corner_radius=10)
+        self.frame_opts.pack(pady=10, padx=15, fill="x")
         
-        ctk.CTkLabel(self.tab_basic, text="输出软件名称 (可选):").grid(row=2, column=0, padx=10, pady=10, sticky="w")
-        self.name_entry = ctk.CTkEntry(self.tab_basic, width=500, placeholder_text="默认与主程序同名")
-        self.name_entry.grid(row=2, column=1, padx=10, pady=10)
+        # 标题栏
+        ctk.CTkLabel(self.frame_opts, text="⚙️ 环境与选项", font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w", padx=15, pady=(10, 5))
 
-        self.frame_options = ctk.CTkFrame(self.tab_basic, fg_color="transparent")
-        self.frame_options.grid(row=3, column=0, columnspan=3, pady=20, sticky="w")
+        # 内部选项网格化容器：增加呼吸感
+        grid_frame = ctk.CTkFrame(self.frame_opts, fg_color="transparent")
+        grid_frame.pack(fill="x", padx=15, pady=5)
+
+        self.var_onefile = ctk.BooleanVar(value=True)
+        self.var_noconsole = ctk.BooleanVar(value=True)
+        self.var_admin = ctk.BooleanVar(value=False)
+        self.var_venv = ctk.BooleanVar(value=True)
+        self.var_open_folder = ctk.BooleanVar(value=True)
+
+        # 第一行：基础参数 (加大了 padx 水平间距和 pady 垂直间距)
+        ctk.CTkCheckBox(grid_frame, text="单文件模式 (-F)", variable=self.var_onefile).grid(row=0, column=0, padx=(0, 40), pady=10, sticky="w")
+        ctk.CTkCheckBox(grid_frame, text="隐藏控制台 (-w)", variable=self.var_noconsole).grid(row=0, column=1, padx=(0, 40), pady=10, sticky="w")
+        ctk.CTkCheckBox(grid_frame, text="请求管理员权限", variable=self.var_admin).grid(row=0, column=2, padx=(0, 20), pady=10, sticky="w")
         
-        self.opt_onefile = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(self.frame_options, text="打包为单文件 (-F)", variable=self.opt_onefile).pack(side="left", padx=10)
-        self.opt_windowed = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(self.frame_options, text="隐藏控制台 (GUI程序适用 -w)", variable=self.opt_windowed).pack(side="left", padx=10)
+        # 第二行：环境参数
+        ctk.CTkCheckBox(grid_frame, text="🟢 每次新建干净虚拟环境", variable=self.var_venv, text_color="green").grid(row=1, column=0, columnspan=2, padx=(0, 40), pady=10, sticky="w")
+        ctk.CTkCheckBox(grid_frame, text="📂 打包完自动打开目录", variable=self.var_open_folder, text_color="#1f538d").grid(row=1, column=2, padx=(0, 20), pady=10, sticky="w")
 
-    def setup_env_tab(self):
-        self.opt_venv = ctk.BooleanVar(value=True)
-        ctk.CTkSwitch(self.tab_env, text="启用纯净虚拟环境打包 (推荐开启)", variable=self.opt_venv, font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=20)
-        
-        frame = ctk.CTkFrame(self.tab_env, fg_color="transparent")
-        frame.pack(fill="x", padx=20, pady=10)
-        
-        ctk.CTkLabel(frame, text="依赖清单 (requirements.txt):").pack(side="left")
-        self.req_entry = ctk.CTkEntry(frame, width=400, placeholder_text="如果不填，将只打包标准库...")
-        self.req_entry.pack(side="left", padx=10)
-        ctk.CTkButton(frame, text="浏览", width=80, command=lambda: self.select_file(self.req_entry, [("Text", "*.txt")])).pack(side="left")
+        # 排除模块独立容器
+        adv_frame = ctk.CTkFrame(self.frame_opts, fg_color="transparent")
+        adv_frame.pack(fill="x", padx=15, pady=(5, 15))
+        ctk.CTkLabel(adv_frame, text="🚫 排除模块:").pack(side="left", padx=(0, 10))
+        self.entry_exclude = ctk.CTkEntry(adv_frame, placeholder_text="输入要排除的库名，用逗号分隔 (如: numpy,pandas)")
+        self.entry_exclude.pack(side="left", fill="x", expand=True)
 
-    def setup_assets_tab(self):
-        ctk.CTkLabel(self.tab_assets, text="附加资源 (图片、音频等)：").pack(anchor="w", padx=20, pady=10)
-        self.assets_textbox = ctk.CTkTextbox(self.tab_assets, height=120)
-        self.assets_textbox.pack(fill="x", padx=20, pady=5)
-        self.assets_textbox.insert("end", "当前未添加任何附加文件。\n")
-        self.assets_textbox.configure(state="disabled")
-        
-        btn_frame = ctk.CTkFrame(self.tab_assets, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=20, pady=5)
-        
-        ctk.CTkButton(btn_frame, text="添加文件", command=self.add_asset_file).pack(side="left", padx=(0, 10))
-        ctk.CTkButton(btn_frame, text="添加文件夹", command=self.add_asset_folder).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="清空", fg_color="darkred", hover_color="red", command=self.clear_assets).pack(side="right")
+        # ==================== 3. 按钮区 ====================
+        self.frame_btns = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_btns.pack(pady=5, padx=20, fill="x")
 
-    def setup_cloud_tab(self):
-        ctk.CTkLabel(self.tab_cloud, text="GitHub Actions 自动打包配置生成器", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=10)
-        ctk.CTkButton(self.tab_cloud, text="生成 Workflow (.yml)", height=40).pack(anchor="w", padx=20, pady=20)
+        self.btn_pack = ctk.CTkButton(self.frame_btns, text="🚀 开始纯净隔离打包", font=("Microsoft YaHei UI", 16, "bold"), fg_color="#28a745", hover_color="#218838", height=45, command=self.start_pack)
+        self.btn_pack.pack(side="left", expand=True, fill="x", padx=(0, 10))
 
-    # ------------------ 辅助逻辑 ------------------
-    def select_file(self, entry_widget, filetypes):
-        path = filedialog.askopenfilename(filetypes=filetypes)
-        if path:
-            entry_widget.delete(0, "end")
-            entry_widget.insert(0, path)
+        ctk.CTkButton(self.frame_btns, text="🗑️ 清空日志", font=("Microsoft YaHei UI", 16), fg_color="#dc3545", hover_color="#c82333", height=45, width=120, command=self.clear_log).pack(side="right")
 
-    def add_asset_file(self):
-        paths = filedialog.askopenfilenames()
-        for path in paths: self.assets_list.append((path, "."))
-        self.update_assets_display()
+        # ==================== 4. 日志区 ====================
+        self.frame_log = ctk.CTkFrame(self, corner_radius=10)
+        self.frame_log.pack(pady=10, padx=15, fill="both", expand=True) 
+        self.txt_log = ctk.CTkTextbox(self.frame_log, font=("Consolas", 12))
+        self.txt_log.pack(padx=10, pady=10, fill="both", expand=True)
 
-    def add_asset_folder(self):
-        path = filedialog.askdirectory()
-        if path: self.assets_list.append((path, os.path.basename(path)))
-        self.update_assets_display()
+    def create_file_row(self, parent, label_text, row, placeholder, btn_cmd):
+        ctk.CTkLabel(parent, text=label_text).grid(row=row, column=0, padx=15, pady=5, sticky="e")
+        entry = ctk.CTkEntry(parent, placeholder_text=placeholder)
+        entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
+        parent.columnconfigure(1, weight=1)
+        ctk.CTkButton(parent, text="浏览", width=70, command=btn_cmd).grid(row=row, column=2, padx=15, pady=5)
+        entry.drop_target_register(DND_FILES)
+        entry.dnd_bind('<<Drop>>', lambda e: self.on_drop(e, entry))
+        return entry
 
-    def clear_assets(self):
-        self.assets_list.clear()
-        self.update_assets_display()
+    def on_drop(self, event, entry_widget):
+        file_path = event.data.strip('{}')
+        entry_widget.delete(0, END)
+        entry_widget.insert(0, file_path)
+        if getattr(self, 'entry_script', None) and entry_widget == self.entry_script:
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            self.entry_name.delete(0, END)
+            self.entry_name.insert(0, base_name)
 
-    def update_assets_display(self):
-        self.assets_textbox.configure(state="normal")
-        self.assets_textbox.delete("1.0", "end")
-        for src, dest in self.assets_list: self.assets_textbox.insert("end", f"源: {src}  --->  目标文件夹: {dest}\n")
-        self.assets_textbox.configure(state="disabled")
+    def browse_script(self):
+        f = filedialog.askopenfilename(filetypes=[("Python Files", "*.py")])
+        if f: 
+            self.entry_script.delete(0, END)
+            self.entry_script.insert(0, f)
+            base_name = os.path.splitext(os.path.basename(f))[0]
+            self.entry_name.delete(0, END)
+            self.entry_name.insert(0, base_name)
 
-    # ================== 队列处理与线程安全 ==================
-    def log_message(self, message):
-        self.log_queue.put(message)
+    def browse_req(self):
+        f = filedialog.askopenfilename(filetypes=[("Text Files", "*.txt")])
+        if f: self.entry_req.delete(0, END); self.entry_req.insert(0, f)
 
-    def process_log_queue(self):
-        try:
-            logs = []
-            while True: logs.append(self.log_queue.get_nowait())
-        except queue.Empty: pass
-            
-        if logs:
-            self.log_textbox.configure(state="normal")
-            for log in logs: self.log_textbox.insert("end", log + "\n")
-            self.log_textbox.see("end")
-            self.log_textbox.configure(state="disabled")
-            
-        self.after(100, self.process_log_queue)
+    def browse_icon(self):
+        f = filedialog.askopenfilename(filetypes=[("Icon Files", "*.ico;*.icns")])
+        if f: self.entry_icon.delete(0, END); self.entry_icon.insert(0, f)
 
-    def restore_button_state(self):
-        self.build_btn.configure(state="normal", text="🚀 启动智能打包")
+    def browse_dir(self):
+        d = filedialog.askdirectory()
+        if d: self.entry_outdir.delete(0, END); self.entry_outdir.insert(0, d)
 
-    # ================== 核心修复：针对 Linux/Ubuntu 的进程调度器 ==================
-    def execute_command(self, cmd, cwd=None, prefix=""):
-        # 获取当前系统的环境变量副本
-        custom_env = os.environ.copy()
-        
-        # 针对 Ubuntu 的致命一击 1：斩断 pip 唤起系统 Keyring 密码弹窗的途径！
-        custom_env["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
-        
-        # 针对 Ubuntu 的致命一击 2：强制 Linux 管道无缓冲，防止假死死锁！
-        custom_env["PYTHONUNBUFFERED"] = "1"
+    def browse_adddata(self):
+        f = filedialog.askopenfilename()
+        if f: self.entry_adddata.delete(0, END); self.entry_adddata.insert(0, f)
 
-        kwargs = {
-            'stdout': subprocess.PIPE,
-            'stderr': subprocess.STDOUT,
-            'stdin': subprocess.PIPE, # 关闭输入，防止在后台偷偷要求按 Y/N
-            'text': True,
-            'errors': 'replace',
-            'env': custom_env
-        }
-        
-        if platform.system() == "Windows":
+    def log(self, message):
+        self.txt_log.insert(END, message + "\n")
+        self.txt_log.see(END)
+
+    def clear_log(self):
+        self.txt_log.delete("1.0", END)
+
+    def get_clean_env(self):
+        env = os.environ.copy()
+        env.pop('_MEIPASS2', None)
+        env.pop('PYARMOR_LICENSE', None)
+        env.pop('PYTHONPATH', None)
+        return env
+
+    def run_cmd_with_log(self, cmd_list, cwd=None):
+        startupinfo = None
+        if os.name == 'nt':
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            kwargs['startupinfo'] = startupinfo
-            kwargs['creationflags'] = 0x08000000 
             
-        if cwd: kwargs['cwd'] = cwd
-
-        process = subprocess.Popen(cmd, **kwargs)
-        process.stdin.close() 
-
-        for line in process.stdout:
-            if line.strip(): self.log_message(f"{prefix}{line.strip()}")
-                
-        process.wait()
-        return process.returncode
-
-    # ------------------ 核心打包流程 ------------------
-    def start_build_thread(self):
-        script_path = self.script_entry.get()
-        if not script_path or not os.path.exists(script_path):
-            messagebox.showerror("错误", "请先选择 Python 主程序！")
-            return
-
-        self.build_btn.configure(state="disabled", text="⚙️ 引擎正在全力打包中...")
-        self.log_textbox.configure(state="normal")
-        self.log_textbox.delete("1.0", "end")
-        self.log_textbox.configure(state="disabled")
-        
-        threading.Thread(target=self.run_build_process, args=(script_path,), daemon=True).start()
-
-    def run_build_process(self, script_path):
-        work_dir = os.path.dirname(script_path)
-        os_type = platform.system()
-        pyinstaller_exe = "pyinstaller"
-        
         try:
-            if self.opt_venv.get():
-                self.log_message("[*] ================= 初始化纯净虚拟环境 =================")
-                venv_dir = os.path.join(work_dir, "build_env")
-                
-                if os_type == "Windows":
-                    python_exe = os.path.join(venv_dir, "Scripts", "python.exe")
-                    pyinstaller_exe = os.path.join(venv_dir, "Scripts", "pyinstaller.exe")
-                else:
-                    # Ubuntu / Linux 环境路径
-                    python_exe = os.path.join(venv_dir, "bin", "python")
-                    pyinstaller_exe = os.path.join(venv_dir, "bin", "pyinstaller")
+            process = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, cwd=cwd, env=self.get_clean_env())
+            for line in process.stdout:
+                self.log(line.strip())
+            process.wait()
+            return process.returncode == 0
+        except Exception as e:
+            self.log(f"执行命令时出错: {e}")
+            return False
 
-                if not os.path.exists(venv_dir):
-                    self.log_message(f"[*] 正在创建虚拟环境...")
-                    # Ubuntu 特殊提醒：如果这里报错，说明系统缺包
-                    ret = self.execute_command([sys.executable, "-m", "venv", venv_dir], prefix="[系统] ")
-                    if ret != 0: 
-                        self.log_message("[x] 严重错误：Ubuntu 中可能未安装 venv 模块。")
-                        self.log_message("[!] 请打开您的 Ubuntu 终端，手动执行一次：sudo apt install python3-venv")
-                        raise Exception("虚拟环境创建失败。")
-                else:
-                    self.log_message("[*] 发现现有虚拟环境，正在复用...")
-
-                self.log_message("[*] 正在安装底层打包引擎 (PyInstaller)...")
-                self.execute_command([python_exe, "-m", "pip", "install", "pyinstaller", "--quiet"], prefix="[PIP] ")
-                
-                req_file = self.req_entry.get()
-                if req_file and os.path.exists(req_file):
-                    self.log_message(f"[*] 正在安装依赖 (requirements.txt)...")
-                    self.execute_command([python_exe, "-m", "pip", "install", "-r", req_file], prefix="[PIP] ")
-
-            self.log_message("[*] ================= 准备启动引擎打包 =================")
-            cmd = [pyinstaller_exe, "-y", "--clean"]
-            
-            if self.opt_onefile.get(): cmd.append("--onefile")
-            if self.opt_windowed.get(): cmd.append("--windowed")
-                
-            app_name = self.name_entry.get()
-            if app_name: cmd.extend(["--name", app_name])
-                
-            icon_path = self.icon_entry.get()
-            if icon_path and os.path.exists(icon_path):
-                cmd.append(f"--icon={icon_path}")
-                
-            if self.assets_list:
-                separator = ";" if os_type == "Windows" else ":"
-                for src, dest in self.assets_list:
-                    cmd.append(f"--add-data={src}{separator}{dest}")
-                    
-            cmd.append(script_path)
-            self.log_message(f"[*] 执行指令: {' '.join(cmd)}\n")
-
-            self.log_message("[*] 🚀 编译正式开始，这在 Ubuntu 上可能需要一两分钟...")
-            
-            retcode = self.execute_command(cmd, cwd=work_dir, prefix="[打包器] ")
-
-            if retcode == 0:
-                dist_dir = os.path.join(work_dir, 'dist')
-                self.log_message(f"\n[+] 🎉 恭喜！Ubuntu 版本打包大功告成！")
-                self.log_message(f"[+] 您的可执行文件已输出至: {dist_dir}")
-                # 适配 Ubuntu 的自动打开文件夹命令
-                try:
-                    if os_type == "Windows": os.startfile(dist_dir)
-                    elif os_type == "Darwin": subprocess.run(["open", dist_dir])
-                    elif os_type == "Linux": subprocess.run(["xdg-open", dist_dir])
-                except: pass
+    def open_output_folder(self, path):
+        try:
+            if not os.path.exists(path): return
+            if os.name == 'nt':
+                os.startfile(path)
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', path])
             else:
-                self.log_message("\n[x] ⚠️ 打包失败，请往上翻阅日志查看具体的 Error 信息。")
+                subprocess.Popen(['xdg-open', path])
+        except Exception as e:
+            self.log(f"无法自动打开文件夹: {e}")
+
+    def bring_window_to_front(self):
+        try:
+            if self.state() == 'iconic':
+                self.deiconify() 
+            self.attributes('-topmost', True)
+            self.focus_force()
+            self.update()
+            self.attributes('-topmost', False)
+        except Exception as e:
+            pass
+
+    def start_pack(self):
+        self.btn_pack.configure(state="disabled", text="⏳ 打包进行中 (请勿关闭)...")
+        self.log("="*60)
+        self.log("🚀 开始全自动纯净打包流程...")
+        threading.Thread(target=self.orchestrate_packaging, daemon=True).start()
+
+    def orchestrate_packaging(self):
+        try:
+            script = self.entry_script.get().strip()
+            if not script or not os.path.exists(script):
+                self.log("❌ 错误: 找不到指定的 Python 脚本！")
+                return
+
+            req_file = self.entry_req.get().strip()
+            app_name = self.entry_name.get().strip()
+            script_dir = os.path.dirname(script)
+            
+            sys_py = shutil.which("python3") or shutil.which("python")
+            if not sys_py:
+                self.log("❌ 致命错误: 系统环境中找不到 Python！")
+                return
+
+            run_py = sys_py
+
+            if self.var_venv.get():
+                venv_dir = os.path.join(script_dir, ".pack_venv")
+                self.log(f"📦 启用纯净虚拟环境。目标位置: {venv_dir}")
+                
+                if os.path.exists(venv_dir):
+                    self.log("🧹 发现历史残留的虚拟环境，正在执行深度清理，请稍候...")
+                    for _ in range(3):
+                        try:
+                            shutil.rmtree(venv_dir, ignore_errors=True)
+                            if not os.path.exists(venv_dir): break
+                            time.sleep(1)
+                        except: pass
+                    
+                    if os.path.exists(venv_dir):
+                        self.log("⚠️ 警告：无法彻底删除旧环境（可能被占用），将尝试直接覆盖。")
+                    else:
+                        self.log("✨ 历史环境清理完毕！")
+
+                if os.name == 'nt':
+                    venv_py = os.path.join(venv_dir, "Scripts", "python.exe")
+                else:
+                    venv_py = os.path.join(venv_dir, "bin", "python")
+
+                self.log(f"⏳ 正在从零创建全新的隔离虚拟环境...")
+                success = self.run_cmd_with_log([sys_py, "-m", "venv", venv_dir])
+                if not success or not os.path.exists(venv_py):
+                    self.log("❌ 虚拟环境创建失败！")
+                    return
+                self.log("✅ 纯净虚拟环境创建成功！")
+
+                run_py = venv_py 
+
+                if req_file and os.path.exists(req_file):
+                    self.log(f"⬇️ 正在从 {os.path.basename(req_file)} 挂载全新依赖...")
+                    self.run_cmd_with_log([run_py, "-m", "pip", "install", "-r", req_file, "--disable-pip-version-check"])
+
+                self.log("⬇️ 正在为当前环境安装 PyInstaller 引擎...")
+                self.run_cmd_with_log([run_py, "-m", "pip", "install", "pyinstaller", "--disable-pip-version-check"])
+
+            self.log(f"\n⚙️ 环境部署就绪，开始执行构建...")
+            
+            cmd = [run_py, "-m", "PyInstaller", "--noconfirm", "--clean"]
+
+            if self.var_onefile.get(): cmd.append("-F")
+            if self.var_noconsole.get(): cmd.append("-w")
+            if self.var_admin.get(): cmd.append("--uac-admin")
+            if app_name: cmd.extend(["-n", app_name])
+
+            icon = self.entry_icon.get().strip()
+            if icon: cmd.extend(["-i", icon])
+
+            outdir = self.entry_outdir.get().strip()
+            final_outdir = outdir if outdir else os.path.join(script_dir, "dist")
+            cmd.extend(["--distpath", final_outdir])
+
+            adddata = self.entry_adddata.get().strip()
+            if adddata: 
+                sep = ";" if os.name == 'nt' else ":"
+                cmd.extend(["--add-data", f"{adddata}{sep}."])
+
+            excludes = self.entry_exclude.get().strip()
+            if excludes:
+                for mod in excludes.split(","):
+                    cmd.extend(["--exclude-module", mod.strip()])
+
+            extra = self.entry_extra.get().strip()
+            if extra:
+                cmd.extend(shlex.split(extra))
+
+            cmd.append(script)
+            
+            success = self.run_cmd_with_log(cmd)
+            
+            if success:
+                self.log(f"\n✅ 打包大功告成！文件已输出至: {final_outdir}")
+                if self.var_open_folder.get():
+                    self.log("📂 正在为您打开输出文件夹...")
+                    self.open_output_folder(final_outdir)
+            else:
+                self.log("\n❌ 打包失败，请向上滚动查看红色错误日志。")
 
         except Exception as e:
-            self.log_message(f"\n[x] 发生严重错误: {str(e)}")
+            self.log(f"\n❌ 发生严重异常: {str(e)}")
+            
         finally:
-            self.after(0, self.restore_button_state)
+            self.btn_pack.configure(state="normal", text="🚀 开始纯净隔离打包")
+            self.log("\n✨ 任务彻底结束，工具已释放！")
+            self.bring_window_to_front()
 
 if __name__ == "__main__":
-    app = PyPackagerPro()
+    app = PackagerApp()
     app.mainloop()
