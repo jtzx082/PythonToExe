@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import shutil
+import time # 新增 time 模块用于删除重试
 import subprocess
 import threading
 import multiprocessing
@@ -16,7 +17,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v5.9 (混合环境终极版)")
+        self.title("PyInstaller 打包工具 v6.0 (智能重置终极版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -42,6 +43,7 @@ class PyInstallerGUI(ttk.Window):
         self.var_clean = tk.BooleanVar(value=True)
         self.var_upx = tk.BooleanVar(value=False)
         self.var_uac = tk.BooleanVar(value=False)
+        self.var_auto_fix = tk.BooleanVar(value=True) 
         
         self.var_add_data = tk.StringVar()
         self.var_hidden_imports = tk.StringVar()
@@ -160,6 +162,7 @@ class PyInstallerGUI(ttk.Window):
         ttk.Checkbutton(f_build, text="打包后清理临时文件 (--clean)", variable=self.var_clean).pack(anchor=W, pady=3)
         ttk.Checkbutton(f_build, text="使用 UPX 极致压缩 (--upx-dir)", variable=self.var_upx).pack(anchor=W, pady=3)
         ttk.Checkbutton(f_build, text="请求管理员权限 (Windows 提权)", variable=self.var_uac).pack(anchor=W, pady=3)
+        ttk.Checkbutton(f_build, text="🤖 开启智能防报错扫描 (自动分析代码修复常见缺包问题)", variable=self.var_auto_fix, bootstyle="warning").pack(anchor=W, pady=5)
 
     def _build_env_tab(self):
         f_env = ttk.Labelframe(self.tab_env, text="沙盒隔离打包 (极限压缩体积)", padding=20)
@@ -171,7 +174,7 @@ class PyInstallerGUI(ttk.Window):
         desc_lbl.pack(anchor=W, pady=(0, 15), fill=X)
         desc_lbl.bind('<Configure>', lambda e: e.widget.config(wraplength=e.width))
         
-        self.cb_venv = ttk.Checkbutton(f_env, text="启用纯净虚拟环境打包 (.pack_venv)", variable=self.var_use_venv, bootstyle="success-round-toggle", command=self._toggle_sys_pkg)
+        self.cb_venv = ttk.Checkbutton(f_env, text="每次打包时都强制重置纯净虚拟环境 (.pack_venv)", variable=self.var_use_venv, bootstyle="success-round-toggle", command=self._toggle_sys_pkg)
         self.cb_venv.pack(anchor=W, pady=(0, 5))
         
         self.cb_sys_pkg = ttk.Checkbutton(f_env, text="↳ 允许继承全局库 (混合模式：专治 ARM 架构/复杂 C++ 依赖编译报错)", variable=self.var_venv_sys)
@@ -197,12 +200,12 @@ class PyInstallerGUI(ttk.Window):
         
         guide_text = (
             "1. 基础配置：选择您的 Python 主程序。如果带界面，建议勾选“隐藏控制台黑框”。\n\n"
-            "2. 沙盒机制：在【🌱 依赖与隔离环境】中勾选“纯净虚拟环境”，杜绝软件体积臃肿。\n"
+            "2. 沙盒机制：在【🌱 依赖与隔离环境】中勾选“重置纯净虚拟环境”，每次打包都会强制清空旧依赖，重新构建极简沙盒。\n"
             "   ⚠️ AMD / Intel 架构：仅勾选纯净沙盒即可完美打包。\n"
             "   ⚠️ ARM 架构 (或强依赖库)：务必同时勾选“允许继承全局库”，避免沙盒内 C++ 现场编译报错。\n\n"
             "3. 解决报错神技：\n"
-            "   • 报 ModuleNotFoundError: 在“隐式导入”填入缺失模块。\n"
-            "   • 报 DLL / 核心库缺失 (如 Azure, OpenCV): 在“全量收集包”中填入对应库名，强制打包底层库！\n\n"
+            "   • 工具内置【智能防报错扫描】，一键自动解决绝大部分库缺失导致的白屏崩溃。\n"
+            "   • 特殊情况：报 DLL/核心库缺失时，请手动在“全量收集包”中填入库名。\n\n"
             "4. 一键执行：点击打包，静待“🎉 打包圆满完成”即可。"
         )
         guide_lbl = ttk.Label(f_guide, text=guide_text, justify=LEFT)
@@ -214,7 +217,7 @@ class PyInstallerGUI(ttk.Window):
         
         author_text = (
             "开发与维护：俞晋全\n"
-            "个人博客：电子云\n\n"
+            "个人博客：硫酸铜的遐想\n\n"
             "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。具有混合架构自适应编译能力，彻底告别环境污染和底层 DLL 丢失烦恼。"
         )
         author_lbl = ttk.Label(f_author, text=author_text, justify=LEFT)
@@ -257,6 +260,7 @@ class PyInstallerGUI(ttk.Window):
             self.var_venv_sys.set(False)
             self.var_upx.set(False)
             self.var_uac.set(False)
+            self.var_auto_fix.set(True)
             self._toggle_sys_pkg()
             
             self.console_text.delete(1.0, END)
@@ -271,7 +275,8 @@ class PyInstallerGUI(ttk.Window):
             "exclude_modules": self.var_exclude_modules.get(),
             "onefile": self.var_onefile.get(), "console": self.var_console.get(),
             "clean": self.var_clean.get(), "upx": self.var_upx.get(), "uac": self.var_uac.get(),
-            "use_venv": self.var_use_venv.get(), "use_venv_sys": self.var_venv_sys.get()
+            "use_venv": self.var_use_venv.get(), "use_venv_sys": self.var_venv_sys.get(),
+            "auto_fix": self.var_auto_fix.get() 
         }
 
     def save_config(self, filepath, silent=False):
@@ -300,6 +305,7 @@ class PyInstallerGUI(ttk.Window):
             self.var_uac.set(cfg.get("uac", False))
             self.var_use_venv.set(cfg.get("use_venv", True))
             self.var_venv_sys.set(cfg.get("use_venv_sys", False))
+            self.var_auto_fix.set(cfg.get("auto_fix", True))
             self._toggle_sys_pkg()
         except: pass
 
@@ -368,6 +374,56 @@ class PyInstallerGUI(ttk.Window):
         self.btn_clear.config(state=NORMAL) 
         self.process = None
 
+    # ================= 🌟 核心引擎植入：智能分析器 =================
+    def smart_analyze_dependencies(self, script_path, req_path):
+        """扫描代码，自动识别坑位，并返回需要补全的打包参数"""
+        auto_args_set = set() 
+        content = ""
+        
+        if script_path and os.path.exists(script_path):
+            try:
+                with open(script_path, 'r', encoding='utf-8') as f:
+                    content += f.read()
+            except Exception: pass
+            
+        if req_path and os.path.exists(req_path):
+            try:
+                with open(req_path, 'r', encoding='utf-8') as f:
+                    content += "\n" + f.read()
+            except Exception: pass
+
+        if "ttkbootstrap" in content:
+            auto_args_set.add(("--collect-all", "ttkbootstrap"))
+            auto_args_set.add(("--hidden-import", "PIL._tkinter_finder"))
+            
+        if "customtkinter" in content:
+            auto_args_set.add(("--collect-all", "customtkinter"))
+            auto_args_set.add(("--hidden-import", "PIL._tkinter_finder"))
+
+        if "PIL" in content or "Pillow" in content or "pillow" in content:
+            auto_args_set.add(("--hidden-import", "PIL._tkinter_finder"))
+            
+        if "tkinterdnd2" in content:
+            auto_args_set.add(("--collect-all", "tkinterdnd2"))
+            
+        if "pyttsx3" in content:
+            auto_args_set.add(("--hidden-import", "pyttsx3.drivers"))
+            auto_args_set.add(("--hidden-import", "pyttsx3.drivers.sapi5"))
+            auto_args_set.add(("--hidden-import", "pyttsx3.drivers.nsss"))
+            auto_args_set.add(("--hidden-import", "pyttsx3.drivers.dummy"))
+            
+        if "pandas" in content:
+            auto_args_set.add(("--hidden-import", "pandas._libs.tslibs.timedeltas"))
+
+        if "azure.cognitiveservices.speech" in content or "azure" in content:
+            auto_args_set.add(("--collect-all", "azure.cognitiveservices.speech"))
+
+        final_args = []
+        for flag, val in auto_args_set:
+            final_args.extend([flag, val])
+            
+        return final_args
+
     def start_build_thread(self):
         if not self.var_script.get():
             messagebox.showwarning("警告", "请先在基础配置中选择需要打包的 Python 脚本！")
@@ -406,6 +462,23 @@ class PyInstallerGUI(ttk.Window):
             venv_dir = os.path.join(script_dir, ".pack_venv")
             self.log_console(f"🌱 [阶段 1/2] 正在调用系统环境构建隔离沙盒...\n")
             
+            # ================= 🌟 核心新增：强制深度清理旧环境 =================
+            if os.path.exists(venv_dir):
+                self.log_console("🧹 发现历史残留的虚拟环境，正在执行深度清理，请稍候...\n")
+                # 尝试3次强制删除，避免因文件锁定导致的失败
+                for _ in range(3):
+                    try:
+                        shutil.rmtree(venv_dir, ignore_errors=True)
+                        if not os.path.exists(venv_dir): break
+                        time.sleep(1)
+                    except: pass
+                
+                if os.path.exists(venv_dir):
+                    self.log_console("⚠️ 警告：无法彻底删除旧环境（可能被其他程序占用），将尝试直接覆盖。\n")
+                else:
+                    self.log_console("✨ 历史环境清理完毕，确保本次打包100%纯净！\n")
+            # =================================================================
+            
             venv_cmd = [system_python, "-m", "venv", venv_dir, "--clear"]
             if self.var_venv_sys.get():
                 venv_cmd.append("--system-site-packages")
@@ -438,7 +511,7 @@ class PyInstallerGUI(ttk.Window):
 
         self.log_console(f"\n🚀 [阶段 2/2] 启动打包引擎...\n{'-'*40}\n")
         
-        # 【核心修复】：不再调用可能缺失的 pyinstaller.exe，而是直接使用模块调用模式，万无一失！
+        # 抛弃直接调用可执行文件，改为模块式启动
         cmd = [v_python, "-m", "PyInstaller", "-y"] 
         
         if self.var_onefile.get(): cmd.append("-F")
@@ -455,6 +528,7 @@ class PyInstallerGUI(ttk.Window):
         if add_data:
             for data in add_data.split(): cmd.extend(["--add-data", data])
                 
+        # 兼容用户旧的手动设置，依然保留
         default_hidden = ["PIL._tkinter_finder"]
         for d_imp in default_hidden:
             cmd.extend(["--hidden-import", d_imp])
@@ -474,6 +548,16 @@ class PyInstallerGUI(ttk.Window):
         if exclude_modules:
             for exc in exclude_modules.replace(" ", "").split(","):
                 if exc: cmd.extend(["--exclude-module", exc])
+
+        # ================= 🌟 智能防御层拦截注入 =================
+        if self.var_auto_fix.get():
+            self.log_console("🤖 [智能扫描] 正在分析代码依赖，搜寻常见易错库...\n")
+            smart_fixes = self.smart_analyze_dependencies(self.var_script.get(), self.var_req.get())
+            if smart_fixes:
+                self.log_console(f"✨ 检测到易错库，已自动注入终极免疫补丁: {' '.join(smart_fixes)}\n")
+                cmd.extend(smart_fixes)
+            else:
+                self.log_console("✨ 分析完毕，代码健康度高，未触发干预补丁。\n")
                 
         cmd.append(self.var_script.get())
         
