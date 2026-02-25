@@ -17,7 +17,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v6.2 (Mac底层框架免疫版)")
+        self.title("PyInstaller 打包工具 v6.3 (防无限套娃终极版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -217,7 +217,7 @@ class PyInstallerGUI(ttk.Window):
         
         author_text = (
             "开发与维护：俞晋全\n"
-            "个人博客：硫酸铜的遐想\n\n"
+            "个人博客：电子云\n\n"
             "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。具有混合架构自适应编译能力，彻底告别环境污染和底层 DLL 丢失烦恼。"
         )
         author_lbl = ttk.Label(f_author, text=author_text, justify=LEFT)
@@ -345,20 +345,35 @@ class PyInstallerGUI(ttk.Window):
             sep = ";" if os.name == 'nt' else ":"
             self.var_add_data.set(f"{self.var_add_data.get()} {p}{sep}{os.path.basename(p)}".strip())
 
-    # --- 环境自检逻辑 ---
+    # ================= 🌟 核心修复 1：冷冻状态感知 =================
     def get_system_python(self):
-        """
-        🌟 核心修复：永远优先使用启动当前 UI 工具的那个官方 Python 解释器。
-        这可以 100% 避免在 Mac 上抓到自带的 Command Line Tools 残缺版 Python (Tcl 8.5 导致崩溃)。
-        """
-        if sys.executable and os.path.exists(sys.executable):
-            return sys.executable
-            
-        # 降级备用方案
-        if os.name == 'nt':
-            return "python" if shutil.which("python") else None
+        """智能判断自身是否已被打包，从而选择正确的系统 Python 解释器"""
+        if getattr(sys, 'frozen', False):
+            # 🚨 警告：已被打包！绝对不能用 sys.executable，否则会导致无限无限嵌套弹窗！
+            if sys.platform == "darwin":
+                # Mac 环境：优先硬编码去寻找官方纯净版 Python3 路径
+                good_paths = [
+                    "/usr/local/bin/python3",
+                    "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"
+                ]
+                for p in good_paths:
+                    if os.path.exists(p): return p
+                return shutil.which("python3") or shutil.which("python")
+            else:
+                return shutil.which("python") or shutil.which("python3")
         else:
-            return shutil.which("python3") or shutil.which("python")
+            # 💡 安全：处于源码运行状态，直接复用当前 Python
+            return sys.executable
+
+    def get_clean_env(self):
+        """清洗 PyInstaller 运行时强加的环境变量，防止污染子进程"""
+        env = os.environ.copy()
+        env.pop('LD_LIBRARY_PATH', None)
+        env.pop('DYLD_LIBRARY_PATH', None)
+        env.pop('PYTHONPATH', None)
+        env.pop('_MEIPASS2', None)
+        return env
+    # =============================================================
 
     # --- 核心打包逻辑 ---
     def log_console(self, text):
@@ -381,7 +396,6 @@ class PyInstallerGUI(ttk.Window):
         self.process = None
 
     def smart_analyze_dependencies(self, script_path, req_path):
-        """扫描代码，自动识别坑位，并返回需要补全的打包参数"""
         auto_args_set = set() 
         content = ""
         
@@ -429,11 +443,14 @@ class PyInstallerGUI(ttk.Window):
             
         return final_args
 
+    # ================= 🌟 核心修复 2：隔离执行环境 =================
     def _run_cmd_blocking(self, cmd, cwd=None):
         try:
             kwargs = {}
             if cwd: kwargs['cwd'] = cwd
             if os.name == 'nt': kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+            # 注入干净的环境变量，切断毒素传播
+            kwargs['env'] = self.get_clean_env()
             self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, **kwargs)
             for line in self.process.stdout: self.log_console(line)
             self.process.wait()
