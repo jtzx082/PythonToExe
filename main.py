@@ -22,7 +22,7 @@ ctk.set_default_color_theme("blue")
 class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Python脚本打包工具 - 终极降维打击版")
+        self.title("Python脚本打包工具 - 强制同居版")
         self.geometry("860x920")
         self.minsize(800, 800)
 
@@ -374,7 +374,7 @@ class PackagerApp(TkinterDnD_CTk):
                 else:
                     self.log("✨ 扫描完毕，代码很干净，无需补丁。")
                     
-                # ================= 🌟 终极神迹：全境搜捕 C++ 运行库 =================
+                # ================= 🌟 终极神迹：强制同居打包法 =================
                 content_all = ""
                 try:
                     with open(script, 'r', encoding='utf-8', errors='ignore') as f:
@@ -382,19 +382,16 @@ class PackagerApp(TkinterDnD_CTk):
                 except: pass
                 
                 if "azure.cognitiveservices.speech" in content_all or "azure" in content_all:
-                    self.log("🤖 [深度手术] 发现病因：缺少 Windows C++ 底层运行库！")
-                    self.log("🚀 正在启动全境雷达，强制悬赏抓捕 MSVCP140 等系统级依赖...")
+                    self.log("🤖 [深度手术] 发现病因：Azure 的 C++ 依赖断层导致系统拒载！")
+                    self.log("🚀 正在启动强制同居计划，将系统级依赖与 Azure 核心强行绑入同一子目录...")
                     
-                    # 编写高能探测脚本，让它在子环境中执行
                     detect_code = """
 import os, sys
-# 1. 抓捕 Azure 核心路径
 try:
     import azure.cognitiveservices.speech as az
     print("AZURE_PATH|" + os.path.dirname(az.__file__))
 except: pass
 
-# 2. 抓捕系统 C++ 运行库
 base_dir = getattr(sys, 'base_prefix', sys.prefix)
 dlls = ['msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140_codecvt_ids.dll']
 search_paths = [base_dir, os.path.join(base_dir, 'DLLs'), os.path.join(base_dir, 'Library', 'bin')]
@@ -440,9 +437,9 @@ for f in found.values():
                                                 cmd.extend(["--add-binary", f"{abs_file}{sep}{target_folder}"])
                             elif line.startswith("SYS_DLL|"):
                                 sys_dll_path = line.split("|", 1)[1]
-                                # 🔥 将救命的系统 DLL 强制放入 EXE 根目录
-                                cmd.extend(["--add-binary", f"{sys_dll_path}{sep}."])
-                                self.log(f"🎯 成功捕获系统关键依赖: {os.path.basename(sys_dll_path)}")
+                                # 🔥 终极必杀：把救命的系统 DLL 强制放入 Azure 所在的子目录，让它们做邻居！
+                                cmd.extend(["--add-binary", f"{sys_dll_path}{sep}azure/cognitiveservices/speech"])
+                                self.log(f"🎯 强制同居安排成功: {os.path.basename(sys_dll_path)}")
                                 
                         # 注入 Runtime Hook
                         rthook_code = """import os, sys
@@ -460,7 +457,7 @@ if hasattr(sys, '_MEIPASS'):
                             f.write(rthook_code)
                         
                         cmd.extend(["--runtime-hook", rthook_path])
-                        self.log("✨ [神迹降临] C++ 运行库已强制绑定！Azure 启动断层已被彻底修复！")
+                        self.log("✨ [神迹降临] C++ 运行库已强制打入 Azure 内部！底层依赖彻底贯通！")
                         
                     except Exception as e:
                         self.log(f"⚠️ Azure 底层劫持发生小异常: {e}")
