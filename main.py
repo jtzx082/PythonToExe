@@ -147,9 +147,7 @@ class PackagerApp(TkinterDnD_CTk):
     def clear_log(self):
         self.txt_log.delete("1.0", END)
 
-    # ================= 🌟 核心修复 1：环境清洗与进程解绑 =================
     def get_system_python(self):
-        """智能判断自身是否已被打包，从而选择正确的系统 Python 解释器"""
         if getattr(sys, 'frozen', False):
             if sys.platform == "darwin":
                 good_paths = [
@@ -169,12 +167,10 @@ class PackagerApp(TkinterDnD_CTk):
         env.pop('_MEIPASS2', None)
         env.pop('PYARMOR_LICENSE', None)
         env.pop('PYTHONPATH', None)
-        # 清理 Mac 动态库劫持变量
         env.pop('LD_LIBRARY_PATH', None)
         env.pop('DYLD_LIBRARY_PATH', None)
         return env
 
-    # 🌟 核心修复 2：加入 cwd 参数，强制规范命令执行路径
     def run_cmd_with_log(self, cmd_list, cwd=None):
         startupinfo = None
         if os.name == 'nt':
@@ -279,7 +275,6 @@ class PackagerApp(TkinterDnD_CTk):
             app_name = self.entry_name.get().strip()
             script_dir = os.path.dirname(script)
             
-            # 使用更安全的系统 Python 获取逻辑
             sys_py = self.get_system_python()
             if not sys_py:
                 self.log("❌ 致命错误: 系统环境中找不到 Python！")
@@ -311,7 +306,6 @@ class PackagerApp(TkinterDnD_CTk):
                     venv_py = os.path.join(venv_dir, "bin", "python")
 
                 self.log(f"⏳ 正在从零创建全新的隔离虚拟环境...")
-                # 🌟 修复：指定 cwd=script_dir，避免影响到根目录
                 success = self.run_cmd_with_log([sys_py, "-m", "venv", venv_dir], cwd=script_dir)
                 if not success or not os.path.exists(venv_py):
                     self.log("❌ 虚拟环境创建失败！")
@@ -331,7 +325,6 @@ class PackagerApp(TkinterDnD_CTk):
             
             cmd = [run_py, "-m", "PyInstaller", "--noconfirm", "--clean"]
 
-            # 🌟 核心修复 3：Mac 防呆设计 - macOS 下隐藏控制台(-w)会打包成 .app，不能和 -F 混用
             is_macos_app = sys.platform == "darwin" and self.var_noconsole.get()
             if self.var_onefile.get() and not is_macos_app: 
                 cmd.append("-F")
@@ -375,11 +368,36 @@ class PackagerApp(TkinterDnD_CTk):
 
             cmd.append(script)
             
-            # 🌟 指定 cwd=script_dir，彻底解决 .spec 写入根目录的权限崩溃问题
             success = self.run_cmd_with_log(cmd, cwd=script_dir)
             
             if success:
                 self.log(f"\n✅ 打包大功告成！文件已输出至: {final_outdir}")
+                
+                # ================= 🌟 核心新增：无痕清理机制 =================
+                target_name = app_name if app_name else os.path.splitext(os.path.basename(script))[0]
+                
+                # 1. 斩草除根：清理残留的 .spec 文件
+                spec_path = os.path.join(script_dir, f"{target_name}.spec")
+                if os.path.exists(spec_path):
+                    try:
+                        os.remove(spec_path)
+                        self.log("🧹 [无痕清理] 已自动删除临时的 .spec 配置文件。")
+                    except Exception:
+                        pass
+                
+                # 2. Mac 专属净化：删除同名文件夹，仅保留 .app 封装包
+                if sys.platform == "darwin" and self.var_noconsole.get():
+                    raw_folder_path = os.path.join(final_outdir, target_name)
+                    app_bundle_path = os.path.join(final_outdir, f"{target_name}.app")
+                    
+                    if os.path.exists(app_bundle_path) and os.path.exists(raw_folder_path) and os.path.isdir(raw_folder_path):
+                        try:
+                            shutil.rmtree(raw_folder_path, ignore_errors=True)
+                            self.log("🧹 [无痕清理] 已自动为您删除 macOS 底层多余的同名文件夹，输出目录仅保留纯净的 .app 包！")
+                        except Exception:
+                            pass
+                # =============================================================
+
                 if self.var_open_folder.get():
                     self.log("📂 正在为您打开输出文件夹...")
                     self.open_output_folder(final_outdir)
