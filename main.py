@@ -22,7 +22,7 @@ ctk.set_default_color_theme("blue")
 class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Python脚本打包工具 - 终极降维打击版")
+        self.title("Python脚本打包工具 - 终极搭桥补丁版")
         self.geometry("860x920")
         self.minsize(800, 800)
 
@@ -261,7 +261,6 @@ class PackagerApp(TkinterDnD_CTk):
         if "pandas" in content:
             auto_args_set.add(("--hidden-import", "pandas._libs.tslibs.timedeltas"))
 
-        # Azure 仅做显式基础声明，核心搬运交给下方的手术系统
         if "azure.cognitiveservices.speech" in content or "azure" in content:
             auto_args_set.add(("--hidden-import", "azure.cognitiveservices.speech"))
 
@@ -375,59 +374,64 @@ class PackagerApp(TkinterDnD_CTk):
                 else:
                     self.log("✨ 扫描完毕，代码很干净，无需补丁。")
                     
-                # ================= 🌟 终极神迹：Azure 专属急救协议 (木马注入) =================
-                content_all = ""
+                # ================= 🌟 终极真·物理遍历 + 运行时环境劫持 =================
+                self.log("🤖 [地毯式搜索] 正在暴力翻阅虚拟环境底层文件夹，活捉 C++ 动态库...")
                 try:
-                    with open(script, 'r', encoding='utf-8', errors='ignore') as f:
-                        content_all += f.read()
-                    if req_file and os.path.exists(req_file):
-                        with open(req_file, 'r', encoding='utf-8', errors='ignore') as f:
-                            content_all += "\n" + f.read()
-                except Exception: pass
-                
-                if "azure.cognitiveservices.speech" in content_all or "azure" in content_all:
-                    self.log("🤖 [深度手术] 检测到傲娇的 Azure 语音库，正在执行底层劫持协议...")
-                    # 步骤1：获取 Azure 在虚拟环境中的绝对物理路径
-                    detect_code = "import azure.cognitiveservices.speech as az; import os; print(os.path.dirname(az.__file__))"
-                    try:
-                        startupinfo = None
-                        if os.name == 'nt':
-                            startupinfo = subprocess.STARTUPINFO()
-                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                            
-                        sys_encoding = locale.getpreferredencoding()
-                        res = subprocess.run(
-                            [run_py, "-c", detect_code], 
-                            capture_output=True, text=True, env=self.get_clean_env(),
-                            startupinfo=startupinfo, encoding=sys_encoding, errors='replace'
-                        )
-                        azure_path = res.stdout.strip()
-                        
-                        if azure_path and os.path.exists(azure_path):
+                    # 绝对定位虚拟环境里的 site-packages 路径
+                    site_pkgs = None
+                    if os.name == 'nt':
+                        site_pkgs = os.path.join(venv_dir, "Lib", "site-packages")
+                    else:
+                        lib_path = os.path.join(venv_dir, "lib")
+                        if os.path.exists(lib_path):
+                            for d in os.listdir(lib_path):
+                                if d.startswith("python"):
+                                    site_pkgs = os.path.join(lib_path, d, "site-packages")
+                                    break
+                                    
+                    # 定位成功，对 azure 进行地毯式遍历，生擒 DLL
+                    if site_pkgs and os.path.exists(site_pkgs):
+                        azure_dir = os.path.join(site_pkgs, "azure", "cognitiveservices", "speech")
+                        if os.path.exists(azure_dir):
+                            dll_count = 0
                             sep = ";" if os.name == 'nt' else ":"
-                            # 将整个 Azure 文件夹作为绝对原封不动的数据搬进包里，避开 PyInstaller 的依赖篡改
-                            cmd.extend(["--add-data", f"{azure_path}{sep}azure/cognitiveservices/speech"])
                             
-                            # 步骤2：生成并注入 Runtime Hook (启动前置木马)
-                            rthook_code = """import os
+                            for root_d, _, files in os.walk(azure_dir):
+                                for f in files:
+                                    if f.lower().endswith(('.dll', '.so', '.dylib', '.lib')):
+                                        abs_file = os.path.join(root_d, f)
+                                        rel_folder = os.path.relpath(root_d, site_pkgs).replace('\\', '/')
+                                        cmd.extend(["--add-binary", f"{abs_file}{sep}{rel_folder}"])
+                                        dll_count += 1
+                                        
+                            if dll_count > 0:
+                                self.log(f"✨ [终极神迹] 从硬盘深处生擒了 {dll_count} 个动态链接库，已钉死在打包配方上！")
+                    
+                    # 🌟 关键修复：写入强力 Runtime Hook 补丁，强制连接根目录和 Azure 子目录的底层通路
+                    hook_code = """import os
 import sys
+
 if hasattr(sys, '_MEIPASS'):
-    # Azure 专属防崩溃机制：将内部目录强行加入 Windows 动态库绝对信任搜索路径
-    target_dir = os.path.join(sys._MEIPASS, 'azure', 'cognitiveservices', 'speech')
-    if os.path.exists(target_dir):
-        if hasattr(os, 'add_dll_directory'):
-            os.add_dll_directory(target_dir)
-        os.environ['PATH'] = target_dir + os.pathsep + os.environ.get('PATH', '')
+    # 强制将根目录(包含MSVCP140.dll)和 Azure子目录 加入 Windows DLL 信任搜索链
+    target_dirs = [
+        sys._MEIPASS,
+        os.path.join(sys._MEIPASS, 'azure', 'cognitiveservices', 'speech')
+    ]
+    for d in target_dirs:
+        if os.path.exists(d):
+            if hasattr(os, 'add_dll_directory'):
+                try: os.add_dll_directory(d)
+                except: pass
+            os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
 """
-                            rthook_path = os.path.join(script_dir, "_azure_rthook_terminator.py")
-                            with open(rthook_path, "w", encoding="utf-8") as f:
-                                f.write(rthook_code)
-                            
-                            # 将木马钩子交由 PyInstaller，让它在主程序运行前执行
-                            cmd.extend(["--runtime-hook", rthook_path])
-                            self.log("✨ [手术成功] 已成功向生成的 EXE 植入底层环境篡改木马，此后绝不会再报 DLL 缺失！")
-                    except Exception as e:
-                        self.log(f"⚠️ Azure 底层劫持发生小异常: {e}")
+                    hook_file = os.path.join(script_dir, "_azure_dll_fix.py")
+                    with open(hook_file, "w", encoding="utf-8") as f:
+                        f.write(hook_code)
+                    cmd.extend(["--runtime-hook", hook_file])
+                    self.log("✨ [维度打击] 已注入 DLL 寻址纠正补丁 (Runtime Hook)，彻底打通底层依赖断层！")
+                    
+                except Exception as e:
+                    self.log(f"⚠️ 物理搜索遇到小意外，继续常规打包: {e}")
                 # =======================================================================
 
             extra = self.entry_extra.get().strip()
@@ -443,23 +447,26 @@ if hasattr(sys, '_MEIPASS'):
                 
                 target_name = app_name if app_name else os.path.splitext(os.path.basename(script))[0]
                 
-                # 斩草除根：清理临时文件
+                # 扫地机器人：把生成的 hook 文件和 spec 文件一起销毁
                 cleanup_files = [
                     os.path.join(script_dir, f"{target_name}.spec"),
-                    os.path.join(script_dir, "_azure_rthook_terminator.py")
+                    os.path.join(script_dir, "_azure_dll_fix.py")
                 ]
                 for cf in cleanup_files:
                     if os.path.exists(cf):
                         try: os.remove(cf)
                         except Exception: pass
-                self.log("🧹 [无痕清理] 战场已打扫完毕，无冗余文件残留。")
+                self.log("🧹 [无痕清理] 临时配方与木马补丁已从您的源码目录彻底销毁。")
                 
                 if sys.platform == "darwin" and self.var_noconsole.get():
                     raw_folder_path = os.path.join(final_outdir, target_name)
                     app_bundle_path = os.path.join(final_outdir, f"{target_name}.app")
                     if os.path.exists(app_bundle_path) and os.path.exists(raw_folder_path) and os.path.isdir(raw_folder_path):
-                        try: shutil.rmtree(raw_folder_path, ignore_errors=True)
-                        except Exception: pass
+                        try:
+                            shutil.rmtree(raw_folder_path, ignore_errors=True)
+                            self.log("🧹 [无痕清理] 已自动为您删除 macOS 底层多余的同名文件夹，输出目录仅保留纯净的 .app 包！")
+                        except Exception:
+                            pass
 
                 if self.var_open_folder.get():
                     self.log("📂 正在为您打开输出文件夹...")
