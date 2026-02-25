@@ -178,12 +178,16 @@ class PackagerApp(TkinterDnD_CTk):
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             
         try:
+            # 🌟 修复乱码 1：智能获取系统终端默认编码，避免中文路径乱码
+            import locale
+            sys_encoding = locale.getpreferredencoding()
+            
             process = subprocess.Popen(
                 cmd_list, 
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.STDOUT, 
                 text=True, 
-                encoding='utf-8', 
+                encoding=sys_encoding, # 使用系统本地编码读取
                 errors='replace', 
                 startupinfo=startupinfo, 
                 cwd=cwd, 
@@ -259,8 +263,8 @@ class PackagerApp(TkinterDnD_CTk):
         if "pandas" in content:
             auto_args_set.add(("--hidden-import", "pandas._libs.tslibs.timedeltas"))
 
-        # 🌟 修改点：放弃容易失败的 --collect-all，仅做基本引入，重任交给后面的物理外挂
         if "azure.cognitiveservices.speech" in content or "azure" in content:
+            # 仅做基础引入，核心底层库交给后续深度探测
             auto_args_set.add(("--hidden-import", "azure.cognitiveservices.speech"))
 
         final_args = []
@@ -373,22 +377,56 @@ class PackagerApp(TkinterDnD_CTk):
                 else:
                     self.log("✨ 扫描完毕，代码很干净，无需补丁。")
                     
-                # ================= 🌟 物理寻址外挂防御体系 =================
-                self.log("🤖 [动态探测] 正在扫描隐蔽的 C++ 底层依赖库...")
-                check_code = "try:\n import azure.cognitiveservices.speech as az\n print(az.__path__[0])\nexcept:\n pass"
+                # ================= 🌟 修复：DLL 终极物理强制劫持 (深度遍历引擎) =================
+                # 针对 Azure 等隐藏极深的库，不再依赖通配符，而是让子进程把目录里所有 DLL 找出来
+                self.log("🤖 [动态探测] 正在启动深度雷达，扫描隐蔽的 C++ 底层依赖库...")
+                detect_code = """
+import os
+import sys
+try:
+    import azure.cognitiveservices.speech as az
+    base_dir = az.__path__[0]
+    # 深度遍历目录，寻找所有的动态库
+    found_libs = []
+    for root, dirs, files in os.walk(base_dir):
+        for file in files:
+            if file.lower().endswith(('.dll', '.so', '.dylib')):
+                found_libs.append(os.path.join(root, file))
+    for lib in found_libs:
+        print(lib)
+except Exception as e:
+    pass
+"""
                 try:
-                    res = subprocess.run([run_py, "-c", check_code], capture_output=True, text=True, env=self.get_clean_env())
+                    startupinfo = None
+                    if os.name == 'nt':
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    
+                    res = subprocess.run(
+                        [run_py, "-c", detect_code], 
+                        capture_output=True, 
+                        text=True, 
+                        env=self.get_clean_env(),
+                        startupinfo=startupinfo,
+                        encoding='utf-8', errors='ignore'
+                    )
+                    
                     if res.returncode == 0 and res.stdout.strip():
-                        az_path = res.stdout.strip()
+                        dll_paths = res.stdout.strip().split('\n')
                         sep = ";" if os.name == 'nt' else ":"
-                        # 物理强制将这三个平台的库全都绑进去，不管三七二十一
-                        cmd.extend(["--add-binary", f"{az_path}/*.dll{sep}azure/cognitiveservices/speech"])
-                        cmd.extend(["--add-binary", f"{az_path}/*.so{sep}azure/cognitiveservices/speech"])
-                        cmd.extend(["--add-binary", f"{az_path}/*.dylib{sep}azure/cognitiveservices/speech"])
-                        self.log("✨ [终极防御] 成功定位并物理提取 Azure C++ 核心动态库，已强行捆绑至打包配方！")
-                except Exception:
-                    pass
-                # ========================================================
+                        dll_count = 0
+                        for dll_path in dll_paths:
+                            if dll_path.strip():
+                                # 强制将每一个 DLL 文件映射到安装包的对应相对位置
+                                target_folder = "azure/cognitiveservices/speech"
+                                cmd.extend(["--add-binary", f"{dll_path.strip()}{sep}{target_folder}"])
+                                dll_count += 1
+                        if dll_count > 0:
+                            self.log(f"✨ [终极防御] 成功在底层发现并物理劫持了 {dll_count} 个关键 C++ 动态库，已强行绑入配方！")
+                except Exception as e:
+                    self.log(f"⚠️ 动态探测辅助模块运行时出现小意外，继续常规打包: {e}")
+                # =========================================================================
 
             extra = self.entry_extra.get().strip()
             if extra:
