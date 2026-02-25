@@ -3,6 +3,7 @@ import sys
 import asyncio
 import threading
 import subprocess
+import tempfile # 🌟 新增：引入临时文件模块，获取系统绝对合法的读写目录
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, scrolledtext
 import ttkbootstrap as ttk
@@ -53,7 +54,8 @@ class TTSApp:
         self.is_generating = False 
         self.is_paused = False  
         
-        self.temp_audio_file = "temp_preview.mp3"
+        # 🌟 核心修复 1：将试听临时文件指向系统安全的临时目录，彻底解决 [Errno 30] 报错
+        self.temp_audio_file = os.path.join(tempfile.gettempdir(), "edge_tts_temp_preview.mp3")
         self.loop = asyncio.new_event_loop()
         
         self.selected_voice_key = ttk.StringVar(value="晓晓 (女声 - 活泼/默认)")
@@ -438,7 +440,8 @@ class TTSApp:
 
         def run_export():
             try:
-                temp_mp3 = "temp_export.mp3"
+                # 🌟 核心修复 2：将导出过程中的中间音频文件也放入系统安全的临时目录，彻底解决 [Errno 30] 报错
+                temp_mp3 = os.path.join(tempfile.gettempdir(), "edge_tts_temp_export.mp3")
                 future = asyncio.run_coroutine_threadsafe(
                     self._generate_audio_task(text, temp_mp3), self.loop
                 )
