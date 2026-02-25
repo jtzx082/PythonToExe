@@ -17,7 +17,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v6.1 (Mac环境完美适配版)")
+        self.title("PyInstaller 打包工具 v6.2 (Mac底层框架免疫版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -217,7 +217,7 @@ class PyInstallerGUI(ttk.Window):
         
         author_text = (
             "开发与维护：俞晋全\n"
-            "个人博客：电子云\n\n"
+            "个人博客：硫酸铜的遐想\n\n"
             "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。具有混合架构自适应编译能力，彻底告别环境污染和底层 DLL 丢失烦恼。"
         )
         author_lbl = ttk.Label(f_author, text=author_text, justify=LEFT)
@@ -347,12 +347,18 @@ class PyInstallerGUI(ttk.Window):
 
     # --- 环境自检逻辑 ---
     def get_system_python(self):
+        """
+        🌟 核心修复：永远优先使用启动当前 UI 工具的那个官方 Python 解释器。
+        这可以 100% 避免在 Mac 上抓到自带的 Command Line Tools 残缺版 Python (Tcl 8.5 导致崩溃)。
+        """
+        if sys.executable and os.path.exists(sys.executable):
+            return sys.executable
+            
+        # 降级备用方案
         if os.name == 'nt':
             return "python" if shutil.which("python") else None
         else:
-            if shutil.which("python3"): return "python3"
-            if shutil.which("python"): return "python"
-            return None
+            return shutil.which("python3") or shutil.which("python")
 
     # --- 核心打包逻辑 ---
     def log_console(self, text):
@@ -423,7 +429,6 @@ class PyInstallerGUI(ttk.Window):
             
         return final_args
 
-    # 🌟 核心修复 1：引入 cwd 参数，强制规范命令执行路径，解决 Mac [Errno 30] 报错
     def _run_cmd_blocking(self, cmd, cwd=None):
         try:
             kwargs = {}
@@ -461,7 +466,7 @@ class PyInstallerGUI(ttk.Window):
         
         if self.var_use_venv.get():
             venv_dir = os.path.join(script_dir, ".pack_venv")
-            self.log_console(f"🌱 [阶段 1/2] 正在调用系统环境构建隔离沙盒...\n")
+            self.log_console(f"🌱 [阶段 1/2] 正在调用官方纯净环境构建隔离沙盒...\n")
             
             if os.path.exists(venv_dir):
                 self.log_console("🧹 发现历史残留的虚拟环境，正在执行深度清理，请稍候...\n")
@@ -477,14 +482,13 @@ class PyInstallerGUI(ttk.Window):
                 else:
                     self.log_console("✨ 历史环境清理完毕，确保本次打包100%纯净！\n")
             
-            # 🌟 修复：传入 cwd=script_dir，确保后续生成都在项目目录下进行
             venv_cmd = [system_python, "-m", "venv", venv_dir, "--clear"]
             if self.var_venv_sys.get():
                 venv_cmd.append("--system-site-packages")
                 self.log_console("🔧 混合模式已开启：沙盒将继承全局底层库 (适配 ARM/复杂环境)\n")
             
             if not self._run_cmd_blocking(venv_cmd, cwd=script_dir):
-                self.log_console("\n❌ 虚拟环境创建失败！\n(提示: Ubuntu 等 Linux 系统请确保已通过终端执行过 sudo apt install python3-venv)\n")
+                self.log_console("\n❌ 虚拟环境创建失败！\n")
                 self.after(0, self._unlock_ui)
                 return
                 
@@ -511,12 +515,11 @@ class PyInstallerGUI(ttk.Window):
         
         cmd = [v_python, "-m", "PyInstaller", "-y"] 
         
-        # 🌟 核心修复 2：Mac 防呆设计 - macOS 下隐藏控制台(-w)会打包成 .app，不能和 -F 混用
         is_macos_app = sys.platform == "darwin" and self.var_console.get()
         if self.var_onefile.get() and not is_macos_app: 
             cmd.append("-F")
         elif is_macos_app and self.var_onefile.get():
-            self.log_console("🍎 [Mac专属优化] 检测到同时勾选了单文件和隐藏控制台，已自动取消单文件模式以适配 macOS .app 规范。\n")
+            self.log_console("🍎 [Mac专属防呆] 侦测到正在生成 macOS .app 包，自动禁用冲突的单文件(-F)模式。\n")
 
         if self.var_console.get(): cmd.append("-w") 
         if self.var_clean.get(): cmd.append("--clean")
@@ -562,7 +565,6 @@ class PyInstallerGUI(ttk.Window):
                 
         cmd.append(self.var_script.get())
         
-        # 🌟 此处同样传入 cwd=script_dir，彻底解决 .spec 写入根目录的权限崩溃问题
         success = self._run_cmd_blocking(cmd, cwd=script_dir)
         
         if success:
