@@ -178,7 +178,6 @@ class PackagerApp(TkinterDnD_CTk):
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             
         try:
-            # 🌟 核心修复点：强制加入 encoding='utf-8', errors='replace'，防止控制台 GBK 乱码导致崩溃
             process = subprocess.Popen(
                 cmd_list, 
                 stdout=subprocess.PIPE, 
@@ -225,7 +224,6 @@ class PackagerApp(TkinterDnD_CTk):
         auto_args_set = set()
         content = ""
         
-        # 🌟 同步修复：读取文件时加入 errors='ignore'，避免异常编码文件引发崩溃
         if script_path and os.path.exists(script_path):
             try:
                 with open(script_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -261,8 +259,9 @@ class PackagerApp(TkinterDnD_CTk):
         if "pandas" in content:
             auto_args_set.add(("--hidden-import", "pandas._libs.tslibs.timedeltas"))
 
+        # 🌟 修改点：放弃容易失败的 --collect-all，仅做基本引入，重任交给后面的物理外挂
         if "azure.cognitiveservices.speech" in content or "azure" in content:
-            auto_args_set.add(("--collect-all", "azure.cognitiveservices.speech"))
+            auto_args_set.add(("--hidden-import", "azure.cognitiveservices.speech"))
 
         final_args = []
         for flag, val in auto_args_set:
@@ -373,6 +372,23 @@ class PackagerApp(TkinterDnD_CTk):
                     cmd.extend(smart_fixes)
                 else:
                     self.log("✨ 扫描完毕，代码很干净，无需补丁。")
+                    
+                # ================= 🌟 物理寻址外挂防御体系 =================
+                self.log("🤖 [动态探测] 正在扫描隐蔽的 C++ 底层依赖库...")
+                check_code = "try:\n import azure.cognitiveservices.speech as az\n print(az.__path__[0])\nexcept:\n pass"
+                try:
+                    res = subprocess.run([run_py, "-c", check_code], capture_output=True, text=True, env=self.get_clean_env())
+                    if res.returncode == 0 and res.stdout.strip():
+                        az_path = res.stdout.strip()
+                        sep = ";" if os.name == 'nt' else ":"
+                        # 物理强制将这三个平台的库全都绑进去，不管三七二十一
+                        cmd.extend(["--add-binary", f"{az_path}/*.dll{sep}azure/cognitiveservices/speech"])
+                        cmd.extend(["--add-binary", f"{az_path}/*.so{sep}azure/cognitiveservices/speech"])
+                        cmd.extend(["--add-binary", f"{az_path}/*.dylib{sep}azure/cognitiveservices/speech"])
+                        self.log("✨ [终极防御] 成功定位并物理提取 Azure C++ 核心动态库，已强行捆绑至打包配方！")
+                except Exception:
+                    pass
+                # ========================================================
 
             extra = self.entry_extra.get().strip()
             if extra:
@@ -387,7 +403,6 @@ class PackagerApp(TkinterDnD_CTk):
                 
                 target_name = app_name if app_name else os.path.splitext(os.path.basename(script))[0]
                 
-                # 1. 斩草除根：清理残留的 .spec 文件
                 spec_path = os.path.join(script_dir, f"{target_name}.spec")
                 if os.path.exists(spec_path):
                     try:
@@ -396,7 +411,6 @@ class PackagerApp(TkinterDnD_CTk):
                     except Exception:
                         pass
                 
-                # 2. Mac 专属净化：删除同名文件夹，仅保留 .app 封装包
                 if sys.platform == "darwin" and self.var_noconsole.get():
                     raw_folder_path = os.path.join(final_outdir, target_name)
                     app_bundle_path = os.path.join(final_outdir, f"{target_name}.app")
