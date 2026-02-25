@@ -17,7 +17,7 @@ AUTO_CONFIG_FILE = "pyinstaller_gui_history.json"
 class PyInstallerGUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="lumen")
-        self.title("PyInstaller 打包工具 v6.3 (防无限套娃终极版)")
+        self.title("PyInstaller 打包工具 v6.5 (无痕清理终极版)")
         self.geometry("820x800")
         self.minsize(750, 650)
         
@@ -217,7 +217,7 @@ class PyInstallerGUI(ttk.Window):
         
         author_text = (
             "开发与维护：俞晋全\n"
-            "个人博客：电子云\n\n"
+            "个人博客：硫酸铜的遐想\n\n"
             "本工具致力于为广大的 Python 开发者、教师同仁提供一款轻量且强大的跨平台打包解决方案。具有混合架构自适应编译能力，彻底告别环境污染和底层 DLL 丢失烦恼。"
         )
         author_lbl = ttk.Label(f_author, text=author_text, justify=LEFT)
@@ -345,13 +345,11 @@ class PyInstallerGUI(ttk.Window):
             sep = ";" if os.name == 'nt' else ":"
             self.var_add_data.set(f"{self.var_add_data.get()} {p}{sep}{os.path.basename(p)}".strip())
 
-    # ================= 🌟 核心修复 1：冷冻状态感知 =================
+    # --- 核心感知与环境管理 ---
     def get_system_python(self):
         """智能判断自身是否已被打包，从而选择正确的系统 Python 解释器"""
         if getattr(sys, 'frozen', False):
-            # 🚨 警告：已被打包！绝对不能用 sys.executable，否则会导致无限无限嵌套弹窗！
             if sys.platform == "darwin":
-                # Mac 环境：优先硬编码去寻找官方纯净版 Python3 路径
                 good_paths = [
                     "/usr/local/bin/python3",
                     "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"
@@ -362,7 +360,6 @@ class PyInstallerGUI(ttk.Window):
             else:
                 return shutil.which("python") or shutil.which("python3")
         else:
-            # 💡 安全：处于源码运行状态，直接复用当前 Python
             return sys.executable
 
     def get_clean_env(self):
@@ -373,9 +370,7 @@ class PyInstallerGUI(ttk.Window):
         env.pop('PYTHONPATH', None)
         env.pop('_MEIPASS2', None)
         return env
-    # =============================================================
 
-    # --- 核心打包逻辑 ---
     def log_console(self, text):
         self.console_text.insert(END, text)
         self.console_text.see(END)
@@ -396,6 +391,7 @@ class PyInstallerGUI(ttk.Window):
         self.process = None
 
     def smart_analyze_dependencies(self, script_path, req_path):
+        """扫描代码，自动识别坑位，并返回需要补全的打包参数"""
         auto_args_set = set() 
         content = ""
         
@@ -443,13 +439,11 @@ class PyInstallerGUI(ttk.Window):
             
         return final_args
 
-    # ================= 🌟 核心修复 2：隔离执行环境 =================
     def _run_cmd_blocking(self, cmd, cwd=None):
         try:
             kwargs = {}
             if cwd: kwargs['cwd'] = cwd
             if os.name == 'nt': kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-            # 注入干净的环境变量，切断毒素传播
             kwargs['env'] = self.get_clean_env()
             self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, **kwargs)
             for line in self.process.stdout: self.log_console(line)
@@ -543,7 +537,11 @@ class PyInstallerGUI(ttk.Window):
         if self.var_upx.get(): cmd.append("--upx-dir=.") 
         if self.var_uac.get() and sys.platform == "win32": cmd.append("--uac-admin")
         
-        if self.var_outdir.get(): cmd.extend(["--distpath", self.var_outdir.get()])
+        outdir_val = self.var_outdir.get().strip()
+        final_outdir = outdir_val if outdir_val else os.path.join(script_dir, "dist")
+        if outdir_val: 
+            cmd.extend(["--distpath", outdir_val])
+            
         if self.var_outname.get(): cmd.extend(["-n", self.var_outname.get()])
         if self.var_icon.get(): cmd.extend(["-i", self.var_icon.get()])
             
@@ -582,10 +580,39 @@ class PyInstallerGUI(ttk.Window):
                 
         cmd.append(self.var_script.get())
         
+        # 提取目标名称，用于后续文件清理
+        target_name = self.var_outname.get().strip() or os.path.splitext(os.path.basename(self.var_script.get()))[0]
+        
         success = self._run_cmd_blocking(cmd, cwd=script_dir)
         
         if success:
-            self.log_console("\n🎉 打包圆满完成！(生成的程序体积已得到极限优化)\n您可以点击左下角打开输出目录查看。\n")
+            self.log_console("\n🎉 打包圆满完成！(生成的程序体积已得到极限优化)\n")
+            
+            # ================= 🌟 核心新增：无痕清理机制 =================
+            # 1. 斩草除根：清理残留的 .spec 文件
+            spec_path = os.path.join(script_dir, f"{target_name}.spec")
+            if os.path.exists(spec_path):
+                try:
+                    os.remove(spec_path)
+                    self.log_console("🧹 [无痕清理] 已自动删除临时的 .spec 配置文件。\n")
+                except Exception:
+                    pass
+            
+            # 2. Mac 专属净化：删除同名文件夹，仅保留 .app 封装包
+            if sys.platform == "darwin" and self.var_console.get():
+                raw_folder_path = os.path.join(final_outdir, target_name)
+                app_bundle_path = os.path.join(final_outdir, f"{target_name}.app")
+                
+                # 只有当 .app 成功生成，且多余的同名文件夹存在时才动手
+                if os.path.exists(app_bundle_path) and os.path.exists(raw_folder_path) and os.path.isdir(raw_folder_path):
+                    try:
+                        shutil.rmtree(raw_folder_path, ignore_errors=True)
+                        self.log_console("🧹 [无痕清理] 已自动为您删除 macOS 底层多余的同名文件夹，输出目录仅保留纯净的 .app 包！\n")
+                    except Exception:
+                        pass
+            # =============================================================
+
+            self.log_console("您可以点击左下角打开输出目录查看。\n")
         else:
             self.log_console("\n❌ 操作失败或被强制取消。\n")
             
