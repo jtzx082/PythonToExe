@@ -22,7 +22,7 @@ ctk.set_default_color_theme("blue")
 class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Python脚本打包工具 - 强制同居版")
+        self.title("Python脚本打包工具 - 终极扁平化必杀版")
         self.geometry("860x920")
         self.minsize(800, 800)
 
@@ -261,6 +261,7 @@ class PackagerApp(TkinterDnD_CTk):
         if "pandas" in content:
             auto_args_set.add(("--hidden-import", "pandas._libs.tslibs.timedeltas"))
 
+        # Azure 基础导入声明
         if "azure.cognitiveservices.speech" in content or "azure" in content:
             auto_args_set.add(("--hidden-import", "azure.cognitiveservices.speech"))
 
@@ -374,38 +375,50 @@ class PackagerApp(TkinterDnD_CTk):
                 else:
                     self.log("✨ 扫描完毕，代码很干净，无需补丁。")
                     
-                # ================= 🌟 终极神迹：强制同居打包法 =================
+                # ================= 🌟 终极破茧：全面扁平化投放系统 =================
                 content_all = ""
                 try:
                     with open(script, 'r', encoding='utf-8', errors='ignore') as f:
                         content_all += f.read()
+                    if req_file and os.path.exists(req_file):
+                        with open(req_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            content_all += "\n" + f.read()
                 except: pass
                 
                 if "azure.cognitiveservices.speech" in content_all or "azure" in content_all:
-                    self.log("🤖 [深度手术] 发现病因：Azure 的 C++ 依赖断层导致系统拒载！")
-                    self.log("🚀 正在启动强制同居计划，将系统级依赖与 Azure 核心强行绑入同一子目录...")
+                    self.log("🤖 [破茧行动] 发现病因：PyInstaller 拦截了子目录的 DLL 加载！")
+                    self.log("🚀 正在启动扁平化投放，将 Azure 与系统底层库全员空降至根目录...")
                     
                     detect_code = """
 import os, sys
+
+# 1. 获取 Azure DLL
 try:
     import azure.cognitiveservices.speech as az
-    print("AZURE_PATH|" + os.path.dirname(az.__file__))
+    azure_path = os.path.dirname(az.__file__)
+    for root_d, _, files in os.walk(azure_path):
+        for f in files:
+            if f.lower().endswith(('.dll', '.so', '.dylib', '.lib')):
+                abs_file = os.path.join(root_d, f)
+                print("AZURE_DLL|" + abs_file)
 except: pass
 
-base_dir = getattr(sys, 'base_prefix', sys.prefix)
-dlls = ['msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140_codecvt_ids.dll']
-search_paths = [base_dir, os.path.join(base_dir, 'DLLs'), os.path.join(base_dir, 'Library', 'bin')]
+# 2. 全境抓捕系统 C++ 运行库
+dlls_to_find = ['msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140_codecvt_ids.dll']
+search_paths = [getattr(sys, 'base_prefix', sys.prefix), os.path.join(getattr(sys, 'base_prefix', sys.prefix), 'DLLs'), os.path.join(getattr(sys, 'base_prefix', sys.prefix), 'Library', 'bin')]
 if 'WINDIR' in os.environ:
     search_paths.append(os.path.join(os.environ['WINDIR'], 'System32'))
-    
+search_paths.extend(os.environ.get('PATH', '').split(os.pathsep))
+
 found = {}
 for p in search_paths:
-    if os.path.exists(p):
-        for d in dlls:
-            if d not in found:
-                fp = os.path.join(p, d)
-                if os.path.exists(fp):
-                    found[d] = fp
+    if not p or not os.path.exists(p): continue
+    for d in dlls_to_find:
+        if d not in found:
+            fp = os.path.join(p, d)
+            if os.path.isfile(fp):
+                found[d] = fp
+
 for f in found.values():
     print("SYS_DLL|" + f)
 """
@@ -423,44 +436,25 @@ for f in found.values():
                         )
                         
                         sep = ";" if os.name == 'nt' else ":"
+                        dll_count = 0
                         for line in res.stdout.strip().split('\n'):
                             line = line.strip()
-                            if line.startswith("AZURE_PATH|"):
-                                azure_path = line.split("|", 1)[1]
-                                if os.path.exists(azure_path):
-                                    for root_d, _, files in os.walk(azure_path):
-                                        for f in files:
-                                            if f.lower().endswith(('.dll', '.so', '.dylib', '.lib')):
-                                                abs_file = os.path.join(root_d, f)
-                                                rel_folder = os.path.relpath(root_d, azure_path).replace('\\', '/')
-                                                target_folder = f"azure/cognitiveservices/speech/{rel_folder}".strip('/')
-                                                cmd.extend(["--add-binary", f"{abs_file}{sep}{target_folder}"])
+                            if line.startswith("AZURE_DLL|"):
+                                dll_path = line.split("|", 1)[1]
+                                # 💥 核心突破点：将 Azure DLL 强制塞入打包根目录 "." 💥
+                                cmd.extend(["--add-binary", f"{dll_path}{sep}."])
+                                dll_count += 1
                             elif line.startswith("SYS_DLL|"):
                                 sys_dll_path = line.split("|", 1)[1]
-                                # 🔥 终极必杀：把救命的系统 DLL 强制放入 Azure 所在的子目录，让它们做邻居！
-                                cmd.extend(["--add-binary", f"{sys_dll_path}{sep}azure/cognitiveservices/speech"])
-                                self.log(f"🎯 强制同居安排成功: {os.path.basename(sys_dll_path)}")
+                                # 🔥 将救命的系统 DLL 强制放入 EXE 根目录 "."
+                                cmd.extend(["--add-binary", f"{sys_dll_path}{sep}."])
+                                self.log(f"🎯 成功捕获系统关键依赖: {os.path.basename(sys_dll_path)}")
                                 
-                        # 注入 Runtime Hook
-                        rthook_code = """import os, sys
-if hasattr(sys, '_MEIPASS'):
-    target_dirs = [sys._MEIPASS, os.path.join(sys._MEIPASS, 'azure', 'cognitiveservices', 'speech')]
-    for d in target_dirs:
-        if os.path.exists(d):
-            if hasattr(os, 'add_dll_directory'):
-                try: os.add_dll_directory(d)
-                except: pass
-            os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
-"""
-                        rthook_path = os.path.join(script_dir, "_azure_rthook_terminator.py")
-                        with open(rthook_path, "w", encoding="utf-8") as f:
-                            f.write(rthook_code)
-                        
-                        cmd.extend(["--runtime-hook", rthook_path])
-                        self.log("✨ [神迹降临] C++ 运行库已强制打入 Azure 内部！底层依赖彻底贯通！")
+                        if dll_count > 0:
+                            self.log(f"✨ [神迹降临] 成功提取 {dll_count} 个 Azure 动态库直达根目录，完美适配加载机制！")
                         
                     except Exception as e:
-                        self.log(f"⚠️ Azure 底层劫持发生小异常: {e}")
+                        self.log(f"⚠️ 物理搜索遇到小意外，继续常规打包: {e}")
                 # =========================================================================
 
             extra = self.entry_extra.get().strip()
@@ -477,15 +471,12 @@ if hasattr(sys, '_MEIPASS'):
                 target_name = app_name if app_name else os.path.splitext(os.path.basename(script))[0]
                 
                 # 斩草除根：扫地机器人
-                cleanup_files = [
-                    os.path.join(script_dir, f"{target_name}.spec"),
-                    os.path.join(script_dir, "_azure_rthook_terminator.py")
-                ]
-                for cf in cleanup_files:
-                    if os.path.exists(cf):
-                        try: os.remove(cf)
-                        except Exception: pass
-                self.log("🧹 [无痕清理] 临时配方与木马补丁已从您的源码目录彻底销毁。")
+                spec_path = os.path.join(script_dir, f"{target_name}.spec")
+                if os.path.exists(spec_path):
+                    try:
+                        os.remove(spec_path)
+                        self.log("🧹 [无痕清理] 临时配方已从您的源码目录彻底销毁。")
+                    except Exception: pass
                 
                 if sys.platform == "darwin" and self.var_noconsole.get():
                     raw_folder_path = os.path.join(final_outdir, target_name)
