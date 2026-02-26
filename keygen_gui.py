@@ -3,14 +3,13 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 import hashlib
 
-# 必须与 main.py 中的盐值绝对一致！
 SECRET_SALT = "LiuSuanTong_Chem_2026_@TopSecret!"
 
 class LicenseGenerator:
     def __init__(self, master):
         self.master = master
         self.master.title("硫酸铜的遐想 - 商业授权注册机")
-        self.master.geometry("550x400")
+        self.master.geometry("550x460") 
         self.master.resizable(False, False)
         self.setup_ui()
 
@@ -59,7 +58,6 @@ class LicenseGenerator:
             ttk.dialogs.dialogs.Messagebox.show_info("复制成功", "授权码已复制到剪贴板，可直接在微信中粘贴发给客户！")
 
 if __name__ == "__main__":
-    # 采用炫酷的暗黑黑客主题，与主程序的亮色办公风彻底区分！
     app = ttk.Window(themename="darkly") 
     LicenseGenerator(app)
     app.mainloop()
