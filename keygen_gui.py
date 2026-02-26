@@ -9,7 +9,8 @@ class LicenseGenerator:
     def __init__(self, master):
         self.master = master
         self.master.title("硫酸铜的遐想 - 商业授权注册机")
-        self.master.geometry("550x460") 
+        # 核心修复：高度调大至 520，完美适配 macOS 渲染机制
+        self.master.geometry("550x520") 
         self.master.resizable(False, False)
         self.setup_ui()
 
@@ -27,7 +28,7 @@ class LicenseGenerator:
         self.ent_machine_code = ttk.Entry(input_frame, font=("Consolas", 15), justify=CENTER)
         self.ent_machine_code.pack(fill=X, pady=10)
 
-        ttk.Button(container, text="⚙️ 极速生成专属授权码", bootstyle=PRIMARY, width=30, command=self.generate_key).pack(pady=15)
+        ttk.Button(container, text="⚙️ 极速生成专属授权码", bootstyle=PRIMARY, width=30, command=self.generate_key).pack(pady=20)
 
         output_frame = ttk.Frame(container)
         output_frame.pack(fill=X, pady=10)
@@ -36,7 +37,7 @@ class LicenseGenerator:
         self.ent_license_key = ttk.Entry(output_frame, font=("Consolas", 15, "bold"), justify=CENTER, bootstyle=INFO)
         self.ent_license_key.pack(fill=X, pady=10)
 
-        ttk.Button(container, text="📋 一键复制授权码", bootstyle=(SUCCESS, OUTLINE), width=20, command=self.copy_to_clipboard).pack(pady=5)
+        ttk.Button(container, text="📋 一键复制授权码", bootstyle=(SUCCESS, OUTLINE), width=20, command=self.copy_to_clipboard).pack(pady=10)
 
     def generate_key(self):
         mc = self.ent_machine_code.get().strip()
