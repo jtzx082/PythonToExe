@@ -1,393 +1,636 @@
-import customtkinter as ctk
-import pandas as pd
-import numpy as np
-import threading
-import os
 import sys
-from tkinter import filedialog, messagebox
+import os
+import json
 
-# --- 全局外观设置 ---
-ctk.set_appearance_mode("System")  
-ctk.set_default_color_theme("blue")  
+# --- 兼容性修复 ---
+try:
+    import PIL._tkinter_finder
+except ImportError:
+    pass
+import PIL.ImageTk 
+# -----------------
 
-class GaokaoApp(ctk.CTk):
+import threading
+import tkinter as tk
+from tkinter import messagebox, filedialog, simpledialog
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from ttkbootstrap.scrolled import ScrolledText
+import requests
+from docx import Document
+from docx.shared import Cm, Pt, RGBColor
+from docx.oxml.ns import qn
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from datetime import datetime
+import pptx  # 新增：用于解析 PPTX 文件
+
+# --- 字体自动适配 ---
+DEFAULT_FONT = "Helvetica"
+SYSTEM_PLATFORM = sys.platform
+if SYSTEM_PLATFORM.startswith('win'):
+    MAIN_FONT_NAME = "微软雅黑"
+    UI_FONT_SIZE = 9
+elif SYSTEM_PLATFORM.startswith('darwin'): 
+    MAIN_FONT_NAME = "PingFang SC"
+    UI_FONT_SIZE = 11
+else: 
+    MAIN_FONT_NAME = "WenQuanYi Micro Hei" 
+    UI_FONT_SIZE = 10
+
+# --- 配置文件路径 (用户主目录) ---
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".jinta_lesson_config.json")
+
+class LessonPlanWriter(ttk.Window):
     def __init__(self):
-        super().__init__()
-
-        # 1. 窗口基础设置
-        self.title("甘肃新高考赋分系统 Pro Max (自定义参数版) | 俞晋全名师工作室")
-        self.geometry("1200x850")
-        self.minsize(1000, 750)
+        super().__init__(themename="flatly") 
+        self.title("金塔县中学教案智能生成系统 v3.5 (文档智编版)")
+        self.geometry("1350x950")
         
-        # 数据变量
-        self.file_path = None
-        self.df_raw = None
-        self.sheet_names = []
-        self.param_entries = {} # 存储参数输入框的字典
+        self.lesson_data = {} 
+        self.active_period = 1 
         
-        # 布局配置
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-
-        # ==========================
-        # === 左侧边栏 (操作区) ===
-        # ==========================
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(9, weight=1) 
-
-        # Logo
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=22, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
-
-        # 1. 导入
-        self.btn_load = ctk.CTkButton(self.sidebar_frame, text="1. 导入Excel成绩表", height=40, command=self.load_file_action)
-        self.btn_load.grid(row=1, column=0, padx=20, pady=10)
-
-        # 2. Sheet选择
-        self.lbl_sheet = ctk.CTkLabel(self.sidebar_frame, text="选择工作表 (Sheet):", anchor="w")
-        self.lbl_sheet.grid(row=2, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.sheet_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_sheet_event)
-        self.sheet_dropdown.grid(row=3, column=0, padx=20, pady=(5, 10))
-        self.sheet_dropdown.set("等待导入...")
-        self.sheet_dropdown.configure(state="disabled")
-
-        # 3. 班级列
-        self.lbl_class = ctk.CTkLabel(self.sidebar_frame, text="指定班级列 (计算班排):", anchor="w")
-        self.lbl_class.grid(row=4, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.class_col_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[])
-        self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
-        self.class_col_dropdown.set("等待加载...")
-
-        # 底部按钮区
-        self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始赋分计算", height=50, fg_color="green", font=ctk.CTkFont(size=16, weight="bold"), command=self.start_calculation)
-        self.btn_calc.grid(row=10, column=0, padx=20, pady=15)
-        self.btn_calc.configure(state="disabled")
-
-        self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果 Excel", height=40, command=self.export_file)
-        self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
-        self.btn_export.configure(state="disabled")
-
-        # ==========================
-        # === 右侧主内容区 (Tab) ===
-        # ==========================
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.is_generating = False
+        self.stop_flag = False
         
-        # 状态栏
-        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请先导入数据，然后确认【赋分标准】。", anchor="w", font=("Microsoft YaHei UI", 16))
-        self.status_label.pack(fill="x", pady=(0, 10))
-
-        # 创建选项卡
-        self.tabview = ctk.CTkTabview(self.main_frame)
-        self.tabview.pack(fill="both", expand=True)
-        self.tabview.add("科目设置")
-        self.tabview.add("赋分标准设置")
+        # 新增：文档内容存储
+        self.uploaded_file_text = ""
+        self.uploaded_file_name_var = tk.StringVar(value="未上传参考文档")
         
-        # --- Tab 1: 科目设置 ---
-        self.setup_subject_tab()
-
-        # --- Tab 2: 赋分参数设置 ---
-        self.setup_params_tab()
-
-        # 进度条
-        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progressbar.pack(fill="x", pady=(15, 0))
-        self.progressbar.set(0)
-
-    # --------------------------
-    # 界面构建辅助函数
-    # --------------------------
-    def setup_subject_tab(self):
-        tab = self.tabview.tab("科目设置")
+        # 变量
+        self.api_key = "" 
+        self.api_status_var = tk.StringVar(value="❌ 未配置")
+        self.total_periods_var = tk.IntVar(value=1)
+        self.current_period_disp_var = tk.StringVar(value="1")
         
-        # 滚动设置区
-        self.scroll_frame = ctk.CTkScrollableFrame(tab, label_text="勾选对应列名")
-        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # 原始计入科目区
-        self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【直接计入总分】 (语数外 + 物理/历史):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_raw.pack(fill="x", pady=(10, 5), padx=10)
-        self.raw_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.raw_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.raw_checkboxes = []
-
-        # 赋分科目区
-        self.lbl_assign = ctk.CTkLabel(self.scroll_frame, text="【等级赋分科目】 (化生政地):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_assign.pack(fill="x", pady=(25, 5), padx=10)
-        self.assign_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.assign_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.assign_checkboxes = []
-
-    def setup_params_tab(self):
-        tab = self.tabview.tab("赋分标准设置")
+        self.author_info = "设计与开发：金塔县中学化学教研组 · 俞晋全 | 核心驱动：DeepSeek-V3"
         
-        info_lbl = ctk.CTkLabel(tab, text="请根据实际需求修改参数（默认值为甘肃省标准）。\n人数比例请输入整数（如15代表15%）。", font=("Microsoft YaHei UI", 13))
-        info_lbl.pack(pady=10)
+        self.load_config() 
+        self.setup_ui()
+        self.save_current_data_to_memory(1)
 
-        # 参数网格容器
-        grid_frame = ctk.CTkFrame(tab)
-        grid_frame.pack(padx=20, pady=10)
+    def load_config(self):
+        """加载配置文件"""
+        try:
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    self.api_key = config.get("api_key", "")
+                    if self.api_key:
+                        self.api_status_var.set("✅ 已就绪 (自动加载)")
+        except Exception:
+            pass
 
-        # 表头
-        headers = ["等级", "人数比例 (%)", "赋分上限 (T2)", "赋分下限 (T1)"]
-        for col, text in enumerate(headers):
-            ctk.CTkLabel(grid_frame, text=text, font=("Arial", 12, "bold")).grid(row=0, column=col, padx=15, pady=10)
+    def save_config(self):
+        """保存配置文件"""
+        try:
+            config = {"api_key": self.api_key}
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f)
+        except Exception as e:
+            messagebox.showerror("保存失败", f"无法保存配置: {str(e)}")
 
-        # 默认数据 (甘肃标准)
-        default_data = [
-            ('A', '15', '100', '86'),
-            ('B', '35', '85',  '71'),
-            ('C', '35', '70',  '56'),
-            ('D', '13', '55',  '41'),
-            ('E', '2',  '40',  '30')
+    def open_api_settings(self):
+        new_key = simpledialog.askstring(
+            title="配置 API Key",
+            prompt="请输入 DeepSeek API Key:\n(输入后将自动保存，下次无需再次输入)",
+            initialvalue=self.api_key,
+            parent=self
+        )
+        
+        if new_key is not None:
+            self.api_key = new_key.strip()
+            self.save_config() 
+            
+            if self.api_key:
+                self.api_status_var.set("✅ 已就绪")
+                messagebox.showinfo("成功", "API Key 已保存！下次打开软件可直接使用。")
+            else:
+                self.api_status_var.set("❌ 未配置")
+
+    # ================= 新增：文档上传解析逻辑 =================
+    def upload_document(self):
+        filepath = filedialog.askopenfilename(
+            title="选择参考文档",
+            filetypes=[("支持的文档", "*.pptx *.docx"), ("PowerPoint", "*.pptx"), ("Word", "*.docx")]
+        )
+        if not filepath:
+            return
+        
+        self.status_var.set("⏳ 正在解析文档内容...")
+        threading.Thread(target=self._process_document_thread, args=(filepath,)).start()
+
+    def _process_document_thread(self, filepath):
+        try:
+            text_content = ""
+            if filepath.endswith('.docx'):
+                doc = Document(filepath)
+                text_content = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+            elif filepath.endswith('.pptx'):
+                prs = pptx.Presentation(filepath)
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            text_content += shape.text + "\n"
+            
+            # 截取前 15000 字符，避免输入 Token 过大导致 API 拒绝或超时
+            self.uploaded_file_text = text_content[:15000] 
+            filename = os.path.basename(filepath)
+            
+            self.after(0, lambda: self.uploaded_file_name_var.set(f"📄 {filename}"))
+            self.after(0, lambda: self.status_var.set(f"✅ 文档 {filename} 解析成功，AI 将参考此内容！"))
+        except Exception as e:
+            self.after(0, lambda: messagebox.showerror("解析失败", f"无法解析该文档，请确保文件未被占用:\n{str(e)}"))
+            self.after(0, lambda: self.status_var.set("❌ 文档解析失败"))
+
+    def setup_ui(self):
+        header_frame = ttk.Frame(self, padding=(15, 15))
+        header_frame.pack(fill=X)
+        
+        api_frame = ttk.Labelframe(header_frame, text="🔑 授权管理", padding=10, bootstyle="info")
+        api_frame.pack(side=LEFT, fill=Y, padx=(0, 10))
+        
+        ttk.Button(api_frame, text="⚙️ 配置 API Key", command=self.open_api_settings, bootstyle="info").pack(side=LEFT, padx=5)
+        ttk.Label(api_frame, textvariable=self.api_status_var, font=(MAIN_FONT_NAME, 9)).pack(side=LEFT, padx=5)
+
+        topic_frame = ttk.Labelframe(header_frame, text="📚 课题与进度规划", padding=10, bootstyle="primary")
+        topic_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
+        
+        f1 = ttk.Frame(topic_frame)
+        f1.pack(fill=X, pady=(0, 5))
+        ttk.Label(f1, text="课题名称:", font=(MAIN_FONT_NAME, UI_FONT_SIZE, "bold")).pack(side=LEFT)
+        self.topic_entry = ttk.Entry(f1, width=25, bootstyle="primary")
+        self.topic_entry.pack(side=LEFT, padx=5, fill=X, expand=True)
+        self.topic_entry.insert(0, "离子反应")
+        
+        ttk.Label(f1, text="教案类型:", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT, padx=(10, 5))
+        self.type_combo = ttk.Combobox(f1, values=["详案 (标准)", "简案 (提纲)", "匹配教学环节详案", "匹配教学环节简案"], state="readonly", width=16, bootstyle="primary")
+        self.type_combo.current(0)
+        self.type_combo.pack(side=LEFT)
+
+        f2 = ttk.Frame(topic_frame)
+        f2.pack(fill=X)
+        ttk.Label(f2, text="总课时:", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT)
+        self.total_spin = ttk.Spinbox(f2, from_=1, to=10, width=3, textvariable=self.total_periods_var, command=self.update_period_list, bootstyle="primary")
+        self.total_spin.pack(side=LEFT, padx=5)
+        
+        ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
+        
+        ttk.Label(f2, text="当前编辑:", font=(MAIN_FONT_NAME, UI_FONT_SIZE, "bold"), bootstyle="warning").pack(side=LEFT)
+        ttk.Label(f2, text="第").pack(side=LEFT, padx=2)
+        self.period_combo = ttk.Combobox(f2, values=[1], width=3, state="readonly", textvariable=self.current_period_disp_var, bootstyle="warning")
+        self.period_combo.current(0)
+        self.period_combo.pack(side=LEFT)
+        self.period_combo.bind("<<ComboboxSelected>>", self.handle_period_switch)
+        ttk.Label(f2, text="课时").pack(side=LEFT, padx=2)
+
+        # 新增：文档上传 UI 区域
+        ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
+        ttk.Button(f2, text="📎 注入PPT/文档", command=self.upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
+        ttk.Label(f2, textvariable=self.uploaded_file_name_var, font=(MAIN_FONT_NAME, 9), bootstyle="secondary").pack(side=LEFT)
+
+        action_frame = ttk.Labelframe(header_frame, text="⚙️ 全局操作", padding=10, bootstyle="secondary")
+        action_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
+        
+        ttk.Button(action_frame, text="📥 导出全套Word教案", command=self.export_word, bootstyle="warning").pack(fill=X, pady=2)
+        ttk.Button(action_frame, text="🗑️ 清空所有数据", command=self.clear_all_data, bootstyle="danger outline").pack(fill=X, pady=2)
+        ttk.Button(action_frame, text="ℹ️ 关于作者", command=self.show_author, bootstyle="info outline").pack(fill=X, pady=2)
+
+        main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
+        main_pane.pack(fill=BOTH, expand=True, padx=15, pady=5)
+        
+        left_frame = ttk.Labelframe(main_pane, text="1. 教学设计框架 (AI辅助)", padding=10, bootstyle="info")
+        main_pane.add(left_frame, weight=1)
+        
+        self.left_canvas = tk.Canvas(left_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=self.left_canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.left_canvas)
+        self.scrollable_frame.bind("<Configure>", lambda e: self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all")))
+        
+        left_canvas_window = self.left_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        def configure_canvas(event):
+            self.left_canvas.itemconfig(left_canvas_window, width=event.width)
+        self.left_canvas.bind('<Configure>', configure_canvas)
+        
+        self.left_canvas.configure(yscrollcommand=scrollbar.set)
+        self.left_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def _on_mousewheel(event):
+            self.left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        def _on_linux_scroll_up(event):
+            self.left_canvas.yview_scroll(-1, "units")
+        def _on_linux_scroll_down(event):
+            self.left_canvas.yview_scroll(1, "units")
+        def _bind_mouse(event):
+            self.left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            self.left_canvas.bind_all("<Button-4>", _on_linux_scroll_up)
+            self.left_canvas.bind_all("<Button-5>", _on_linux_scroll_down)
+        def _unbind_mouse(event):
+            self.left_canvas.unbind_all("<MouseWheel>")
+            self.left_canvas.unbind_all("<Button-4>")
+            self.left_canvas.unbind_all("<Button-5>")
+
+        left_frame.bind('<Enter>', _bind_mouse)
+        left_frame.bind('<Leave>', _unbind_mouse)
+
+        self.fields = {}
+        font_bold = (MAIN_FONT_NAME, UI_FONT_SIZE, "bold")
+        font_norm = (MAIN_FONT_NAME, UI_FONT_SIZE)
+
+        custom_frame = ttk.LabelFrame(self.scrollable_frame, text="★ 本课时自定义教学内容 (可选)", padding=5, bootstyle="danger")
+        custom_frame.pack(fill=X, pady=(0, 10))
+        ttk.Label(custom_frame, text="若填写，AI将严格围绕此内容设计；若留空，则自动规划。", font=(MAIN_FONT_NAME, UI_FONT_SIZE-1), bootstyle="secondary").pack(anchor=W)
+        self.fields['custom_content'] = tk.Text(custom_frame, height=3, font=font_norm, bg="#fff0f0", fg="#000")
+        self.fields['custom_content'].pack(fill=X, pady=2)
+        
+        labels = [
+            ("📖 章节名称", "chapter", 1),
+            ("📋 课程标准 (2017版2025修订)", "standard", 4), 
+            ("🎯 素养导向目标", "objectives", 6),
+            ("🔥 教学重点", "key_points", 3),
+            ("💡 教学难点", "difficulties", 3),
+            ("🛠️ 教学方法", "methods", 2),
+            ("✍️ 作业设计", "homework", 3),
         ]
-
-        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
-
-        for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
-            # 等级标签
-            ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
-            
-            # 百分比输入
-            e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_pct.insert(0, pct)
-            e_pct.grid(row=row, column=1, pady=5)
-            
-            # 上限输入
-            e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_max.insert(0, tmax)
-            e_max.grid(row=row, column=2, pady=5)
-            
-            # 下限输入
-            e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_min.insert(0, tmin)
-            e_min.grid(row=row, column=3, pady=5)
-
-            # 存入字典方便调用
-            self.param_entries[f"{grade}_percent"] = e_pct
-            self.param_entries[f"{grade}_max"] = e_max
-            self.param_entries[f"{grade}_min"] = e_min
-
-    # --------------------------
-    # 文件加载与 UI 更新逻辑
-    # --------------------------
-    def load_file_action(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
-        if not file_path: return
         
-        self.file_path = file_path
-        self.status_label.configure(text=f"正在分析文件: {os.path.basename(file_path)}...")
-        self.progressbar.start()
-        threading.Thread(target=self.read_excel_sheets).start()
-
-    def read_excel_sheets(self):
-        try:
-            excel_file = pd.ExcelFile(self.file_path)
-            self.sheet_names = excel_file.sheet_names
-            self.after(0, self.update_sheet_ui)
-        except Exception as e:
-            self.after(0, lambda: messagebox.showerror("错误", f"读取失败: {e}"))
-            self.after(0, self.progressbar.stop)
-
-    def update_sheet_ui(self):
-        self.progressbar.stop()
-        self.progressbar.set(1)
-        self.status_label.configure(text=f"已就绪: {os.path.basename(self.file_path)}")
-        self.sheet_dropdown.configure(values=self.sheet_names, state="normal")
-        self.sheet_dropdown.set(self.sheet_names[0])
-        self.change_sheet_event(self.sheet_names[0])
-
-    def change_sheet_event(self, sheet_name):
-        try:
-            self.df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name)
-            columns = self.df_raw.columns.tolist()
-            
-            self.class_col_dropdown.configure(values=columns)
-            default_class = next((c for c in columns if "班" in str(c)), columns[0] if columns else "")
-            self.class_col_dropdown.set(default_class)
-
-            self.create_subject_checkboxes(columns)
-            
-            self.btn_calc.configure(state="normal")
-            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请在【科目设置】页勾选")
-        except Exception as e:
-            messagebox.showerror("错误", f"加载工作表失败: {e}")
-
-    def create_subject_checkboxes(self, columns):
-        for cb in self.raw_checkboxes + self.assign_checkboxes: cb.destroy()
-        self.raw_checkboxes.clear()
-        self.assign_checkboxes.clear()
+        for text, key, height in labels:
+            lbl = ttk.Label(self.scrollable_frame, text=text, font=font_bold, bootstyle="primary")
+            lbl.pack(anchor=W, pady=(5, 0))
+            txt = tk.Text(self.scrollable_frame, height=height, font=font_norm)
+            txt.pack(fill=X, pady=(0, 5))
+            self.fields[key] = txt
         
-        common_raw = ["语文", "数学", "英语", "物理", "历史", "外语"]
-        common_assign = ["化学", "生物", "地理", "政治", "思想政治"]
+        ttk.Button(left_frame, text="⚡ 生成当前课时框架", command=self.generate_framework, bootstyle="info").pack(fill=X, pady=5)
 
-        def add_cb(parent, text, storage, keywords):
-            cb = ctk.CTkCheckBox(parent, text=text, font=("Microsoft YaHei UI", 12))
-            cb.grid(row=len(storage)//5, column=len(storage)%5, sticky="w", padx=10, pady=8)
-            if any(k in str(text) for k in keywords): cb.select()
-            storage.append(cb)
+        right_frame = ttk.Labelframe(main_pane, text="2. 教学过程与活动 (40分钟)", padding=10, bootstyle="success")
+        main_pane.add(right_frame, weight=2)
+        
+        cmd_frame = ttk.Frame(right_frame)
+        cmd_frame.pack(fill=X, pady=5)
+        ttk.Label(cmd_frame, text="💬 额外指令:", font=font_bold).pack(side=LEFT)
+        self.instruction_entry = ttk.Entry(cmd_frame, bootstyle="success")
+        self.instruction_entry.pack(side=LEFT, fill=X, expand=True, padx=5)
+        self.instruction_entry.insert(0, "环节清晰，体现学生探究，师生互动具体")
 
-        for col in columns:
-            add_cb(self.raw_checkboxes_frame, col, self.raw_checkboxes, common_raw)
-        for col in columns:
-            add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
+        self.process_text = ScrolledText(right_frame, font=(MAIN_FONT_NAME, 11), padding=10)
+        self.process_text.pack(fill=BOTH, expand=True, pady=5)
+        
+        ctrl_frame = ttk.Frame(right_frame)
+        ctrl_frame.pack(fill=X, pady=5)
+        
+        ttk.Button(ctrl_frame, text="🚀 开始撰写 (Stream)", command=self.start_writing_process, bootstyle="success").pack(side=LEFT, padx=5, fill=X, expand=True)
+        ttk.Button(ctrl_frame, text="🛑 停止", command=self.stop_generation, bootstyle="danger").pack(side=LEFT, padx=5)
+        ttk.Button(ctrl_frame, text="🧹 清空当前页", command=self.clear_current, bootstyle="secondary outline").pack(side=LEFT, padx=5)
 
-    # --------------------------
-    # 核心计算逻辑 (动态读取参数)
-    # --------------------------
-    def get_user_configs(self):
-        """从UI界面读取用户输入的参数"""
-        configs = []
-        grades = ['A', 'B', 'C', 'D', 'E']
+        footer_frame = ttk.Frame(self, bootstyle="light")
+        footer_frame.pack(fill=X, side=BOTTOM)
+        
+        self.status_var = tk.StringVar(value="准备就绪")
+        status_lbl = ttk.Label(footer_frame, textvariable=self.status_var, padding=(10, 5), font=(MAIN_FONT_NAME, 9))
+        status_lbl.pack(side=LEFT)
+        
+        author_lbl = ttk.Label(footer_frame, text=self.author_info, padding=(10, 5), font=(MAIN_FONT_NAME, 9), foreground="gray")
+        author_lbl.pack(side=RIGHT)
+
+    def show_author(self):
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.5.0 (文档智编版)\n适用：金塔县中学教案模版标准")
+
+    def update_period_list(self):
         try:
-            for g in grades:
-                pct = float(self.param_entries[f"{g}_percent"].get()) / 100.0
-                t_max = int(self.param_entries[f"{g}_max"].get())
-                t_min = int(self.param_entries[f"{g}_min"].get())
-                
-                configs.append({
-                    'grade': g,
-                    'percent': pct,
-                    't_max': t_max,
-                    't_min': t_min
-                })
-            return configs
+            total = int(self.total_spin.get())
+            current_vals = [i for i in range(1, total + 1)]
+            self.period_combo['values'] = current_vals
+            if self.active_period > total:
+                self.period_combo.current(0)
+                self.handle_period_switch(None)
+        except:
+            pass
+
+    def handle_period_switch(self, event):
+        try:
+            new_period = int(self.period_combo.get())
         except ValueError:
-            messagebox.showerror("参数错误", "赋分标准中请输入有效的数字！")
+            return
+        if new_period == self.active_period:
+            return
+        self.save_current_data_to_memory(self.active_period)
+        self.load_data_from_memory(new_period)
+        self.active_period = new_period
+
+    def save_current_data_to_memory(self, period):
+        data = {key: self.fields[key].get("1.0", END).strip() for key in self.fields}
+        data['process'] = self.process_text.get("1.0", END).strip()
+        self.lesson_data[period] = data
+
+    def load_data_from_memory(self, period):
+        data = self.lesson_data.get(period, {})
+        for key in self.fields:
+            self.fields[key].delete("1.0", END)
+        self.process_text.delete("1.0", END)
+        
+        if data:
+            for key in self.fields:
+                if key in data:
+                    self.fields[key].insert("1.0", data[key])
+            if 'process' in data:
+                self.process_text.insert("1.0", data['process'])
+
+    def clean_text(self, text):
+        text = text.replace("**", "").replace("__", "")
+        text = text.replace("```json", "").replace("```", "")
+        lines = []
+        for line in text.split('\n'):
+            clean_line = line.strip()
+            while clean_line.startswith("#"):
+                clean_line = clean_line[1:].strip()
+            lines.append(clean_line)
+        return "\n".join(lines)
+
+    def get_api_key(self):
+        if not self.api_key:
+            messagebox.showwarning("未配置 API Key", "请先点击左上角的【⚙️ 配置 API Key】按钮进行授权。\n配置后将自动保存，下次无需输入。")
             return None
+        return self.api_key
 
-    def start_calculation(self):
-        self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
-        self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
-        self.selected_class_col = self.class_col_dropdown.get()
+    def stop_generation(self):
+        if self.is_generating:
+            self.stop_flag = True
+            self.status_var.set("⛔ 已停止生成")
 
-        if not self.selected_raw and not self.selected_assign:
-            messagebox.showwarning("提示", "请至少勾选一个科目！")
-            return
-        
-        # 验证并获取配置
-        self.user_configs = self.get_user_configs()
-        if not self.user_configs:
-            return
+    def clear_current(self):
+        if messagebox.askyesno("确认", f"确定清空【第 {self.active_period} 课时】的所有内容吗？"):
+            for key in self.fields:
+                self.fields[key].delete("1.0", END)
+            self.process_text.delete("1.0", END)
+            self.status_var.set(f"第 {self.active_period} 课时已清空")
 
-        self.btn_calc.configure(state="disabled")
-        self.status_label.configure(text="正在根据自定义参数计算...")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start()
-        
-        threading.Thread(target=self.run_math_logic).start()
-
-    def run_math_logic(self):
-        try:
-            df = self.df_raw.copy()
-            grade_configs = self.user_configs # 使用用户自定义的配置
-
-            def calculate_assigned_score(series):
-                series_num = pd.to_numeric(series, errors='coerce')
-                valid = series_num.dropna()
-                if len(valid) == 0: return pd.Series(index=series.index, dtype=float)
-                
-                sorted_scores = valid.sort_values(ascending=False)
-                result = pd.Series(index=valid.index, dtype=float)
-                curr = 0
-                for cfg in grade_configs:
-                    cnt = int(np.round(len(valid) * cfg['percent']))
-                    if cfg['grade'] == 'E': cnt = len(valid) - curr
-                    if cnt <= 0: continue
-                    end = min(curr + cnt, len(valid))
-                    if curr >= end: break
-                    chunk = sorted_scores.iloc[curr:end]
-                    Y2, Y1 = chunk.max(), chunk.min()
-                    T2, T1 = cfg['t_max'], cfg['t_min']
-                    
-                    def linear(Y): return (T2+T1)/2 if Y2==Y1 else T1 + ((Y-Y1)*(T2-T1))/(Y2-Y1)
-                    
-                    result.loc[chunk.index] = chunk.apply(linear)
-                    curr = end
-                return result.round()
-
-            def calc_ranks(dframe, target_col, rank_base_name):
-                yr_rk = f"{rank_base_name}年排"
-                cl_rk = f"{rank_base_name}班排"
-                dframe[yr_rk] = dframe[target_col].rank(ascending=False, method='min')
-                if self.selected_class_col in dframe.columns:
-                    dframe[cl_rk] = dframe.groupby(self.selected_class_col)[target_col].rank(ascending=False, method='min')
-                else:
-                    dframe[cl_rk] = None
-                return yr_rk, cl_rk
-
-            cols_for_raw_total = []    
-            cols_for_final_total = []  
-            output_cols_order = []     
-
-            # 1. 原始科目
-            for sub in self.selected_raw:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                yr_rk, cl_rk = calc_ranks(df, sub, sub)
-                cols_for_raw_total.append(sub)
-                cols_for_final_total.append(sub)
-                output_cols_order.extend([sub, yr_rk, cl_rk])
-
-            # 2. 赋分科目
-            for sub in self.selected_assign:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                assigned_col_name = f"{sub}赋分"
-                df[assigned_col_name] = calculate_assigned_score(df[sub])
-                
-                yr_rk, cl_rk = calc_ranks(df, assigned_col_name, assigned_col_name)
-                
-                cols_for_raw_total.append(sub)            
-                cols_for_final_total.append(assigned_col_name) 
-                output_cols_order.extend([sub, assigned_col_name, yr_rk, cl_rk])
-
-            # 3. 原始总分
-            df["原始总分"] = df[cols_for_raw_total].sum(axis=1, min_count=1)
-            raw_yr_rk, raw_cl_rk = calc_ranks(df, "原始总分", "原始总分")
-            raw_total_group = ["原始总分", raw_yr_rk, raw_cl_rk]
-
-            # 4. 最终总分
-            df["总分"] = df[cols_for_final_total].sum(axis=1, min_count=1)
-            final_yr_rk, final_cl_rk = calc_ranks(df, "总分", "总分")
-            final_total_group = ["总分", final_yr_rk, final_cl_rk]
-
-            df = df.sort_values(final_yr_rk)
-
-            all_generated_cols = set(output_cols_order + raw_total_group + final_total_group)
-            base_info_cols = [c for c in df.columns if c not in all_generated_cols]
+    def clear_all_data(self):
+        if messagebox.askyesno("危险操作", "确定要清空【所有课时】和【已上传文档】的数据吗？\n此操作不可恢复！"):
+            self.lesson_data = {} 
+            self.active_period = 1
+            self.total_periods_var.set(1)
+            self.period_combo['values'] = [1]
+            self.period_combo.current(0)
             
-            final_order = base_info_cols + output_cols_order + raw_total_group + final_total_group
-            final_order = [c for c in final_order if c in df.columns]
-            self.df_result = df[final_order]
+            self.uploaded_file_text = ""
+            self.uploaded_file_name_var.set("未上传参考文档")
+            
+            for key in self.fields:
+                self.fields[key].delete("1.0", END)
+            self.process_text.delete("1.0", END)
+            self.topic_entry.delete(0, END)
+            self.topic_entry.insert(0, "离子反应")
+            
+            self.status_var.set("⚠️ 所有数据已重置")
 
-            self.after(0, self.finish_calculation)
+    def generate_framework(self):
+        api_key = self.get_api_key()
+        if not api_key: return
+        
+        topic = self.topic_entry.get()
+        current_p = self.active_period
+        total_p = self.total_periods_var.get()
+        custom_content = self.fields['custom_content'].get("1.0", END).strip()
+        
+        self.is_generating = True
+        self.stop_flag = False
+        threading.Thread(target=self._thread_generate_framework, args=(api_key, topic, current_p, total_p, custom_content)).start()
 
+    def _thread_generate_framework(self, api_key, topic, current_p, total_p, custom_content):
+        self.status_var.set(f"🤖 正在分析第 {current_p} 课时框架...")
+        
+        content_instruction = ""
+        if custom_content:
+            content_instruction = f"【特别指令】用户强制指定本课时(第{current_p}课时)内容为：『{custom_content}』。请只围绕此内容设计。"
+        else:
+            content_instruction = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
+
+        # 新增：将文档内容注入到 Prompt
+        doc_context = ""
+        if self.uploaded_file_text:
+            doc_context = f"\n【重要参考：教师上传素材】\n以下是从教师提供的PPT/文档中提取的文本，请务必高度吸收其中的知识体系、实验情境设计作为本课时设计的骨架素材：\n<文档内容>\n{self.uploaded_file_text}\n</文档内容>\n"
+
+        prompt = f"""
+        任务：为高中化学课题《{topic}》设计第 {current_p} 课时的教案框架。
+        {content_instruction}
+        {doc_context}
+
+        【核心要求】
+        1. **课程标准**：【必须】引用**《普通高中化学课程标准（2017年版2025年日常修订版）》**中与本课时内容直接相关的具体条目，严禁使用“匹配课标”等模糊词汇。
+        2. **素养导向**：严禁使用“三维目标”分类。请用一段通顺的话描述“通过...培养...素养”。
+        3. 格式：纯文本，无Markdown。**【重要】化学式、离子符号、化学方程式【必须】严格使用 Unicode 标准的上标和下标字符（例如：H₂O, SO₄²⁻, Fe³⁺, ∆表示加热），绝对不能用普通数字替代。**
+        4. 返回JSON格式，Key必须保持一致：
+        {{
+            "chapter": "所属章节",
+            "standard": "在此处填写具体的2025日常修订版课标条目内容",
+            "objectives": "素养导向目标",
+            "key_points": "重点",
+            "difficulties": "难点",
+            "methods": "方法",
+            "homework": "作业"
+        }}
+        """
+        
+        try:
+            url = "https://api.deepseek.com/chat/completions"
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            data = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False
+            }
+            
+            response = requests.post(url, headers=headers, json=data)
+            if response.status_code == 200:
+                raw_content = response.json()['choices'][0]['message']['content']
+                json_str = raw_content.replace("```json", "").replace("```", "").strip()
+                data = json.loads(json_str)
+                for k, v in data.items():
+                    data[k] = self.clean_text(v)
+                self.after(0, lambda: self._update_framework_ui(data))
+                self.status_var.set("✅ 框架生成完毕")
+            else:
+                self.status_var.set(f"❌ API错误: {response.status_code}")
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("计算错误", str(e)))
-            self.after(0, self.stop_loading_ui)
+            self.status_var.set(f"❌ 错误: {str(e)}")
+        finally:
+            self.is_generating = False
 
-    def finish_calculation(self):
-        self.stop_loading_ui()
-        self.status_label.configure(text="✅ 计算完成！数据已应用当前赋分标准。")
-        self.btn_export.configure(state="normal", fg_color="#2CC985", text="导出 Excel 结果")
-        messagebox.showinfo("成功", "计算完成！\n请注意：本次计算使用了您在【赋分标准设置】中填写的参数。")
+    def _update_framework_ui(self, data):
+        for key, value in data.items():
+            if key in self.fields and key != 'custom_content':
+                self.fields[key].delete("1.0", END)
+                self.fields[key].insert("1.0", value)
 
-    def stop_loading_ui(self):
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate")
-        self.progressbar.set(1)
-        self.btn_calc.configure(state="normal")
+    def start_writing_process(self):
+        api_key = self.get_api_key()
+        if not api_key: return
+        
+        context = {k: v.get("1.0", END).strip() for k, v in self.fields.items()}
+        topic = self.topic_entry.get()
+        instruction = self.instruction_entry.get()
+        plan_type = self.type_combo.get()
+        current_p = self.active_period
+        
+        self.is_generating = True
+        self.stop_flag = False
+        threading.Thread(target=self._thread_write_process, args=(api_key, topic, context, instruction, plan_type, current_p)).start()
 
-    def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
-        if save_path:
-            try:
-                self.df_result.to_excel(save_path, index=False)
-                messagebox.showinfo("导出成功", f"文件已保存至:\n{save_path}")
-                os.startfile(os.path.dirname(save_path))
-            except Exception as e:
-                messagebox.showerror("保存失败", str(e))
+    def _thread_write_process(self, api_key, topic, context, instruction, plan_type, current_p):
+        self.status_var.set(f"✍️ 正在撰写第 {current_p} 课时过程...")
+        
+        custom_content = context.get('custom_content', '')
+        custom_hint = f"本课时核心锁定：{custom_content}。" if custom_content else ""
+
+        stage_requirements = ""
+        if "匹配教学环节" in plan_type:
+            stage_requirements = """
+        【教学环节强制要求】
+        必须严格按照以下五个高中化学常规环节展开：
+        - 环节一：学习目标。对标课标，深度融合五大核心素养，表述清晰可量化（如“能写出”、“会分析”）。
+        - 环节二：情景创设。使用生活、实验或前沿情境引发认知冲突或探究欲望。
+        - 环节三：任务驱动教学。拆解本节核心任务，该环节必须包含“自主学习或者合作探究”、“归纳小结”、“评价训练”3个基本子环节。
+        - 环节四：课堂小结。师生共同梳理本节课知识脉络，形成完整体系。
+        - 环节五：课堂检测。紧密围绕目标设计基础达标与能力提升题。
+        """
+
+        detail_level = ""
+        if "简案" in plan_type:
+            detail_level = "【篇幅与深度要求】只需体现出教学的核心框架和逻辑思路。严禁长篇大论，不需要写出具体的师生对话和详细的题目内容。"
+        elif "详案" in plan_type:
+            detail_level = "【篇幅与深度要求】需要详细写出教师的具体话术引导、预期的学生具体回答，以及每一道评价训练和课堂检测的具体题目内容。"
+
+        # 新增：将文档内容注入到 Prompt
+        doc_context = ""
+        if self.uploaded_file_text:
+            doc_context = f"\n【重要参考：教师上传素材】\n以下是从教师提供的PPT/文档中提取的内容，请在设计师生活动、提问环节及例题时，直接引用和改编其中的素材：\n<文档内容>\n{self.uploaded_file_text}\n</文档内容>\n"
+
+        prompt = f"""
+        任务：撰写高中化学《{topic}》第 {current_p} 课时的“教学过程”。
+        
+        【输入信息】
+        {custom_hint}
+        素养目标：{context['objectives']}
+        重难点：{context['key_points']}
+        {doc_context}
+        
+        【严格限制】
+        1. 格式：纯文本，严禁Markdown。**【重要】所有的化学式、离子符号等【必须】严格使用 Unicode 标准的上下标字符（例如：H₂O, CO₃²⁻, Fe³⁺）。**
+        2. 时长：40分钟。
+        3. 风格类型：{plan_type}。{instruction}
+        4. 理念：新课标“教-学-评”一体化。
+        {stage_requirements}
+        {detail_level}
+        
+        【输出结构】
+        环节名称（时间） - 教师活动 - 学生活动 - 设计意图
+        """
+
+        url = "https://api.deepseek.com/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        data = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=data, stream=True)
+            for line in response.iter_lines():
+                if self.stop_flag: break
+                if line:
+                    decoded_line = line.decode('utf-8').replace("data: ", "")
+                    if decoded_line != "[DONE]":
+                        try:
+                            json_line = json.loads(decoded_line)
+                            content = json_line['choices'][0]['delta'].get('content', '')
+                            if content:
+                                content = self.clean_text(content)
+                                self.after(0, lambda c=content: self.process_text.insert(END, c))
+                                self.after(0, lambda: self.process_text.see(END))
+                        except:
+                            pass
+            self.status_var.set("✅ 撰写完成")
+        except Exception as e:
+            self.status_var.set(f"❌ 错误: {str(e)}")
+        finally:
+            self.is_generating = False
+
+    def export_word(self):
+        self.save_current_data_to_memory(self.active_period)
+        filename = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word Document", "*.docx")])
+        if not filename: return
+
+        try:
+            doc = Document()
+            doc.styles['Normal'].font.name = u'宋体'
+            doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+            
+            topic = self.topic_entry.get()
+            total_p = self.total_periods_var.get()
+            
+            for i in range(1, total_p + 1):
+                data = self.lesson_data.get(i, {})
+                if not data: continue 
+                
+                if i > 1: doc.add_page_break() 
+                
+                p_title = doc.add_heading(f"第 {i} 课时教案", level=1)
+                p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                table = doc.add_table(rows=8, cols=4)
+                table.style = 'Table Grid'
+                table.autofit = False
+                
+                for row in table.rows:
+                    row.height = Cm(1.2)
+
+                table.cell(0, 0).text = "课题"
+                table.cell(0, 1).text = topic
+                table.cell(0, 2).text = "时间"
+                table.cell(0, 3).text = datetime.now().strftime("%Y-%m-%d")
+
+                custom_info = data.get('custom_content', '')
+                info_text = f"第 {i} 课时 (共 {total_p} 课时)"
+                if custom_info: info_text += f"\n[自定义内容]: {custom_info}"
+                
+                table.cell(1, 0).text = "课程章节"
+                table.cell(1, 1).text = data.get('chapter', '')
+                table.cell(1, 2).text = "课时说明"
+                table.cell(1, 3).text = info_text
+
+                table.cell(2, 0).merge(table.cell(2, 3))
+                table.cell(2, 0).text = f"课程标准:\n{data.get('standard', '（未生成，请点击生成框架）')}" 
+
+                table.cell(3, 0).merge(table.cell(3, 3))
+                table.cell(3, 0).text = f"素养导向目标:\n{data.get('objectives', '')}"
+
+                table.cell(4, 0).merge(table.cell(4, 3))
+                p = table.cell(4, 0).paragraphs[0]
+                p.add_run("教学重点：").bold = True
+                p.add_run(f"{data.get('key_points', '')}\n")
+                p.add_run("教学难点：").bold = True
+                p.add_run(f"{data.get('difficulties', '')}\n")
+                p.add_run("教学方法：").bold = True
+                p.add_run(f"{data.get('methods', '')}")
+
+                table.cell(5, 0).merge(table.cell(5, 3))
+                cell = table.cell(5, 0)
+                cell.text = "教学过程与师生活动 (40分钟)"
+                cell.add_paragraph(data.get('process', ''))
+
+                table.cell(6, 0).merge(table.cell(6, 3))
+                table.cell(6, 0).text = f"作业设计:\n{data.get('homework', '')}"
+
+                table.cell(7, 0).merge(table.cell(7, 3))
+                table.cell(7, 0).text = "课后反思:\n"
+
+            doc.save(filename)
+            messagebox.showinfo("导出成功", f"🎉 已成功导出 {total_p} 个课时的教案！")
+            
+        except Exception as e:
+            messagebox.showerror("导出失败", str(e))
 
 if __name__ == "__main__":
-    app = GaokaoApp()
+    app = LessonPlanWriter()
     app.mainloop()
