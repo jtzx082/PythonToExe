@@ -31,25 +31,28 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --noconfirm --onefile --windowed --clean --name "电子云甘肃新高考分析舱" main.py
+        # -w: 隐藏控制台
+        # -F: 独立单文件
+        # --clean: 清理临时构建文件
+        pyinstaller --noconfirm --onefile --windowed --clean --name "硫酸铜的遐想_高考分析舱" main.py
 
     - name: Upload Artifacts (Windows)
       if: matrix.os == 'windows-latest'
       uses: actions/upload-artifact@v4
       with:
         name: Analyzer_Windows_exe
-        path: dist/电子云甘肃新高考分析舱.exe
+        path: dist/硫酸铜的遐想_高考分析舱.exe
         
     - name: Upload Artifacts (macOS)
       if: matrix.os == 'macos-latest'
       uses: actions/upload-artifact@v4
       with:
         name: Analyzer_macOS_app
-        path: dist/电子云甘肃新高考分析舱.app
+        path: dist/硫酸铜的遐想_高考分析舱.app
 
     - name: Upload Artifacts (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       uses: actions/upload-artifact@v4
       with:
         name: Analyzer_Ubuntu_bin
-        path: dist/电子云甘肃新高考分析舱
+        path: dist/硫酸铜的遐想_高考分析舱
