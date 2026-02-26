@@ -294,6 +294,7 @@ class ReverieOfCopperSulfateAnalyzer:
         try:
             xls = pd.ExcelFile(filepath)
             sheet_names = xls.sheet_names
+            
             if len(sheet_names) > 1:
                 self._open_sheet_selector(xls, filepath, sheet_names)
             else:
@@ -378,7 +379,7 @@ class ReverieOfCopperSulfateAnalyzer:
                     new_rules.append({"level": level, "pct": p, "min": mi, "max": ma})
                 
                 if abs(total_pct - 100) > 0.1:
-                    messagebox.showwarning("比例警告", f"注意：当前比例总和为 {total_pct}%，非100%。", parent=dialog)
+                    messagebox.showwarning("比例警告", f"注意：当前比例总和为 {total_pct}%，非100%，请确保这是您的意图。", parent=dialog)
                     
                 self.assign_rules = new_rules
                 messagebox.showinfo("保存成功", "自定义赋分参数已保存！请执行统算生效。", parent=dialog)
@@ -480,7 +481,9 @@ class ReverieOfCopperSulfateAnalyzer:
         track_rules = {}
         for t in tracks:
             track_rules[t] = {sub: self.rule_vars[t][sub].get() for sub in self.track_valid_cols_map[t]}
+        
         dialog.destroy()
+        
         try:
             processed_dfs = []
             self.track_calc_cols = {}
@@ -491,7 +494,10 @@ class ReverieOfCopperSulfateAnalyzer:
             for track in self.tracks:
                 t_cols = self.track_valid_cols_map[track]
                 track_df = df[df['科类'] == track].copy()
-                for c in t_cols: track_df[c] = pd.to_numeric(track_df[c], errors='coerce').fillna(0)
+                
+                for c in t_cols:
+                    track_df[c] = pd.to_numeric(track_df[c], errors='coerce').fillna(0)
+                    
                 calc_cols, t_raw, t_assign = [], [], []
                 
                 for sub in t_cols:
@@ -528,6 +534,7 @@ class ReverieOfCopperSulfateAnalyzer:
 
                 track_df[['优势学科', '薄弱学科']] = track_df.apply(lambda r: pd.Series(get_diagnostics(r)), axis=1)
                 track_df.drop(columns=[f'{col}_pct' for col in calc_cols] + ['temp_sub'], inplace=True, errors='ignore')
+                
                 processed_dfs.append(track_df)
                 
             self.cleaned_df = pd.concat(processed_dfs).sort_values(['科类', '科类统考排名'])
@@ -541,6 +548,7 @@ class ReverieOfCopperSulfateAnalyzer:
 
             base_cols = ['班级', '姓名', '科类', '3+1+2总分', '班级内排名', '科类统考排名', '优势学科', '薄弱学科']
             all_display_cols = []
+            
             for t in self.tracks:
                 t_raw = self.track_raw_subjects.get(t, [])
                 t_assign = self.track_assign_subjects.get(t, [])
@@ -557,11 +565,13 @@ class ReverieOfCopperSulfateAnalyzer:
                     seen.add(c)
                     
             self.exist_cols = final_preview_cols 
+            
             preview_df = self.cleaned_df[final_preview_cols].copy()
             for c in preview_df.columns:
                 if c.endswith('班排') or c.endswith('级排'):
                     preview_df[c] = preview_df[c].replace(9999, '')
             self._update_treeview(self.tv_data, preview_df.head(50))
+            
             self._generate_threshold_inputs()
             messagebox.showinfo("超级引擎完毕", "定制规则统算已完美落地！\n无用科目已剔除，0分未考者已剔除排名。前往后续页签体验高阶分析。")
         except Exception as e:
@@ -611,6 +621,7 @@ class ReverieOfCopperSulfateAnalyzer:
             return
 
         df = self.cleaned_df.copy()
+        
         def check_line(row, line_type):
             target = self.thresholds.get(f"{row['科类']}_{line_type}", 0)
             return 1 if row['3+1+2总分'] >= target else 0
@@ -628,9 +639,11 @@ class ReverieOfCopperSulfateAnalyzer:
         
         stats['特控达线率'] = (stats['特控达线人数'] / stats['班级参考人数'] * 100).map('{:.1f}%'.format)
         stats['本科达线率'] = (stats['本科达线人数'] / stats['班级参考人数'] * 100).map('{:.1f}%'.format)
+        
         stats = stats[['科类', '班级', '班级参考人数', '特控达线人数', '特控达线率', '本科达线人数', '本科达线率', '尖子生人数']]
         stats = stats.rename(columns={'尖子生人数': f'特优生(前{self.top_n_target})'})
         stats = stats.sort_values(by=['科类', '特控达线人数'], ascending=[True, False])
+        
         self._update_treeview(self.tv_kpi, stats)
 
     # ================= 多维质量诊断 =================
@@ -710,7 +723,7 @@ class ReverieOfCopperSulfateAnalyzer:
     # ================= 🚀 商业级 Excel 格式化与导出 =================
     
     def _format_excel_sheet(self, ws):
-        """为导出的 Excel Sheet 施加专业排版魔法（全居中、换行、全边框）"""
+        """核心：为导出的 Excel Sheet 施加专业排版魔法（全居中、换行、全边框）"""
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
                              top=Side(style='thin'), bottom=Side(style='thin'))
         center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -965,12 +978,15 @@ def check_local_auth():
     return False
 
 def show_activation_window(root):
-    root.withdraw() 
     auth_win = tk.Toplevel(root)
     auth_win.title("软件未授权 - 硫酸铜的遐想")
     auth_win.geometry("550x380")
     auth_win.resizable(False, False)
-    auth_win.protocol("WM_DELETE_WINDOW", root.destroy) 
+    
+    def on_close():
+        root.destroy()
+        
+    auth_win.protocol("WM_DELETE_WINDOW", on_close) 
     
     mc = get_stable_machine_code()
     
@@ -998,19 +1014,30 @@ def show_activation_window(root):
                 with open(get_license_file_path(), 'w') as f: f.write(input_key)
                 messagebox.showinfo("激活成功", "🎉 恭喜！设备数字签名绑定成功！\n\n欢迎使用【硫酸铜的遐想】专属教务引擎。", parent=auth_win)
                 auth_win.destroy()
-                root.deiconify() 
             except Exception as e:
                 messagebox.showerror("写入失败", f"无法保存授权文件。\n错误: {str(e)}", parent=auth_win)
         else:
             messagebox.showerror("激活失败", "❌ 授权码无效！请确认输入无误，且为本机专属授权码。", parent=auth_win)
             
     ttk.Button(auth_win, text="🔑 立即验证并激活", bootstyle=SUCCESS, width=25, command=on_activate).pack(pady=20)
+    return auth_win
 
 if __name__ == "__main__":
     app = ttk.Window(themename="yeti") 
-    if check_local_auth(): ReverieOfCopperSulfateAnalyzer(app)
+    app.withdraw() 
+    
+    if check_local_auth():
+        ReverieOfCopperSulfateAnalyzer(app)
+        app.deiconify()
+        app.mainloop()
     else:
-        show_activation_window(app)
-        app.bind("<Map>", lambda e: ReverieOfCopperSulfateAnalyzer(app) if not hasattr(app, 'analyzer_loaded') else None, add="+")
-        app.analyzer_loaded = True 
-    app.mainloop()
+        auth_win = show_activation_window(app)
+        app.wait_window(auth_win) 
+        
+        try:
+            if app.winfo_exists() and check_local_auth():
+                ReverieOfCopperSulfateAnalyzer(app)
+                app.deiconify()
+                app.mainloop()
+        except tk.TclError:
+            pass
