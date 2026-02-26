@@ -1,393 +1,369 @@
-import customtkinter as ctk
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk as tk_ttk
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
 import pandas as pd
 import numpy as np
-import threading
-import os
-import sys
-from tkinter import filedialog, messagebox
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# --- 全局外观设置 ---
-ctk.set_appearance_mode("System")  
-ctk.set_default_color_theme("blue")  
+# 解决跨平台中文字体显示问题
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial Unicode MS', 'sans-serif']
+plt.rcParams['axes.unicode_minus'] = False
 
-class GaokaoApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-
-        # 1. 窗口基础设置
-        self.title("甘肃新高考赋分系统 Pro Max (自定义参数版) | 俞晋全名师工作室")
-        self.geometry("1200x850")
-        self.minsize(1000, 750)
+class ElectronCloudGaokaoAnalyzer:
+    def __init__(self, master):
+        self.master = master
+        self.master.title("电子云 - 甘肃新高考(3+1+2)数据分析舱 (全功能旗舰版)")
+        self.master.geometry("1300x850")
         
-        # 数据变量
-        self.file_path = None
-        self.df_raw = None
-        self.sheet_names = []
-        self.param_entries = {} # 存储参数输入框的字典
+        # 核心数据流状态
+        self.df = pd.DataFrame()
+        self.cleaned_df = pd.DataFrame()
+        self.raw_subjects = []       # 语数外等原始分科目
+        self.assign_subjects = []    # 化生政地等需赋分科目
+        self.tracks = []             # 选科方向 (物理类/历史类)
+        self.thresholds = {}         # 各科类达线阈值
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.notebook = ttk.Notebook(self.master, bootstyle="info")
+        self.notebook.pack(fill=BOTH, expand=YES, padx=10, pady=10)
+
+        # 五大核心功能舱
+        self.tab_data = ttk.Frame(self.notebook, padding=10)
+        self.tab_threshold = ttk.Frame(self.notebook, padding=10)
+        self.tab_report = ttk.Frame(self.notebook, padding=10)
+        self.tab_chart = ttk.Frame(self.notebook, padding=10)
+        self.tab_export = ttk.Frame(self.notebook, padding=10)
+
+        self.notebook.add(self.tab_data, text=" 📂 1. 数据引擎与赋分 ")
+        self.notebook.add(self.tab_threshold, text=" 🎯 2. 划线与上线率 ")
+        self.notebook.add(self.tab_report, text=" 📝 3. 质量诊断大表 ")
+        self.notebook.add(self.tab_chart, text=" 📊 4. 可视化大屏 ")
+        self.notebook.add(self.tab_export, text=" 📤 5. 分发与导出中心 ")
+
+        self._build_data_tab()
+        self._build_threshold_tab()
+        self._build_report_tab()
+        self._build_chart_tab()
+        self._build_export_tab()
+
+    # ================= UI 构建层 =================
+
+    def _build_data_tab(self):
+        ctrl_frame = ttk.Labelframe(self.tab_data, text="操作面板：数据导入与赋分初始化", padding=15)
+        ctrl_frame.pack(fill=X, pady=(0, 10))
+
+        ttk.Button(ctrl_frame, text="导入教务原始成绩单 (Excel)", icon="📂", bootstyle=PRIMARY, command=self.load_data).pack(side=LEFT, padx=5)
+        ttk.Button(ctrl_frame, text="执行 3+1+2 等级赋分与统算", bootstyle=SUCCESS, command=self.clean_and_compute).pack(side=LEFT, padx=5)
         
-        # 布局配置
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        self.data_status = ttk.Label(ctrl_frame, text="等待导入数据...", foreground="gray")
+        self.data_status.pack(side=RIGHT, padx=10)
 
-        # ==========================
-        # === 左侧边栏 (操作区) ===
-        # ==========================
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(9, weight=1) 
+        self.tv_data = ttk.Treeview(self.tab_data, show="headings", height=20)
+        self.tv_data.pack(fill=BOTH, expand=YES)
 
-        # Logo
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=22, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
-
-        # 1. 导入
-        self.btn_load = ctk.CTkButton(self.sidebar_frame, text="1. 导入Excel成绩表", height=40, command=self.load_file_action)
-        self.btn_load.grid(row=1, column=0, padx=20, pady=10)
-
-        # 2. Sheet选择
-        self.lbl_sheet = ctk.CTkLabel(self.sidebar_frame, text="选择工作表 (Sheet):", anchor="w")
-        self.lbl_sheet.grid(row=2, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.sheet_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_sheet_event)
-        self.sheet_dropdown.grid(row=3, column=0, padx=20, pady=(5, 10))
-        self.sheet_dropdown.set("等待导入...")
-        self.sheet_dropdown.configure(state="disabled")
-
-        # 3. 班级列
-        self.lbl_class = ctk.CTkLabel(self.sidebar_frame, text="指定班级列 (计算班排):", anchor="w")
-        self.lbl_class.grid(row=4, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.class_col_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[])
-        self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
-        self.class_col_dropdown.set("等待加载...")
-
-        # 底部按钮区
-        self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始赋分计算", height=50, fg_color="green", font=ctk.CTkFont(size=16, weight="bold"), command=self.start_calculation)
-        self.btn_calc.grid(row=10, column=0, padx=20, pady=15)
-        self.btn_calc.configure(state="disabled")
-
-        self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果 Excel", height=40, command=self.export_file)
-        self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
-        self.btn_export.configure(state="disabled")
-
-        # ==========================
-        # === 右侧主内容区 (Tab) ===
-        # ==========================
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+    def _build_threshold_tab(self):
+        ctrl_frame = ttk.Labelframe(self.tab_threshold, text="设定各科类达线标准 (如一本线/本科线)", padding=15)
+        ctrl_frame.pack(fill=X, pady=(0, 10))
         
-        # 状态栏
-        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请先导入数据，然后确认【赋分标准】。", anchor="w", font=("Microsoft YaHei UI", 16))
-        self.status_label.pack(fill="x", pady=(0, 10))
-
-        # 创建选项卡
-        self.tabview = ctk.CTkTabview(self.main_frame)
-        self.tabview.pack(fill="both", expand=True)
-        self.tabview.add("科目设置")
-        self.tabview.add("赋分标准设置")
+        self.threshold_inputs_frame = ttk.Frame(ctrl_frame)
+        self.threshold_inputs_frame.pack(side=LEFT, fill=X, expand=YES)
         
-        # --- Tab 1: 科目设置 ---
-        self.setup_subject_tab()
+        ttk.Button(ctrl_frame, text="计算各班上线指标", bootstyle=WARNING, command=self.calculate_thresholds).pack(side=RIGHT, padx=15)
 
-        # --- Tab 2: 赋分参数设置 ---
-        self.setup_params_tab()
+        self.tv_threshold = ttk.Treeview(self.tab_threshold, show="headings", height=20)
+        self.tv_threshold.pack(fill=BOTH, expand=YES)
 
-        # 进度条
-        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progressbar.pack(fill="x", pady=(15, 0))
-        self.progressbar.set(0)
-
-    # --------------------------
-    # 界面构建辅助函数
-    # --------------------------
-    def setup_subject_tab(self):
-        tab = self.tabview.tab("科目设置")
+    def _build_report_tab(self):
+        ctrl_frame = ttk.Frame(self.tab_report)
+        ctrl_frame.pack(fill=X, pady=(0, 10))
         
-        # 滚动设置区
-        self.scroll_frame = ctk.CTkScrollableFrame(tab, label_text="勾选对应列名")
-        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # 原始计入科目区
-        self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【直接计入总分】 (语数外 + 物理/历史):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_raw.pack(fill="x", pady=(10, 5), padx=10)
-        self.raw_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.raw_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.raw_checkboxes = []
-
-        # 赋分科目区
-        self.lbl_assign = ctk.CTkLabel(self.scroll_frame, text="【等级赋分科目】 (化生政地):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_assign.pack(fill="x", pady=(25, 5), padx=10)
-        self.assign_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.assign_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.assign_checkboxes = []
-
-    def setup_params_tab(self):
-        tab = self.tabview.tab("赋分标准设置")
+        ttk.Label(ctrl_frame, text="选科方向:").pack(side=LEFT, padx=5)
+        self.report_track_var = tk.StringVar()
+        self.cb_report_track = ttk.Combobox(ctrl_frame, textvariable=self.report_track_var, state="readonly", width=15)
+        self.cb_report_track.pack(side=LEFT, padx=5)
         
-        info_lbl = ctk.CTkLabel(tab, text="请根据实际需求修改参数（默认值为甘肃省标准）。\n人数比例请输入整数（如15代表15%）。", font=("Microsoft YaHei UI", 13))
-        info_lbl.pack(pady=10)
+        ttk.Button(ctrl_frame, text="生成班级全科均分横向对比表", bootstyle=INFO, command=self.generate_report).pack(side=LEFT, padx=15)
 
-        # 参数网格容器
-        grid_frame = ctk.CTkFrame(tab)
-        grid_frame.pack(padx=20, pady=10)
+        self.report_text = ttk.Text(self.tab_report, font=("Consolas", 11), padding=15)
+        self.report_text.pack(fill=BOTH, expand=YES)
 
-        # 表头
-        headers = ["等级", "人数比例 (%)", "赋分上限 (T2)", "赋分下限 (T1)"]
-        for col, text in enumerate(headers):
-            ctk.CTkLabel(grid_frame, text=text, font=("Arial", 12, "bold")).grid(row=0, column=col, padx=15, pady=10)
+    def _build_chart_tab(self):
+        ctrl_frame = ttk.Frame(self.tab_chart)
+        ctrl_frame.pack(fill=X, pady=(0, 10))
+        
+        ttk.Label(ctrl_frame, text="科类:").pack(side=LEFT, padx=5)
+        self.chart_track_var = tk.StringVar()
+        self.cb_chart_track = ttk.Combobox(ctrl_frame, textvariable=self.chart_track_var, state="readonly", width=12)
+        self.cb_chart_track.pack(side=LEFT, padx=5)
 
-        # 默认数据 (甘肃标准)
-        default_data = [
-            ('A', '15', '100', '86'),
-            ('B', '35', '85',  '71'),
-            ('C', '35', '70',  '56'),
-            ('D', '13', '55',  '41'),
-            ('E', '2',  '40',  '30')
+        ttk.Label(ctrl_frame, text="指标:").pack(side=LEFT, padx=5)
+        self.chart_metric_var = tk.StringVar(value="3+1+2总分")
+        self.cb_chart_metric = ttk.Combobox(ctrl_frame, textvariable=self.chart_metric_var, state="readonly", width=12)
+        self.cb_chart_metric.pack(side=LEFT, padx=5)
+        
+        ttk.Button(ctrl_frame, text="一键渲染对比大图", bootstyle=SUCCESS, command=self.draw_chart).pack(side=LEFT, padx=15)
+
+        self.canvas_frame = ttk.Frame(self.tab_chart)
+        self.canvas_frame.pack(fill=BOTH, expand=YES)
+        self.figure, self.ax = plt.subplots(figsize=(10, 5))
+        self.figure.patch.set_facecolor('#f8f9fa')
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.canvas_frame)
+        self.canvas.get_tk_widget().pack(fill=BOTH, expand=YES)
+
+    def _build_export_tab(self):
+        ctrl_frame = ttk.Labelframe(self.tab_export, text="批量分发工具 (按班主任拆分成绩单)", padding=20)
+        ctrl_frame.pack(fill=BOTH, expand=YES, padx=50, pady=50)
+
+        info_lbl = ttk.Label(ctrl_frame, text="将当前经过赋分和排名的总表，一键拆分为每个班级独立的 Excel 文件，方便下发给各班班主任核对。", font=("Microsoft YaHei", 10), wraplength=600)
+        info_lbl.pack(pady=20)
+
+        self.export_btn = ttk.Button(ctrl_frame, text="🚀 一键拆分并导出各班成绩单", bootstyle=(SUCCESS, OUTLINE), width=30, command=self.export_class_files)
+        self.export_btn.pack(pady=20)
+
+        self.export_status = ttk.Label(ctrl_frame, text="", font=("Consolas", 10), foreground="blue")
+        self.export_status.pack(pady=10)
+
+    # ================= 数据与 3+1+2 赋分逻辑 =================
+
+    def assign_score_logic(self, series):
+        """甘肃新高考等级赋分标准算法"""
+        s = series.replace(0, np.nan).dropna()
+        if len(s) == 0: return series
+
+        pct = s.rank(method='min', ascending=False) / len(s)
+        conditions = [
+            pct <= 0.15,
+            (pct > 0.15) & (pct <= 0.50),
+            (pct > 0.50) & (pct <= 0.85),
+            (pct > 0.85) & (pct <= 0.98),
+            pct > 0.98
         ]
-
-        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
-
-        for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
-            # 等级标签
-            ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
-            
-            # 百分比输入
-            e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_pct.insert(0, pct)
-            e_pct.grid(row=row, column=1, pady=5)
-            
-            # 上限输入
-            e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_max.insert(0, tmax)
-            e_max.grid(row=row, column=2, pady=5)
-            
-            # 下限输入
-            e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_min.insert(0, tmin)
-            e_min.grid(row=row, column=3, pady=5)
-
-            # 存入字典方便调用
-            self.param_entries[f"{grade}_percent"] = e_pct
-            self.param_entries[f"{grade}_max"] = e_max
-            self.param_entries[f"{grade}_min"] = e_min
-
-    # --------------------------
-    # 文件加载与 UI 更新逻辑
-    # --------------------------
-    def load_file_action(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
-        if not file_path: return
+        assigned_ranges = [(86, 100), (71, 85), (56, 70), (41, 55), (30, 40)]
         
-        self.file_path = file_path
-        self.status_label.configure(text=f"正在分析文件: {os.path.basename(file_path)}...")
-        self.progressbar.start()
-        threading.Thread(target=self.read_excel_sheets).start()
-
-    def read_excel_sheets(self):
-        try:
-            excel_file = pd.ExcelFile(self.file_path)
-            self.sheet_names = excel_file.sheet_names
-            self.after(0, self.update_sheet_ui)
-        except Exception as e:
-            self.after(0, lambda: messagebox.showerror("错误", f"读取失败: {e}"))
-            self.after(0, self.progressbar.stop)
-
-    def update_sheet_ui(self):
-        self.progressbar.stop()
-        self.progressbar.set(1)
-        self.status_label.configure(text=f"已就绪: {os.path.basename(self.file_path)}")
-        self.sheet_dropdown.configure(values=self.sheet_names, state="normal")
-        self.sheet_dropdown.set(self.sheet_names[0])
-        self.change_sheet_event(self.sheet_names[0])
-
-    def change_sheet_event(self, sheet_name):
-        try:
-            self.df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name)
-            columns = self.df_raw.columns.tolist()
+        result = pd.Series(index=s.index, dtype=float)
+        for cond, (Y1, Y2) in zip(conditions, assigned_ranges):
+            group = s[cond]
+            if len(group) == 0: continue
             
-            self.class_col_dropdown.configure(values=columns)
-            default_class = next((c for c in columns if "班" in str(c)), columns[0] if columns else "")
-            self.class_col_dropdown.set(default_class)
+            T1, T2 = group.min(), group.max()
+            if T1 == T2:
+                result[group.index] = round((Y1 + Y2) / 2)
+            else:
+                assigned = ((group - T1) / (T2 - T1)) * (Y2 - Y1) + Y1
+                result[group.index] = assigned.round()
 
-            self.create_subject_checkboxes(columns)
-            
-            self.btn_calc.configure(state="normal")
-            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请在【科目设置】页勾选")
-        except Exception as e:
-            messagebox.showerror("错误", f"加载工作表失败: {e}")
+        final_series = series.copy()
+        final_series.loc[result.index] = result
+        return final_series.fillna(0)
 
-    def create_subject_checkboxes(self, columns):
-        for cb in self.raw_checkboxes + self.assign_checkboxes: cb.destroy()
-        self.raw_checkboxes.clear()
-        self.assign_checkboxes.clear()
-        
-        common_raw = ["语文", "数学", "英语", "物理", "历史", "外语"]
-        common_assign = ["化学", "生物", "地理", "政治", "思想政治"]
-
-        def add_cb(parent, text, storage, keywords):
-            cb = ctk.CTkCheckBox(parent, text=text, font=("Microsoft YaHei UI", 12))
-            cb.grid(row=len(storage)//5, column=len(storage)%5, sticky="w", padx=10, pady=8)
-            if any(k in str(text) for k in keywords): cb.select()
-            storage.append(cb)
-
-        for col in columns:
-            add_cb(self.raw_checkboxes_frame, col, self.raw_checkboxes, common_raw)
-        for col in columns:
-            add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
-
-    # --------------------------
-    # 核心计算逻辑 (动态读取参数)
-    # --------------------------
-    def get_user_configs(self):
-        """从UI界面读取用户输入的参数"""
-        configs = []
-        grades = ['A', 'B', 'C', 'D', 'E']
+    def load_data(self):
+        filepath = filedialog.askopenfilename(filetypes=[("Excel Files", "*.xlsx;*.xls")])
+        if not filepath: return
         try:
-            for g in grades:
-                pct = float(self.param_entries[f"{g}_percent"].get()) / 100.0
-                t_max = int(self.param_entries[f"{g}_max"].get())
-                t_min = int(self.param_entries[f"{g}_min"].get())
-                
-                configs.append({
-                    'grade': g,
-                    'percent': pct,
-                    't_max': t_max,
-                    't_min': t_min
-                })
-            return configs
+            self.df = pd.read_excel(filepath)
+            self.data_status.config(text=f"🟢 已加载: {os.path.basename(filepath)} | 共 {len(self.df)} 条", foreground="green")
+            self._update_treeview(self.tv_data, self.df.head(50))
+        except Exception as e:
+            messagebox.showerror("读取错误", f"无法读取文件:\n{str(e)}")
+
+    def clean_and_compute(self):
+        if self.df.empty:
+            messagebox.showwarning("提示", "请先导入教务原始数据！")
+            return
+        try:
+            df = self.df.copy()
+            df.columns = df.columns.str.strip()
+            
+            if '科类' not in df.columns or '班级' not in df.columns:
+                messagebox.showerror("规范错误", "Excel表头必须包含 '班级' 与 '科类'。")
+                return
+
+            all_num_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col]) and col not in ['学号', '考号', '班级排名', '年级排名', '总分']]
+            
+            # 自动识别需赋分科目
+            target_assign_names = ['化学', '生物', '政治', '地理']
+            self.assign_subjects = [col for col in all_num_cols if any(name in col for name in target_assign_names)]
+            self.raw_subjects = [col for col in all_num_cols if col not in self.assign_subjects]
+
+            df[all_num_cols] = df[all_num_cols].fillna(0)
+
+            # 1. 等级赋分转换
+            calc_cols = []
+            for sub in self.assign_subjects:
+                new_col_name = f"{sub}_赋分"
+                df[new_col_name] = self.assign_score_logic(df[sub])
+                calc_cols.append(new_col_name)
+
+            # 2. 合成 3+1+2 总分
+            calc_cols.extend(self.raw_subjects)
+            df['3+1+2总分'] = df[calc_cols].sum(axis=1)
+
+            # 3. 双轨独立排名
+            df['科类'] = df['科类'].fillna('未分科').astype(str)
+            df['班级'] = df['班级'].astype(str)
+            df['科类统考排名'] = df.groupby('科类')['3+1+2总分'].rank(method='min', ascending=False).astype(int)
+            df['班级内排名'] = df.groupby('班级')['3+1+2总分'].rank(method='min', ascending=False).astype(int)
+
+            self.cleaned_df = df.sort_values(['科类', '科类统考排名'])
+            
+            # 联动 UI 组件
+            self.tracks = list(self.cleaned_df['科类'].unique())
+            self.cb_report_track['values'] = self.tracks
+            self.cb_chart_track['values'] = self.tracks
+            if self.tracks:
+                self.cb_report_track.current(0)
+                self.cb_chart_track.current(0)
+            
+            # 图表指标加入赋分列
+            chart_metrics = ['3+1+2总分'] + self.raw_subjects + [f"{sub}_赋分" for sub in self.assign_subjects]
+            self.cb_chart_metric['values'] = chart_metrics
+
+            cols_to_show = ['班级', '姓名', '科类', '3+1+2总分', '科类统考排名', '班级内排名'] + self.raw_subjects + [f"{sub}_赋分" for sub in self.assign_subjects]
+            exist_cols = [c for c in cols_to_show if c in self.cleaned_df.columns]
+            self._update_treeview(self.tv_data, self.cleaned_df[exist_cols])
+            
+            self._generate_threshold_inputs()
+            messagebox.showinfo("引擎启动成功", "赋分与排名计算完毕！数据已就绪。")
+        except Exception as e:
+            messagebox.showerror("引擎异常", f"处理失败:\n{str(e)}")
+
+    # ================= 业务分析逻辑 =================
+
+    def _generate_threshold_inputs(self):
+        for widget in self.threshold_inputs_frame.winfo_children():
+            widget.destroy()
+        self.threshold_entries = {}
+        for track in self.tracks:
+            frame = ttk.Frame(self.threshold_inputs_frame)
+            frame.pack(side=LEFT, padx=10)
+            ttk.Label(frame, text=f"{track} 目标线:").pack(side=LEFT)
+            ent = ttk.Entry(frame, width=8)
+            ent.insert(0, "450")
+            ent.pack(side=LEFT, padx=5)
+            self.threshold_entries[track] = ent
+
+    def calculate_thresholds(self):
+        if self.cleaned_df.empty: return
+        try:
+            for track, ent in self.threshold_entries.items():
+                self.thresholds[track] = float(ent.get())
         except ValueError:
-            messagebox.showerror("参数错误", "赋分标准中请输入有效的数字！")
-            return None
-
-    def start_calculation(self):
-        self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
-        self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
-        self.selected_class_col = self.class_col_dropdown.get()
-
-        if not self.selected_raw and not self.selected_assign:
-            messagebox.showwarning("提示", "请至少勾选一个科目！")
-            return
-        
-        # 验证并获取配置
-        self.user_configs = self.get_user_configs()
-        if not self.user_configs:
+            messagebox.showerror("格式错误", "分数线必须为数字！")
             return
 
-        self.btn_calc.configure(state="disabled")
-        self.status_label.configure(text="正在根据自定义参数计算...")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start()
+        df = self.cleaned_df.copy()
+        df['是否达线'] = df.apply(lambda row: 1 if row['3+1+2总分'] >= self.thresholds.get(row['科类'], 0) else 0, axis=1)
         
-        threading.Thread(target=self.run_math_logic).start()
+        stats = df.groupby(['科类', '班级']).agg(班级参考人数=('3+1+2总分', 'count'), 达线人数=('是否达线', 'sum')).reset_index()
+        stats['达线率'] = (stats['达线人数'] / stats['班级参考人数'] * 100).map('{:.1f}%'.format)
+        stats = stats.sort_values(by=['科类', '达线人数'], ascending=[True, False])
+        self._update_treeview(self.tv_threshold, stats)
 
-    def run_math_logic(self):
-        try:
-            df = self.df_raw.copy()
-            grade_configs = self.user_configs # 使用用户自定义的配置
+    def generate_report(self):
+        if self.cleaned_df.empty: return
+        track = self.report_track_var.get()
+        if not track: return
 
-            def calculate_assigned_score(series):
-                series_num = pd.to_numeric(series, errors='coerce')
-                valid = series_num.dropna()
-                if len(valid) == 0: return pd.Series(index=series.index, dtype=float)
-                
-                sorted_scores = valid.sort_values(ascending=False)
-                result = pd.Series(index=valid.index, dtype=float)
-                curr = 0
-                for cfg in grade_configs:
-                    cnt = int(np.round(len(valid) * cfg['percent']))
-                    if cfg['grade'] == 'E': cnt = len(valid) - curr
-                    if cnt <= 0: continue
-                    end = min(curr + cnt, len(valid))
-                    if curr >= end: break
-                    chunk = sorted_scores.iloc[curr:end]
-                    Y2, Y1 = chunk.max(), chunk.min()
-                    T2, T1 = cfg['t_max'], cfg['t_min']
-                    
-                    def linear(Y): return (T2+T1)/2 if Y2==Y1 else T1 + ((Y-Y1)*(T2-T1))/(Y2-Y1)
-                    
-                    result.loc[chunk.index] = chunk.apply(linear)
-                    curr = end
-                return result.round()
-
-            def calc_ranks(dframe, target_col, rank_base_name):
-                yr_rk = f"{rank_base_name}年排"
-                cl_rk = f"{rank_base_name}班排"
-                dframe[yr_rk] = dframe[target_col].rank(ascending=False, method='min')
-                if self.selected_class_col in dframe.columns:
-                    dframe[cl_rk] = dframe.groupby(self.selected_class_col)[target_col].rank(ascending=False, method='min')
-                else:
-                    dframe[cl_rk] = None
-                return yr_rk, cl_rk
-
-            cols_for_raw_total = []    
-            cols_for_final_total = []  
-            output_cols_order = []     
-
-            # 1. 原始科目
-            for sub in self.selected_raw:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                yr_rk, cl_rk = calc_ranks(df, sub, sub)
-                cols_for_raw_total.append(sub)
-                cols_for_final_total.append(sub)
-                output_cols_order.extend([sub, yr_rk, cl_rk])
-
-            # 2. 赋分科目
-            for sub in self.selected_assign:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                assigned_col_name = f"{sub}赋分"
-                df[assigned_col_name] = calculate_assigned_score(df[sub])
-                
-                yr_rk, cl_rk = calc_ranks(df, assigned_col_name, assigned_col_name)
-                
-                cols_for_raw_total.append(sub)            
-                cols_for_final_total.append(assigned_col_name) 
-                output_cols_order.extend([sub, assigned_col_name, yr_rk, cl_rk])
-
-            # 3. 原始总分
-            df["原始总分"] = df[cols_for_raw_total].sum(axis=1, min_count=1)
-            raw_yr_rk, raw_cl_rk = calc_ranks(df, "原始总分", "原始总分")
-            raw_total_group = ["原始总分", raw_yr_rk, raw_cl_rk]
-
-            # 4. 最终总分
-            df["总分"] = df[cols_for_final_total].sum(axis=1, min_count=1)
-            final_yr_rk, final_cl_rk = calc_ranks(df, "总分", "总分")
-            final_total_group = ["总分", final_yr_rk, final_cl_rk]
-
-            df = df.sort_values(final_yr_rk)
-
-            all_generated_cols = set(output_cols_order + raw_total_group + final_total_group)
-            base_info_cols = [c for c in df.columns if c not in all_generated_cols]
+        self.report_text.delete(1.0, END)
+        track_df = self.cleaned_df[self.cleaned_df['科类'] == track]
+        
+        report = f"【{track}】各平行班 全科均分横向大比武 (含赋分转换)\n"
+        report += "="*90 + "\n"
+        
+        agg_dict = {'3+1+2总分': 'mean'}
+        for sub in self.raw_subjects:
+            if track_df[sub].sum() > 0: agg_dict[sub] = 'mean'
+        for sub in self.assign_subjects:
+            assigned_col = f"{sub}_赋分"
+            if track_df[assigned_col].sum() > 0: agg_dict[assigned_col] = 'mean'
             
-            final_order = base_info_cols + output_cols_order + raw_total_group + final_total_group
-            final_order = [c for c in final_order if c in df.columns]
-            self.df_result = df[final_order]
+        class_compare = track_df.groupby('班级').agg(agg_dict).reset_index()
+        for col in class_compare.columns[1:]:
+            class_compare[col] = class_compare[col].map('{:.2f}'.format)
+            
+        class_compare = class_compare.sort_values(by='3+1+2总分', ascending=False)
+        report += class_compare.to_string(index=False) + "\n\n"
+        self.report_text.insert(END, report)
 
-            self.after(0, self.finish_calculation)
+    def draw_chart(self):
+        if self.cleaned_df.empty: return
+        track = self.chart_track_var.get()
+        metric = self.chart_metric_var.get()
+        if not track or not metric: return
 
+        track_df = self.cleaned_df[self.cleaned_df['科类'] == track]
+        if track_df[metric].sum() == 0:
+            messagebox.showwarning("无数据", f"该科类没有【{metric}】的有效成绩。")
+            return
+
+        class_means = track_df.groupby('班级')[metric].mean().sort_values(ascending=False)
+        self.ax.clear()
+        
+        bars = self.ax.bar(class_means.index.astype(str), class_means.values, color=ttk.Style().colors.primary, alpha=0.85, width=0.6)
+        self.ax.set_title(f"{track} - 各班级【{metric}】平均分", fontsize=15, pad=20, fontweight='bold', color='#333333')
+        self.ax.set_ylabel("平均分", fontsize=12)
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.bar_label(bars, fmt='%.1f', padding=4)
+        
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+    # ================= 批量导出模块 (NEW) =================
+    
+    def export_class_files(self):
+        if self.cleaned_df.empty:
+            messagebox.showwarning("提示", "长官，请先在第一步完成数据导入和赋分计算！")
+            return
+
+        # 选择保存目录
+        export_dir = filedialog.askdirectory(title="选择成绩单保存文件夹")
+        if not export_dir: return
+        
+        try:
+            self.export_btn.config(state=DISABLED)
+            self.export_status.config(text="正在切割数据，请稍候...", foreground="orange")
+            self.master.update()
+
+            classes = self.cleaned_df['班级'].unique()
+            
+            # 为了下发给班主任更清晰，我们重新排列一下导出的列顺序
+            cols_to_export = ['班级', '姓名', '科类', '3+1+2总分', '班级内排名', '科类统考排名'] + self.raw_subjects + self.assign_subjects + [f"{sub}_赋分" for sub in self.assign_subjects]
+            exist_cols = [c for c in cols_to_export if c in self.cleaned_df.columns]
+
+            for cls in classes:
+                # 提取特定班级数据
+                class_data = self.cleaned_df[self.cleaned_df['班级'] == cls][exist_cols]
+                # 按班级内排名升序排列
+                class_data = class_data.sort_values('班级内排名')
+                
+                filename = os.path.join(export_dir, f"高二_{cls}班_成绩单.xlsx")
+                class_data.to_excel(filename, index=False)
+
+            self.export_status.config(text=f"✅ 成功！已将 {len(classes)} 个班级的成绩单导出至:\n{export_dir}", foreground="green")
+            messagebox.showinfo("导出完毕", f"完美拆分！共生成 {len(classes)} 份独立的 Excel 班级成绩单。")
+            
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("计算错误", str(e)))
-            self.after(0, self.stop_loading_ui)
+            self.export_status.config(text="❌ 导出过程发生错误", foreground="red")
+            messagebox.showerror("导出错误", f"文件导出失败，请检查文件夹权限或是否文件被占用。\n{str(e)}")
+        finally:
+            self.export_btn.config(state=NORMAL)
 
-    def finish_calculation(self):
-        self.stop_loading_ui()
-        self.status_label.configure(text="✅ 计算完成！数据已应用当前赋分标准。")
-        self.btn_export.configure(state="normal", fg_color="#2CC985", text="导出 Excel 结果")
-        messagebox.showinfo("成功", "计算完成！\n请注意：本次计算使用了您在【赋分标准设置】中填写的参数。")
-
-    def stop_loading_ui(self):
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate")
-        self.progressbar.set(1)
-        self.btn_calc.configure(state="normal")
-
-    def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
-        if save_path:
-            try:
-                self.df_result.to_excel(save_path, index=False)
-                messagebox.showinfo("导出成功", f"文件已保存至:\n{save_path}")
-                os.startfile(os.path.dirname(save_path))
-            except Exception as e:
-                messagebox.showerror("保存失败", str(e))
+    def _update_treeview(self, tree, df):
+        tree.delete(*tree.get_children())
+        tree["columns"] = list(df.columns)
+        for col in df.columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=80, anchor=CENTER)
+        for index, row in df.iterrows():
+            tree.insert("", "end", values=list(row))
 
 if __name__ == "__main__":
-    app = GaokaoApp()
+    app = ttk.Window(themename="cosmo") 
+    ElectronCloudGaokaoAnalyzer(app)
     app.mainloop()
