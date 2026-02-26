@@ -1,6 +1,6 @@
-pandas
-numpy
-openpyxl
-customtkinter
-packaging
+requests
+python-docx
+python-pptx
+ttkbootstrap
 pyinstaller
+Pillow==9.5.0
