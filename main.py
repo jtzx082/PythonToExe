@@ -22,7 +22,7 @@ ctk.set_default_color_theme("blue")
 class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Python脚本打包工具 - 终极扁平化必杀版")
+        self.title("Python脚本打包工具 - 原生克隆终极版")
         self.geometry("860x920")
         self.minsize(800, 800)
 
@@ -261,7 +261,6 @@ class PackagerApp(TkinterDnD_CTk):
         if "pandas" in content:
             auto_args_set.add(("--hidden-import", "pandas._libs.tslibs.timedeltas"))
 
-        # Azure 基础导入声明
         if "azure.cognitiveservices.speech" in content or "azure" in content:
             auto_args_set.add(("--hidden-import", "azure.cognitiveservices.speech"))
 
@@ -375,52 +374,27 @@ class PackagerApp(TkinterDnD_CTk):
                 else:
                     self.log("✨ 扫描完毕，代码很干净，无需补丁。")
                     
-                # ================= 🌟 终极破茧：全面扁平化投放系统 =================
+                # ================= 🌟 终极破茧行动：纯数据克隆法 =================
                 content_all = ""
                 try:
                     with open(script, 'r', encoding='utf-8', errors='ignore') as f:
                         content_all += f.read()
-                    if req_file and os.path.exists(req_file):
-                        with open(req_file, 'r', encoding='utf-8', errors='ignore') as f:
-                            content_all += "\n" + f.read()
                 except: pass
                 
                 if "azure.cognitiveservices.speech" in content_all or "azure" in content_all:
-                    self.log("🤖 [破茧行动] 发现病因：PyInstaller 拦截了子目录的 DLL 加载！")
-                    self.log("🚀 正在启动扁平化投放，将 Azure 与系统底层库全员空降至根目录...")
+                    self.log("🤖 [终极破局] 发现 Azure 语音模块。为防止 PyInstaller 破坏 DLL，启动纯数据直拷模式！")
                     
+                    # 强力检测代码：优先使用 __path__[0]，这是对付命名空间包的唯一解法
                     detect_code = """
 import os, sys
-
-# 1. 获取 Azure DLL
 try:
     import azure.cognitiveservices.speech as az
-    azure_path = os.path.dirname(az.__file__)
-    for root_d, _, files in os.walk(azure_path):
-        for f in files:
-            if f.lower().endswith(('.dll', '.so', '.dylib', '.lib')):
-                abs_file = os.path.join(root_d, f)
-                print("AZURE_DLL|" + abs_file)
-except: pass
-
-# 2. 全境抓捕系统 C++ 运行库
-dlls_to_find = ['msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140_codecvt_ids.dll']
-search_paths = [getattr(sys, 'base_prefix', sys.prefix), os.path.join(getattr(sys, 'base_prefix', sys.prefix), 'DLLs'), os.path.join(getattr(sys, 'base_prefix', sys.prefix), 'Library', 'bin')]
-if 'WINDIR' in os.environ:
-    search_paths.append(os.path.join(os.environ['WINDIR'], 'System32'))
-search_paths.extend(os.environ.get('PATH', '').split(os.pathsep))
-
-found = {}
-for p in search_paths:
-    if not p or not os.path.exists(p): continue
-    for d in dlls_to_find:
-        if d not in found:
-            fp = os.path.join(p, d)
-            if os.path.isfile(fp):
-                found[d] = fp
-
-for f in found.values():
-    print("SYS_DLL|" + f)
+    if hasattr(az, '__path__'):
+        print("AZURE_DIR|" + az.__path__[0])
+    else:
+        print("AZURE_DIR|" + os.path.dirname(az.__file__))
+except Exception as e:
+    pass
 """
                     try:
                         startupinfo = None
@@ -436,23 +410,20 @@ for f in found.values():
                         )
                         
                         sep = ";" if os.name == 'nt' else ":"
-                        dll_count = 0
+                        az_found = False
                         for line in res.stdout.strip().split('\n'):
                             line = line.strip()
-                            if line.startswith("AZURE_DLL|"):
-                                dll_path = line.split("|", 1)[1]
-                                # 💥 核心突破点：将 Azure DLL 强制塞入打包根目录 "." 💥
-                                cmd.extend(["--add-binary", f"{dll_path}{sep}."])
-                                dll_count += 1
-                            elif line.startswith("SYS_DLL|"):
-                                sys_dll_path = line.split("|", 1)[1]
-                                # 🔥 将救命的系统 DLL 强制放入 EXE 根目录 "."
-                                cmd.extend(["--add-binary", f"{sys_dll_path}{sep}."])
-                                self.log(f"🎯 成功捕获系统关键依赖: {os.path.basename(sys_dll_path)}")
+                            if line.startswith("AZURE_DIR|"):
+                                az_dir = line.split("|", 1)[1]
+                                # 🔥 核心机制：放弃使用 --add-binary，改用 --add-data 将整个 Azure 文件夹当做纯数据拷入
+                                # 这将完全避开 PyInstaller 自带的残废 C++ 依赖分析器！
+                                cmd.extend(["--add-data", f"{az_dir}{sep}azure/cognitiveservices/speech"])
+                                az_found = True
+                                self.log(f"🎯 成功锁定 Azure 底层目录，已开启原生态数据克隆: {az_dir}")
                                 
-                        if dll_count > 0:
-                            self.log(f"✨ [神迹降临] 成功提取 {dll_count} 个 Azure 动态库直达根目录，完美适配加载机制！")
-                        
+                        if not az_found:
+                            self.log("⚠️ 未能在虚拟环境中捕获到 Azure 目录，请检查是否正确安装。")
+                            
                     except Exception as e:
                         self.log(f"⚠️ 物理搜索遇到小意外，继续常规打包: {e}")
                 # =========================================================================
