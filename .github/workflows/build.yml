@@ -1,36 +1,67 @@
-name: Build Gansu Gaokao Scorer EXE
+name: Build Gaokao Analyzer and Keygen
 
-# 触发机制：仅保留 workflow_dispatch (手动触发)
-# 删除了 push 触发器，因此代码更新时不会自动运行
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Setup Python
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.11' 
+        cache: 'pip'
 
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Build with PyInstaller
-      run: |
-        # --onefile: 打包成单文件
-        # --noconsole: 运行时不显示黑框命令行
-        # --name: 指定生成的exe名字
-        pyinstaller --onefile --noconsole --name Gansu_Gaokao_Scorer main.py
+    - name: Build Main App with PyInstaller
+      run: pyinstaller --noconfirm --onefile --windowed --clean --name "硫酸铜的遐想_高考分析舱" main.py
 
-    - name: Upload Artifact
+    - name: Build Keygen GUI with PyInstaller
+      run: pyinstaller --noconfirm --onefile --windowed --clean --name "硫酸铜的遐想_注册机" keygen_gui.py
+
+    # 【核心修复】macOS 必须提前手动压缩 .app 文件夹，否则 GitHub 会破坏它的可执行权限
+    - name: Compress macOS app bundles
+      if: matrix.os == 'macos-latest'
+      run: |
+        cd dist
+        zip -r -y Analyzer_macOS.zip "硫酸铜的遐想_高考分析舱.app"
+        zip -r -y Keygen_macOS.zip "硫酸铜的遐想_注册机.app"
+
+    - name: Upload Artifacts (Windows)
+      if: matrix.os == 'windows-latest'
       uses: actions/upload-artifact@v4
       with:
-        name: Gansu_Gaokao_Scorer_EXE
-        path: dist/Gansu_Gaokao_Scorer.exe
+        name: Windows_Executables
+        path: dist/*.exe
+        
+    - name: Upload Artifacts (macOS)
+      if: matrix.os == 'macos-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: macOS_Apps
+        path: dist/*.zip
+
+    - name: Upload Artifacts (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: Ubuntu_Binaries
+        path: |
+          dist/硫酸铜的遐想_高考分析舱
+          dist/硫酸铜的遐想_注册机
