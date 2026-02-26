@@ -22,7 +22,7 @@ ctk.set_default_color_theme("blue")
 class PackagerApp(TkinterDnD_CTk):
     def __init__(self):
         super().__init__()
-        self.title("Python脚本打包工具 - C++底层暴力同居版")
+        self.title("Python脚本打包工具 - 终极镜像克隆版")
         self.geometry("860x920")
         self.minsize(800, 800)
 
@@ -261,10 +261,9 @@ class PackagerApp(TkinterDnD_CTk):
         if "pandas" in content:
             auto_args_set.add(("--hidden-import", "pandas._libs.tslibs.timedeltas"))
 
-        # 🌟 修复关键点：重新启用 Azure 的默认收集机制
-        # 这保证了 PyInstaller 能把 Azure 本身的 core.dll 等文件正常打包！
         if "azure.cognitiveservices.speech" in content or "azure" in content:
-            auto_args_set.add(("--collect-all", "azure.cognitiveservices.speech"))
+            # 仅仅隐式导入它的Python壳子，核心文件搬运交给下方的深度手术！
+            auto_args_set.add(("--hidden-import", "azure.cognitiveservices.speech"))
 
         final_args = []
         for flag, val in auto_args_set:
@@ -376,7 +375,7 @@ class PackagerApp(TkinterDnD_CTk):
                 else:
                     self.log("✨ 扫描完毕，代码很干净，无需补丁。")
                     
-                # ================= 🌟 终极必杀：全境搜捕 C++ 运行库并强制同居 =================
+                # ================= 🌟 终极决战：镜像克隆 + 贴身保镖体系 =================
                 content_all = ""
                 try:
                     with open(script, 'r', encoding='utf-8', errors='ignore') as f:
@@ -386,40 +385,71 @@ class PackagerApp(TkinterDnD_CTk):
                             content_all += "\n" + f.read()
                 except: pass
                 
-                if ("azure.cognitiveservices.speech" in content_all or "azure" in content_all) and os.name == 'nt':
-                    self.log("🤖 [深度手术] 检测到 Azure 语音 SDK。正在启动『C++运行库强制绑定』协议...")
+                if "azure.cognitiveservices.speech" in content_all or "azure" in content_all:
+                    self.log("🤖 [最终决战] 锁定 Azure 语音模块。启动『真·物理镜像克隆』协议...")
                     
-                    # 在主程序的宿主环境中搜捕缺少的 C++ 库（这 100% 能找到）
-                    dlls_to_find = ['msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140_codecvt_ids.dll']
-                    search_paths = [
-                        getattr(sys, 'base_prefix', sys.prefix),
-                        os.path.join(getattr(sys, 'base_prefix', sys.prefix), 'DLLs'),
-                        os.path.join(getattr(sys, 'base_prefix', sys.prefix), 'Library', 'bin'),
-                        os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32'),
-                        os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'SysWOW64')
-                    ]
-                    
-                    found_sys_dlls = set()
-                    for d in dlls_to_find:
-                        for p in search_paths:
-                            fp = os.path.join(p, d)
-                            if os.path.exists(fp):
-                                found_sys_dlls.add(fp)
-                                break
-                    
-                    sep = ";"
-                    if found_sys_dlls:
-                        self.log(f"🎯 成功在宿主机全境捕获 {len(found_sys_dlls)} 个关键 C++ 运行库！")
-                        for fp in found_sys_dlls:
-                            # 绝杀一：放在打包的根目录（以防万一）
-                            cmd.extend(["--add-binary", f"{fp}{sep}."])
-                            # 绝杀二：强行塞进 azure/cognitiveservices/speech 目录内部！
-                            # 这将 100% 满足 Windows 最苛刻的同级目录加载策略，绝不会再报找不到模块！
-                            cmd.extend(["--add-binary", f"{fp}{sep}azure/cognitiveservices/speech"])
-                            self.log(f"💉 强心针注入完毕: {os.path.basename(fp)}")
-                        self.log("✨ [神迹降临] C++ 运行库已强制与 Azure 核心深度绑定！系统报错将被彻底终结！")
-                    else:
-                        self.log("⚠️ 警告：未能在您的电脑上找到 msvcp140.dll，但已交由 PyInstaller 处理。")
+                    detect_code = """
+import os, sys
+def find_dll(name):
+    import ctypes.util
+    p = ctypes.util.find_library(name)
+    if p: return p
+    search_dirs = [
+        sys.base_prefix,
+        os.path.join(sys.base_prefix, 'Library', 'bin'),
+        os.path.join(sys.base_prefix, 'DLLs'),
+        os.path.join(os.environ.get('WINDIR', 'C:\\\\Windows'), 'System32'),
+        os.path.join(os.environ.get('WINDIR', 'C:\\\\Windows'), 'SysWOW64')
+    ]
+    for d in search_dirs:
+        fp = os.path.join(d, name)
+        if os.path.exists(fp): return fp
+    return None
+
+try:
+    import azure.cognitiveservices.speech as az
+    az_dir = os.path.dirname(az.__file__) if hasattr(az, '__file__') else az.__path__[0]
+    print("AZURE_DIR|" + az_dir)
+except: pass
+
+dlls = ['msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140_codecvt_ids.dll']
+for d in dlls:
+    fp = find_dll(d)
+    if fp:
+        print("SYS_DLL|" + fp)
+"""
+                    try:
+                        startupinfo = None
+                        if os.name == 'nt':
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            
+                        sys_encoding = locale.getpreferredencoding()
+                        res = subprocess.run(
+                            [run_py, "-c", detect_code], 
+                            capture_output=True, text=True, env=self.get_clean_env(),
+                            startupinfo=startupinfo, encoding=sys_encoding, errors='replace'
+                        )
+                        
+                        sep = ";" if os.name == 'nt' else ":"
+                        for line in res.stdout.strip().split('\n'):
+                            line = line.strip()
+                            if line.startswith("AZURE_DIR|"):
+                                az_dir = line.split("|", 1)[1]
+                                # 🔥 不用 --add-binary 惹毛 PyInstaller！
+                                # 直接用 --add-data 将整个目录原封不动克隆，且严格保留 azure/cognitiveservices/speech 这个硬层级！
+                                cmd.extend(["--add-data", f"{az_dir}{sep}azure/cognitiveservices/speech"])
+                                self.log(f"🎯 成功锁定并克隆 Azure 核心源目录: {az_dir}")
+                            elif line.startswith("SYS_DLL|"):
+                                sys_dll_path = line.split("|", 1)[1]
+                                # 🔥 致命一击：把救命的系统 DLL 直接塞到 Azure 的子目录内部当贴身保镖！
+                                # 这样 core.dll 一睁眼就能看到 msvcp140.dll，系统再也没理由拦截它！
+                                cmd.extend(["--add-data", f"{sys_dll_path}{sep}azure/cognitiveservices/speech"])
+                                cmd.extend(["--add-data", f"{sys_dll_path}{sep}."])
+                                self.log(f"💉 捕获并注入系统命脉保镖: {os.path.basename(sys_dll_path)}")
+                                
+                    except Exception as e:
+                        self.log(f"⚠️ 底层探测出现异常: {e}")
                 # =========================================================================
 
             extra = self.entry_extra.get().strip()
