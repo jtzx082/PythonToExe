@@ -35,7 +35,7 @@ jobs:
     - name: Build Keygen GUI with PyInstaller
       run: pyinstaller --noconfirm --onefile --windowed --clean --name "硫酸铜的遐想_注册机" keygen_gui.py
 
-    # 【核心修复】macOS 必须提前手动压缩 .app 文件夹，否则 GitHub 会破坏它的可执行权限
+    # 【修复 macOS 的应用破坏问题】
     - name: Compress macOS app bundles
       if: matrix.os == 'macos-latest'
       run: |
