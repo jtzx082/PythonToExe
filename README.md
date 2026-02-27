@@ -1,1 +1,1 @@
-# PythonToExe
+# 一机一码终身使用
