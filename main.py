@@ -238,7 +238,6 @@ class ReverieOfCopperSulfateAnalyzer:
         content = ttk.Frame(main_frame)
         content.pack(fill=BOTH, expand=YES)
         
-        # 增加滚动条以承载详细说明
         y_scroll_help = ttk.Scrollbar(content, orient=VERTICAL)
         txt = tk.Text(content, font=("Microsoft YaHei", 10), wrap=WORD, bg="#f8f9fa", relief=FLAT, padx=20, pady=15, spacing2=6, yscrollcommand=y_scroll_help.set)
         y_scroll_help.config(command=txt.yview)
@@ -255,29 +254,27 @@ class ReverieOfCopperSulfateAnalyzer:
             "📊 【附录一：核心教研指标与算法释义】\n"
             "为了确保年级统一考评标准的科学性，本系统采用标准统计学算法：\n\n"
             "1. 三率计算 (及格率 / 优秀率)\n"
-            "   • 系统自动识别满分标准：语、数、外(英)系统默认满分计 150 分，其余物理、历史、化学等学科满分计 100 分。\n"
-            "   • 及格线标准：得分 ≥ 卷面满分的 60% (即150分制及格线为90分，100分制及格线为60分)。\n"
-            "   • 优秀线标准：得分 ≥ 卷面满分的 80% (即150分制优秀线为120分，100分制优秀线为80分)。\n"
-            "   • 公式：及格/优秀率 = (达到该标准人数 ÷ 该科实际参考有效人数) × 100%\n\n"
+            "   • 缺考保护：成绩为0分(缺考/未选)的学生会被直接隔离，绝不拉低该科平均分与及格率计算池！\n"
+            "   • 系统自动识别满分标准：语、数、外(英)默认满分计 150 分，其余学科满分计 100 分。\n"
+            "   • 及格线标准：得分 ≥ 卷面满分的 60% (即150分制及格线为90分，100分制为60分)。\n"
+            "   • 优秀线标准：得分 ≥ 卷面满分的 80% (即150分制优秀线为120分，100分制为80分)。\n\n"
             "2. 标准差 (教学离散度分析)\n"
             "   • 物理意义：标准差反映了一个班级内学生成绩的“两极分化”程度，是极其重要的教学诊断指标。\n"
             "   • 诊断指南：\n"
             "     - 标准差越【小】：说明该班学生该科成绩紧密围绕平均分，整体水平整齐，未出现断层。\n"
             "     - 标准差越【大】：说明该班学生成绩高度分散，高分与低分差距极其悬殊，班级内“偏科严重”或“尾巴过长”。班主任与任课教师应重点关注此指标，适时调整培优补差策略。\n\n"
             "3. 优势/薄弱学科 靶向诊断引擎\n"
-            "   • 系统通过计算学生单科在全年级(同科类)中的“百分比击败率 (Percentile Rank)”，而非简单的绝对分数高低来评判。\n"
-            "   • 诊断原理：某科击败的年级人数比例最高的学科，系统判定为【优势学科】；击败比例最低的学科，判定为【薄弱学科(亟待提升)】。此算法完美排除了各科试卷难度不同(如物理极难、化学极简单)造成的评价误差。\n\n"
+            "   • 系统通过计算学生单科在全年级中的“百分比击败率”，而非简单的绝对分数来评判。\n"
+            "   • 诊断原理：某科击败年级人数比例最高的学科，判定为【优势学科】；击败比例最低的学科，判定为【薄弱学科(亟待提升)】。此算法完美排除了试卷难度不同造成的分数误差。\n\n"
             "======================================================================\n\n"
             "📝 【附录二：甘肃省新高考(3+1+2)等级赋分原理说明】\n"
-            "系统内置的等级赋分机制，严格遵循甘肃等省份的高考标准：\n\n"
             "1. 位次定等：将该选考科目考生的原始卷面分从高到低排序，按规定比例划分至 A、B、C、D、E 五个等级。\n"
             "   • 默认比例：A(15%)、B(35%)、C(35%)、D(13%)、E(2%)。支持在系统面板内修改。\n\n"
             "2. 确定区间：每个等级对应一个法定的赋分区间，满分为100分，起点分为30分。\n"
             "   • 默认区间：A(100~86)、B(85~71)、C(70~56)、D(55~41)、E(40~30)。\n\n"
-            "3. 等比例换算：采用线性等比例法则，将考生的原始分映射到所在等级的赋分区间，四舍五入取整。\n"
+            "3. 等比例换算：采用线性等比例法则，将原始分映射到所在等级的赋分区间。\n"
             "   • 核心公式：(T2 - T) / (T - T1) = (Y2 - Y) / (Y - Y1)\n"
-            "   • 变量释义：T 为考生的原始分；T1、T2 分别为该生所在等级内全体考生的最低、最高原始分；Y 为换算后的最终赋分；Y1、Y2 分别为该等级规定的最低、最高赋分值。\n"
-            "   • 结论：同等级内，原始分越高，赋分越高。赋分机制消除了各学科试题难度差异导致的不公，全省位次才是成绩的核心体现。"
+            "   • 结论：同等级内，原始分越高，赋分越高。赋分机制消除了难度差异，全省位次才是成绩的核心体现。"
         )
         
         txt.insert(END, guide_text)
@@ -328,7 +325,8 @@ class ReverieOfCopperSulfateAnalyzer:
             self.df = pd.read_excel(xls, sheet_name=sheet_name)
             filename = os.path.basename(filepath)
             self.data_status.config(text=f"🟢 已加载: {filename} [Sheet: {sheet_name}] | 共 {len(self.df)} 条", foreground="green")
-            self._update_treeview(self.tv_data, self.df.head(50))
+            preview_df = self.df.head(50).copy().fillna('')
+            self._update_treeview(self.tv_data, preview_df)
         except Exception as e:
             messagebox.showerror("读取错误", f"无法读取指定工作表:\n{str(e)}")
 
@@ -380,7 +378,7 @@ class ReverieOfCopperSulfateAnalyzer:
                     new_rules.append({"level": level, "pct": p, "min": mi, "max": ma})
                 
                 if abs(total_pct - 100) > 0.1:
-                    messagebox.showwarning("比例警告", f"注意：当前比例总和为 {total_pct}%，非100%，请确保这是您的意图。", parent=dialog)
+                    messagebox.showwarning("比例警告", f"注意：当前比例总和为 {total_pct}%，非100%。", parent=dialog)
                     
                 self.assign_rules = new_rules
                 messagebox.showinfo("保存成功", "自定义赋分参数已保存！请执行统算生效。", parent=dialog)
@@ -389,7 +387,6 @@ class ReverieOfCopperSulfateAnalyzer:
                 messagebox.showerror("输入错误", f"格式不正确：\n{str(e)}", parent=dialog)
 
         ttk.Button(dialog, text="💾 保存并应用参数", bootstyle=SUCCESS, width=30, command=save_rules).pack(pady=20)
-
 
     def open_config_dialog(self):
         if self.df.empty:
@@ -447,11 +444,12 @@ class ReverieOfCopperSulfateAnalyzer:
         ttk.Button(dialog, text="🚀 确认规则并启动全景统算引擎", bootstyle=SUCCESS, width=40, 
                    command=lambda: self._execute_computation(dialog, df, tracks)).pack(pady=20)
 
-    # ================= 动态统算逻辑 =================
+    # ================= 动态统算逻辑 (强物理隔离0分机制) =================
 
     def assign_score_logic(self, series):
-        s = series.replace(0, np.nan).dropna()
-        if len(s) == 0: return series
+        """执行等级赋分，内部已自动隔离NaN"""
+        s = series.dropna()
+        if len(s) == 0: return pd.Series(np.nan, index=series.index)
 
         pct = s.rank(method='min', ascending=False) / len(s)
         conditions, assigned_ranges = [], []
@@ -460,11 +458,9 @@ class ReverieOfCopperSulfateAnalyzer:
         for i, rule in enumerate(self.assign_rules):
             lower_bound = cum_pct
             cum_pct += float(rule['pct']) / 100.0
-            
             if i == len(self.assign_rules) - 1: cond = pct > lower_bound
             elif i == 0: cond = pct <= cum_pct
             else: cond = (pct > lower_bound) & (pct <= cum_pct)
-                
             conditions.append(cond)
             assigned_ranges.append((float(rule['min']), float(rule['max'])))
             
@@ -476,15 +472,15 @@ class ReverieOfCopperSulfateAnalyzer:
             if T1 == T2: result[group.index] = round((Y1 + Y2) / 2)
             else: result[group.index] = (((group - T1) / (T2 - T1)) * (Y2 - Y1) + Y1).round()
 
-        final_series = series.copy()
+        # 核心：未考的保持 NaN，绝不补0，防止拉低后续的均分池！
+        final_series = pd.Series(np.nan, index=series.index)
         final_series.loc[result.index] = result
-        return final_series.fillna(0)
+        return final_series
 
     def _execute_computation(self, dialog, df, tracks):
         track_rules = {}
         for t in tracks:
             track_rules[t] = {sub: self.rule_vars[t][sub].get() for sub in self.track_valid_cols_map[t]}
-        
         dialog.destroy()
         
         try:
@@ -498,8 +494,9 @@ class ReverieOfCopperSulfateAnalyzer:
                 t_cols = self.track_valid_cols_map[track]
                 track_df = df[df['科类'] == track].copy()
                 
+                # 🚀 核心修复：强行把所有0分替换为NaN，完成物理隔离！
                 for c in t_cols:
-                    track_df[c] = pd.to_numeric(track_df[c], errors='coerce').fillna(0)
+                    track_df[c] = pd.to_numeric(track_df[c], errors='coerce').replace(0, np.nan)
                     
                 calc_cols, t_raw, t_assign = [], [], []
                 
@@ -518,25 +515,27 @@ class ReverieOfCopperSulfateAnalyzer:
                 self.track_raw_subjects[track] = t_raw
                 self.track_assign_subjects[track] = t_assign
                 
+                # sum(axis=1)会自动把NaN当做0加起来计算总分，机制完美
                 track_df['3+1+2总分'] = track_df[calc_cols].sum(axis=1)
                 track_df['科类统考排名'] = track_df['3+1+2总分'].rank(method='min', ascending=False).astype(int)
                 track_df['班级内排名'] = track_df.groupby('班级')['3+1+2总分'].rank(method='min', ascending=False).astype(int)
                 
                 for col in calc_cols:
-                    track_df['temp_sub'] = track_df[col].replace(0, np.nan)
-                    track_df[f'{col}级排'] = track_df['temp_sub'].rank(method='min', ascending=False).fillna(9999).astype(int)
-                    track_df[f'{col}班排'] = track_df.groupby('班级')['temp_sub'].rank(method='min', ascending=False).fillna(9999).astype(int)
-                    track_df[f'{col}_pct'] = track_df['temp_sub'].rank(pct=True, ascending=True)
+                    # NaN 会自动被剔除排名，不会获得并列垫底名次
+                    track_df[f'{col}级排'] = track_df[col].rank(method='min', ascending=False).fillna(9999).astype(int)
+                    track_df[f'{col}班排'] = track_df.groupby('班级')[col].rank(method='min', ascending=False).fillna(9999).astype(int)
+                    track_df[f'{col}_pct'] = track_df[col].rank(pct=True, ascending=True)
 
                 def get_diagnostics(row):
-                    pcts = {c: row[f'{c}_pct'] for c in calc_cols if pd.notna(row[f'{c}_pct']) and row[c] > 0}
+                    # 仅对存在成绩的科目计算雷达
+                    pcts = {c: row[f'{c}_pct'] for c in calc_cols if pd.notna(row[c]) and pd.notna(row[f'{c}_pct'])}
                     if not pcts or len(pcts) < 3: return "无", "无"
                     best_sub = max(pcts, key=pcts.get).replace('赋分', '')
                     worst_sub = min(pcts, key=pcts.get).replace('赋分', '')
                     return best_sub, worst_sub
 
                 track_df[['优势学科', '薄弱学科']] = track_df.apply(lambda r: pd.Series(get_diagnostics(r)), axis=1)
-                track_df.drop(columns=[f'{col}_pct' for col in calc_cols] + ['temp_sub'], inplace=True, errors='ignore')
+                track_df.drop(columns=[f'{col}_pct' for col in calc_cols], inplace=True, errors='ignore')
                 
                 processed_dfs.append(track_df)
                 
@@ -570,13 +569,15 @@ class ReverieOfCopperSulfateAnalyzer:
             self.exist_cols = final_preview_cols 
             
             preview_df = self.cleaned_df[final_preview_cols].copy()
+            # 视觉上将缺考排名的 9999 清除，把 NaN 转为空白
             for c in preview_df.columns:
                 if c.endswith('班排') or c.endswith('级排'):
                     preview_df[c] = preview_df[c].replace(9999, '')
+            preview_df = preview_df.fillna('')
             self._update_treeview(self.tv_data, preview_df.head(50))
             
             self._generate_threshold_inputs()
-            messagebox.showinfo("超级引擎完毕", "定制规则统算已完美落地！\n无用科目已剔除，0分未考者已剔除排名。前往后续页签体验高阶分析。")
+            messagebox.showinfo("超级引擎完毕", "定制规则统算已完美落地！\n\n✅ 0分(缺考)数据已触发强制物理隔离，不占名次、不拉低全班均分与及格率！\n您可以前往后续页签进行高阶教务分析了。")
         except Exception as e:
             messagebox.showerror("引擎异常", f"处理失败:\n{str(e)}")
 
@@ -590,8 +591,7 @@ class ReverieOfCopperSulfateAnalyzer:
     # ================= 双线KPI参数 =================
 
     def _generate_threshold_inputs(self):
-        for widget in self.threshold_inputs_frame.winfo_children():
-            widget.destroy()
+        for widget in self.threshold_inputs_frame.winfo_children(): widget.destroy()
         self.threshold_entries = {}
         for row_idx, track in enumerate(self.tracks):
             ttk.Label(self.threshold_inputs_frame, text=f"[{track}] 特控:", font=("Microsoft YaHei", 10, "bold")).grid(row=row_idx, column=0, padx=5, pady=8)
@@ -625,7 +625,6 @@ class ReverieOfCopperSulfateAnalyzer:
             return
 
         df = self.cleaned_df.copy()
-        
         def check_line(row, line_type):
             target = self.thresholds.get(f"{row['科类']}_{line_type}", 0)
             return 1 if row['3+1+2总分'] >= target else 0
@@ -643,11 +642,9 @@ class ReverieOfCopperSulfateAnalyzer:
         
         stats['特控达线率'] = (stats['特控达线人数'] / stats['班级参考人数'] * 100).map('{:.1f}%'.format)
         stats['本科达线率'] = (stats['本科达线人数'] / stats['班级参考人数'] * 100).map('{:.1f}%'.format)
-        
         stats = stats[['科类', '班级', '班级参考人数', '特控达线人数', '特控达线率', '本科达线人数', '本科达线率', '尖子生人数']]
         stats = stats.rename(columns={'尖子生人数': f'特优生(前{self.top_n_target})'})
         stats = stats.sort_values(by=['科类', '特控达线人数'], ascending=[True, False])
-        
         self._update_treeview(self.tv_kpi, stats)
 
     # ================= 多维质量诊断 =================
@@ -669,8 +666,8 @@ class ReverieOfCopperSulfateAnalyzer:
             
             calc_cols = self.track_calc_cols.get(track, [])
             for sub in calc_cols:
-                track_df[sub] = track_df[sub].astype(float)
-                if track_df[sub].sum() > 0: agg_dict[sub] = ['mean', 'max']
+                # 均分和最高分计算会自动忽略 NaN
+                if track_df[sub].notna().sum() > 0: agg_dict[sub] = ['mean', 'max']
                 
             class_compare = track_df.groupby('班级').agg(agg_dict)
             class_compare.columns = ['_'.join(col).strip() for col in class_compare.columns.values]
@@ -682,8 +679,10 @@ class ReverieOfCopperSulfateAnalyzer:
                 if c.endswith('_max') and c not in rename_map: rename_map[c] = c.replace('_max', '最高')
             
             class_compare = class_compare.rename(columns=rename_map).sort_values(by='总分均分', ascending=False)
+            
             for col in class_compare.columns:
-                if col != '班级': class_compare[col] = class_compare[col].map('{:.2f}'.format)
+                if col != '班级': 
+                    class_compare[col] = class_compare[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
                 
             report += class_compare.to_string(index=False) + "\n\n"
             self.report_text.insert(END, report)
@@ -699,20 +698,20 @@ class ReverieOfCopperSulfateAnalyzer:
         try:
             track_df = self.cleaned_df[self.cleaned_df['科类'] == track].copy()
             if metric not in track_df.columns: return
-            track_df[metric] = track_df[metric].astype(float)
-            if track_df[metric].sum() == 0: return
+            
+            scores = track_df[track_df[metric].notna()][metric].astype(float)
+            if scores.empty: return
 
             self.ax.clear()
 
             if "柱状图" in chart_type:
-                class_means = track_df.groupby('班级')[metric].mean().sort_values(ascending=False)
+                class_means = track_df.groupby('班级')[metric].mean().dropna().sort_values(ascending=False)
                 bars = self.ax.bar(class_means.index.astype(str), class_means.values, color='#0078D7', alpha=0.85, width=0.6)
                 self.ax.set_title(f"{track} - 各班级【{metric}】平均分", fontsize=14, pad=15, fontweight='bold', color='#333333')
                 self.ax.set_ylabel("平均分", fontsize=11)
                 self.ax.bar_label(bars, fmt='%.1f', padding=3)
                 
             elif "直方图" in chart_type:
-                scores = track_df[track_df[metric] > 0][metric] 
                 self.ax.hist(scores, bins=15, color='#28A745', edgecolor='white', alpha=0.8)
                 self.ax.set_title(f"{track} - 全年级【{metric}】分层分布直方图", fontsize=14, pad=15, fontweight='bold')
                 self.ax.set_xlabel("分数区间", fontsize=11)
@@ -727,7 +726,6 @@ class ReverieOfCopperSulfateAnalyzer:
     # ================= 🚀 商业级 Excel 格式化与导出 =================
     
     def _format_excel_sheet(self, ws):
-        """核心：为导出的 Excel Sheet 施加专业排版魔法（全居中、换行、全边框）"""
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
                              top=Side(style='thin'), bottom=Side(style='thin'))
         center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -746,13 +744,10 @@ class ReverieOfCopperSulfateAnalyzer:
                     visual_len = sum(2 if ord(c) > 127 else 1 for c in val_str)
                     if visual_len > max_length:
                         max_length = visual_len
-                except:
-                    pass
+                except: pass
             adjusted_width = max_length + 2
-            if adjusted_width > 25:
-                adjusted_width = 25
-            elif adjusted_width < 10:
-                adjusted_width = 10
+            if adjusted_width > 25: adjusted_width = 25
+            elif adjusted_width < 10: adjusted_width = 10
             ws.column_dimensions[column].width = adjusted_width
 
     def export_all_reports(self):
@@ -768,11 +763,12 @@ class ReverieOfCopperSulfateAnalyzer:
             self.export_status.config(text="正在进行底层排版渲染与综合大表合并，请稍候...", foreground="orange")
             self.master.update()
 
-            def clean_ranks(df_to_clean):
+            def clean_ranks_and_nans(df_to_clean):
+                """清除非法排名并全量将NaN转为空白格以供导出"""
                 for c in df_to_clean.columns:
                     if c.endswith('班排') or c.endswith('级排'):
                         df_to_clean[c] = df_to_clean[c].replace(9999, '')
-                return df_to_clean
+                return df_to_clean.fillna('')
 
             base_cols = ['班级', '姓名', '科类', '3+1+2总分', '班级内排名', '科类统考排名', '优势学科', '薄弱学科']
 
@@ -796,7 +792,7 @@ class ReverieOfCopperSulfateAnalyzer:
                         if f"{sub}赋分" in cls_df.columns: cls_export_cols.extend([sub, f"{sub}赋分", f"{sub}赋分班排", f"{sub}赋分级排"])
                     
                     class_data = cls_df[cls_export_cols]
-                    class_data = clean_ranks(class_data)
+                    class_data = clean_ranks_and_nans(class_data)
                     
                     filepath = os.path.join(class_dir, f"高二_{cls}班_全维成绩单.xlsx")
                     with pd.ExcelWriter(filepath, engine='openpyxl') as w:
@@ -845,7 +841,7 @@ class ReverieOfCopperSulfateAnalyzer:
                     for sub in t_assign: valid_track_cols.extend([sub, f"{sub}赋分", f"{sub}赋分班排", f"{sub}赋分级排"])
                         
                     track_board = track_df[valid_track_cols].sort_values('科类统考排名')
-                    track_board = clean_ranks(track_board)
+                    track_board = clean_ranks_and_nans(track_board)
                     track_board.to_excel(writer, sheet_name=f"{track}-全面总榜", index=False)
                     self._format_excel_sheet(writer.sheets[f"{track}-全面总榜"])
 
@@ -866,14 +862,18 @@ class ReverieOfCopperSulfateAnalyzer:
                         border_cols.extend(other_cols)
                         
                         border_df = border_df[border_cols].sort_values(['班级', f'距{line_type}分差'], ascending=[True, False])
-                        border_df = clean_ranks(border_df)
+                        border_df = clean_ranks_and_nans(border_df)
                         border_df.to_excel(writer, sheet_name=f"{track}-{line_type}临界生", index=False)
                         self._format_excel_sheet(writer.sheets[f"{track}-{line_type}临界生"])
 
                     rate_dfs = []
                     for sub in calc_cols:
                         max_s = 150 if any(n in sub for n in ['语', '数', '外', '英']) else 100
-                        sub_df = track_df[track_df[sub] > 0].groupby('班级')[sub].agg(
+                        # 仅保留有效分数的学生做统计分析
+                        valid_scores = track_df[track_df[sub].notna()]
+                        if valid_scores.empty: continue
+                        
+                        sub_df = valid_scores.groupby('班级')[sub].agg(
                             均分='mean',
                             及格率=lambda x, m=max_s: (x >= m*0.6).mean(),
                             优秀率=lambda x, m=max_s: (x >= m*0.8).mean()
@@ -885,14 +885,13 @@ class ReverieOfCopperSulfateAnalyzer:
                         final_rate_df = pd.concat(rate_dfs, axis=1).reset_index()
                         for col in final_rate_df.columns:
                             if '率' in col: final_rate_df[col] = (final_rate_df[col]*100).map('{:.1f}%'.format)
-                            elif '均分' in col: final_rate_df[col] = final_rate_df[col].map('{:.2f}'.format)
+                            elif '均分' in col: final_rate_df[col] = final_rate_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
                         final_rate_df.to_excel(writer, sheet_name=f"{track}-单科三率矩阵", index=False)
                         self._format_excel_sheet(writer.sheets[f"{track}-单科三率矩阵"])
 
                     agg_dict = {'3+1+2总分': ['mean', 'std', 'max']}
                     for sub in calc_cols:
-                        track_df[sub] = track_df[sub].astype(float)
-                        if track_df[sub].sum() > 0: agg_dict[sub] = ['mean', 'max']
+                        if track_df[sub].notna().sum() > 0: agg_dict[sub] = ['mean', 'max']
                     class_compare = track_df.groupby('班级').agg(agg_dict)
                     class_compare.columns = ['_'.join(col).strip() for col in class_compare.columns.values]
                     class_compare = class_compare.reset_index()
@@ -902,7 +901,7 @@ class ReverieOfCopperSulfateAnalyzer:
                         if c.endswith('_max') and c not in rename_map: rename_map[c] = c.replace('_max', '最高分')
                     class_compare = class_compare.rename(columns=rename_map).sort_values(by='总分均分', ascending=False)
                     for col in class_compare.columns:
-                        if col != '班级': class_compare[col] = class_compare[col].map('{:.2f}'.format)
+                        if col != '班级': class_compare[col] = class_compare[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
                     class_compare.to_excel(writer, sheet_name=f"{track}-综合教学诊断", index=False)
                     self._format_excel_sheet(writer.sheets[f"{track}-综合教学诊断"])
 
