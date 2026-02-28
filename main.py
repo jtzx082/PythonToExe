@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.6.0 Ultimate"  # 🚀 新增：UPX 智能全自动下载与无缝挂载
+APP_VERSION = "3.7.0 Ultimate"  # 🚀 终极版：精准适配 Nuitka 的全平台 UPX 注入机制
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -255,17 +255,21 @@ class BuildWorker(QObject):
         except BuildCancelledError as e: self._emit(f"[STOP] {e}"); self.done.emit(False, "构建已终止 🛑", out_dir)
         except Exception as e: self._emit(f"[FATAL] {e}"); self.done.emit(False, f"构建失败：{e}", out_dir)
 
-    def _run_cmd(self, cmd: List[str], cwd: Path, msg: str = ""):
+    def _run_cmd(self, cmd: List[str], cwd: Path, msg: str = "", extra_bin_dir: str = None):
         if msg: self._emit(msg)
         
-        # 🛡️ 终极环境隔离
+        # 🛡️ 终极环境隔离：防止系统环境变量穿透
         clean_env = os.environ.copy()
         for key in ["PYTHONPATH", "PYTHONHOME", "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"]:
             clean_env.pop(key, None)
             
+        paths_to_add = []
+        if extra_bin_dir: paths_to_add.append(extra_bin_dir)
         if cmd and "python" in Path(cmd[0]).name.lower():
-            venv_bin_dir = str(Path(cmd[0]).parent)
-            clean_env["PATH"] = f"{venv_bin_dir}{os.pathsep}{clean_env.get('PATH', '')}"
+            paths_to_add.append(str(Path(cmd[0]).parent))
+            
+        if paths_to_add:
+            clean_env["PATH"] = os.pathsep.join(paths_to_add) + os.pathsep + clean_env.get('PATH', '')
 
         if run_subprocess_stream(cmd, cwd, clean_env, self._emit, self._check_cancel) != 0:
             raise RuntimeError(f"命令执行失败: {format_cmd(cmd)}")
@@ -296,14 +300,12 @@ class BuildWorker(QObject):
         upx_dir = cache_root / "upx_tool"
         upx_exe_name = "upx.exe" if IS_WIN else "upx"
         
-        # 1. 检查是否已经下载过
         for root, _, files in os.walk(upx_dir):
             if upx_exe_name in files:
                 exe_path = Path(root) / upx_exe_name
                 if not IS_WIN: os.chmod(exe_path, 0o755)
                 return str(root)
                 
-        # 2. 如果不存在，自动执行全网匹配下载
         self.stage.emit("准备 UPX 引擎")
         self._emit("[INFO] 检测到开启了 UPX 压缩，正在自动获取最新版 UPX 引擎...")
         
@@ -323,8 +325,7 @@ class BuildWorker(QObject):
                 with urllib.request.urlopen(req, timeout=60) as response, open(archive_path, 'wb') as out_file:
                     shutil.copyfileobj(response, out_file)
 
-            try:
-                download_file(mirror_url)
+            try: download_file(mirror_url)
             except Exception:
                 self._emit("[WARN] 镜像节点下载超时，自动切换直连模式...")
                 download_file(base_url)
@@ -335,7 +336,6 @@ class BuildWorker(QObject):
             else:
                 with tarfile.open(archive_path, 'r:xz') as t: t.extractall(upx_dir)
                     
-            # 授权并挂载
             for root, _, files in os.walk(upx_dir):
                 if upx_exe_name in files:
                     exe_path = Path(root) / upx_exe_name
@@ -373,7 +373,11 @@ class BuildWorker(QObject):
 
         self.stage.emit("安装依赖")
         if cfg.upgrade_pip: self._run_cmd(pip_cmd + ["--upgrade", "pip", "setuptools", "wheel"], proj_dir)
-        self._run_cmd(pip_cmd + ["--upgrade", cfg.builder], proj_dir, f"安装引擎 {cfg.builder}...")
+        
+        engine_pkgs = [cfg.builder]
+        if cfg.builder == "nuitka" and cfg.onefile:
+            engine_pkgs.append("zstandard")
+        self._run_cmd(pip_cmd + ["--upgrade"] + engine_pkgs, proj_dir, f"安装核心引擎与所需库 ({', '.join(engine_pkgs)})...")
 
         if cfg.use_requirements and (req := Path(cfg.requirements_path) if cfg.requirements_path else proj_dir / "requirements.txt").exists():
             cmd = pip_cmd + ["--upgrade", "--force-reinstall", "-r", str(req)] if cfg.force_reinstall else pip_cmd + ["-r", str(req)]
@@ -386,6 +390,8 @@ class BuildWorker(QObject):
         self.stage.emit("编译打包")
         self._header(f"开始 {cfg.builder.upper()} 打包")
         
+        upx_bin_dir = self._ensure_upx(work_root) if cfg.use_upx else None
+        
         if cfg.builder == "pyinstaller":
             cmd = [str(vpy), "-m", "PyInstaller", str(entry_py), "--noconfirm", "--clean", "--name", cfg.app_name]
             cmd += ["--distpath", str(dist_dir), "--workpath", str(build_dir), "--specpath", str(build_dir)]
@@ -394,13 +400,13 @@ class BuildWorker(QObject):
             if cfg.icon_path: cmd += ["--icon", str(Path(cfg.icon_path).resolve())]
             if cfg.optimize_level > 0: cmd += [f"--optimize={cfg.optimize_level}"]
             
-            # 🚀 激活 UPX 智能挂载机制
-            if cfg.use_upx:
-                upx_path = self._ensure_upx(proj_dir / BUILD_ROOT_NAME)
-                if upx_path:
-                    cmd += [f"--upx-dir={upx_path}"]
+            # PyInstaller 专属逻辑：非 Win 环境屏蔽 UPX
+            if cfg.use_upx and upx_bin_dir:
+                if IS_WIN:
+                    cmd += [f"--upx-dir={upx_bin_dir}"]
                 else:
                     cmd += ["--noupx"]
+                    self._emit("[WARN] PyInstaller 官方限制：Mac/Linux 平台禁用 UPX。已自动忽略。")
             else:
                 cmd += ["--noupx"]
             
@@ -425,12 +431,17 @@ class BuildWorker(QObject):
             for item in cfg.add_data:
                 if sep in item: src, dest = item.split(sep, 1); cmd += [f"--include-data-dir={src}={dest}"]
             for plg in cfg.nuitka_plugins: cmd += [f"--enable-plugin={plg}"]
+            
+            # Nuitka 全平台 UPX 注入
+            if cfg.use_upx and upx_bin_dir:
+                cmd += ["--enable-plugin=upx"]
 
         if cfg.extra_args: cmd += [x for x in cfg.extra_args.split() if x]
         if cfg.builder == "nuitka": cmd += [str(entry_py)]
 
         self._emit(format_cmd(cmd))
-        self._run_cmd(cmd, proj_dir)
+        # 将下载的 UPX 路径注入到子进程环境变量中，供 Nuitka 随时调用
+        self._run_cmd(cmd, proj_dir, extra_bin_dir=upx_bin_dir)
 
         self.stage.emit("导出产物")
         rm_tree(Path(final_export)); safe_mkdir(Path(final_export))
@@ -494,7 +505,7 @@ class MainWindow(QMainWindow):
         left_panel = QWidget(); left_layout = QVBoxLayout(left_panel); left_layout.setContentsMargins(16, 16, 16, 16); left_layout.setSpacing(14)
         header = QWidget(); hl = QVBoxLayout(header); hl.setContentsMargins(0,0,0,0); hl.setSpacing(4)
         title = QLabel(f"📦 {APP_NAME}"); title.setStyleSheet("font-size: 22px; font-weight: 800; color: #0F172A;")
-        sub = QLabel("支持拖拽文件 • 每次开启全新纯净状态 • UPX 自动下载与挂载"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
+        sub = QLabel("支持拖拽文件 • 自动下载 UPX • Nuitka 全平台极限压缩"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
         hl.addWidget(title); hl.addWidget(sub); left_layout.addWidget(header)
 
         tabs = QTabWidget(); tabs.setDocumentMode(True)
@@ -558,11 +569,11 @@ class MainWindow(QMainWindow):
         gb_adv = QGroupBox("高级参数 (每行一个)"); fa_adv = QFormLayout(gb_adv)
         self.pt_hidden, self.pt_collect, self.pt_data, self.pt_extra = QPlainTextEdit(), QPlainTextEdit(), QPlainTextEdit(), QPlainTextEdit()
         for pt in (self.pt_hidden, self.pt_collect, self.pt_data, self.pt_extra): pt.setMaximumHeight(70)
-        self.ck_upx = QCheckBox("使用 UPX 极致压缩产物体积 (仅限 PyInstaller, 将自动下载与配置)")
+        self.ck_upx = QCheckBox("使用 UPX 极致压缩 (PyInstaller 仅 Windows 有效，Nuitka 全平台适用)")
         fa_adv.addRow("🛡️ 隐式导入：", self.pt_hidden); fa_adv.addRow("🧲 强制收集包：", self.pt_collect)
         fa_adv.addRow("📁 数据文件(src:dst)：", self.pt_data); fa_adv.addRow("🔧 其它参数：", self.pt_extra)
         fa_adv.addRow("", self.ck_upx)
-        info_lb = QLabel("💡 工具已内置终极 AI与多媒体库 免疫字典，无需手动填写常见高危依赖。")
+        info_lb = QLabel("💡 提示：如果勾选 UPX 且系统中未安装，软件会在后台自动下载并配置。")
         info_lb.setStyleSheet("color: #059669; font-weight: bold;")
         l_a.addWidget(gb_adv); l_a.addWidget(info_lb); l_a.addStretch(1)
         tabs.addTab(wrap_scroll(tab_adv), "🛠️ 高级与优化")
