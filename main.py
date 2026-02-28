@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import json
 import shutil
 import hashlib
 import subprocess
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.5.0 Ultimate"  # 🚀 新增 ttkbootstrap 免疫，强化环境隔离，保持每次开启纯净
+APP_VERSION = "3.5.1 Ultimate"  # 🚀 修复 json 模块未导入的 bug
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
