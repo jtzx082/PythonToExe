@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.7.0 Ultimate"  # 🚀 终极版：精准适配 Nuitka 的全平台 UPX 注入机制
+APP_VERSION = "3.8.0 Ultimate"  # 🚀 解除中文命名封印，底层沙盒安全隔离防乱码
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -86,7 +86,8 @@ def ensure_writable_directory(target: Path, fallback: Path) -> Tuple[Path, Optio
         return fallback, f"目录不可写，已切换至桌面：{fallback}"
 
 def sanitize_name(s: str) -> str:
-    s = re.sub(r"[^A-Za-z0-9_\-\.]+", "_", s.strip())
+    # 🚀 优化：\w 包含了中文等各国语言字符，允许中文、字母、数字、下划线、短横线和空格
+    s = re.sub(r"[^\w\-\.\s]+", "_", s.strip())
     return s.strip("._-") or "MyApp"
 
 def guess_app_name(project_dir: Path) -> str:
@@ -257,8 +258,6 @@ class BuildWorker(QObject):
 
     def _run_cmd(self, cmd: List[str], cwd: Path, msg: str = "", extra_bin_dir: str = None):
         if msg: self._emit(msg)
-        
-        # 🛡️ 终极环境隔离：防止系统环境变量穿透
         clean_env = os.environ.copy()
         for key in ["PYTHONPATH", "PYTHONHOME", "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"]:
             clean_env.pop(key, None)
@@ -296,7 +295,6 @@ class BuildWorker(QObject):
         else: self._emit("未检测到高危依赖。")
 
     def _ensure_upx(self, cache_root: Path) -> Optional[str]:
-        """🚀 自动下载、解压并配置 UPX 工具"""
         upx_dir = cache_root / "upx_tool"
         upx_exe_name = "upx.exe" if IS_WIN else "upx"
         
@@ -400,13 +398,9 @@ class BuildWorker(QObject):
             if cfg.icon_path: cmd += ["--icon", str(Path(cfg.icon_path).resolve())]
             if cfg.optimize_level > 0: cmd += [f"--optimize={cfg.optimize_level}"]
             
-            # PyInstaller 专属逻辑：非 Win 环境屏蔽 UPX
             if cfg.use_upx and upx_bin_dir:
-                if IS_WIN:
-                    cmd += [f"--upx-dir={upx_bin_dir}"]
-                else:
-                    cmd += ["--noupx"]
-                    self._emit("[WARN] PyInstaller 官方限制：Mac/Linux 平台禁用 UPX。已自动忽略。")
+                if IS_WIN: cmd += [f"--upx-dir={upx_bin_dir}"]
+                else: cmd += ["--noupx"]; self._emit("[WARN] PyInstaller 官方限制：Mac/Linux 平台禁用 UPX。已自动忽略。")
             else:
                 cmd += ["--noupx"]
             
@@ -431,16 +425,12 @@ class BuildWorker(QObject):
             for item in cfg.add_data:
                 if sep in item: src, dest = item.split(sep, 1); cmd += [f"--include-data-dir={src}={dest}"]
             for plg in cfg.nuitka_plugins: cmd += [f"--enable-plugin={plg}"]
-            
-            # Nuitka 全平台 UPX 注入
-            if cfg.use_upx and upx_bin_dir:
-                cmd += ["--enable-plugin=upx"]
+            if cfg.use_upx and upx_bin_dir: cmd += ["--enable-plugin=upx"]
 
         if cfg.extra_args: cmd += [x for x in cfg.extra_args.split() if x]
         if cfg.builder == "nuitka": cmd += [str(entry_py)]
 
         self._emit(format_cmd(cmd))
-        # 将下载的 UPX 路径注入到子进程环境变量中，供 Nuitka 随时调用
         self._run_cmd(cmd, proj_dir, extra_bin_dir=upx_bin_dir)
 
         self.stage.emit("导出产物")
@@ -505,7 +495,7 @@ class MainWindow(QMainWindow):
         left_panel = QWidget(); left_layout = QVBoxLayout(left_panel); left_layout.setContentsMargins(16, 16, 16, 16); left_layout.setSpacing(14)
         header = QWidget(); hl = QVBoxLayout(header); hl.setContentsMargins(0,0,0,0); hl.setSpacing(4)
         title = QLabel(f"📦 {APP_NAME}"); title.setStyleSheet("font-size: 22px; font-weight: 800; color: #0F172A;")
-        sub = QLabel("支持拖拽文件 • 自动下载 UPX • Nuitka 全平台极限压缩"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
+        sub = QLabel("支持拖拽文件 • 纯净状态 • UPX 全平台极限压缩 • 支持中文命名"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
         hl.addWidget(title); hl.addWidget(sub); left_layout.addWidget(header)
 
         tabs = QTabWidget(); tabs.setDocumentMode(True)
