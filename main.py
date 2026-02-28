@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.3.0 Ultimate"  # 🚀 纯净版：取消自动记忆，每次打开都是全新纯净状态
+APP_VERSION = "3.4.0 Ultimate"  # 🚀 修复 FrozenApp 依赖穿透导致的 Nuitka 扫描崩溃
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -143,13 +143,13 @@ def find_host_python() -> Path:
     raise RuntimeError("未在系统中探测到有效的 Python 3 环境，请手动浏览选择。")
 
 # -----------------------------
-# 子进程执行
+# 子进程执行 (隔离环境变量)
 # -----------------------------
 class BuildCancelledError(Exception): pass
 
-def run_subprocess_stream(cmd: List[str], cwd: Optional[Path], log_cb: Callable[[str], None], check_cancel: Callable[[], bool]):
+def run_subprocess_stream(cmd: List[str], cwd: Optional[Path], env: Optional[dict], log_cb: Callable[[str], None], check_cancel: Callable[[], bool]):
     proc = subprocess.Popen(
-        cmd, cwd=str(cwd) if cwd else None,
+        cmd, cwd=str(cwd) if cwd else None, env=env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, bufsize=1, universal_newlines=True
     )
@@ -250,7 +250,17 @@ class BuildWorker(QObject):
 
     def _run_cmd(self, cmd: List[str], cwd: Path, msg: str = ""):
         if msg: self._emit(msg)
-        if run_subprocess_stream(cmd, cwd, self._emit, self._check_cancel) != 0:
+        
+        # 🛡️ 终极环境隔离：防止打包器自身的运行环境污染目标项目的编译环境
+        clean_env = os.environ.copy()
+        for key in ["PYTHONPATH", "PYTHONHOME", "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"]:
+            clean_env.pop(key, None)
+            
+        if cmd and "python" in Path(cmd[0]).name.lower():
+            venv_bin_dir = str(Path(cmd[0]).parent)
+            clean_env["PATH"] = f"{venv_bin_dir}{os.pathsep}{clean_env.get('PATH', '')}"
+
+        if run_subprocess_stream(cmd, cwd, clean_env, self._emit, self._check_cancel) != 0:
             raise RuntimeError(f"命令执行失败: {format_cmd(cmd)}")
 
     def _apply_smart_heuristics(self, freeze_path: Path):
