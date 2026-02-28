@@ -8,6 +8,9 @@ import subprocess
 import platform
 import configparser
 import time
+import urllib.request
+import zipfile
+import tarfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Optional, Tuple, Callable
@@ -25,7 +28,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.5.1 Ultimate"  # 🚀 修复 json 模块未导入的 bug
+APP_VERSION = "3.6.0 Ultimate"  # 🚀 新增：UPX 智能全自动下载与无缝挂载
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -255,7 +258,7 @@ class BuildWorker(QObject):
     def _run_cmd(self, cmd: List[str], cwd: Path, msg: str = ""):
         if msg: self._emit(msg)
         
-        # 🛡️ 终极环境隔离：防止打包器自身的运行环境污染目标项目的编译环境
+        # 🛡️ 终极环境隔离
         clean_env = os.environ.copy()
         for key in ["PYTHONPATH", "PYTHONHOME", "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"]:
             clean_env.pop(key, None)
@@ -287,6 +290,61 @@ class BuildWorker(QObject):
             self._emit("✅ 已自动注入以下免疫补丁：")
             for p in applied: self._emit("  - " + p)
         else: self._emit("未检测到高危依赖。")
+
+    def _ensure_upx(self, cache_root: Path) -> Optional[str]:
+        """🚀 自动下载、解压并配置 UPX 工具"""
+        upx_dir = cache_root / "upx_tool"
+        upx_exe_name = "upx.exe" if IS_WIN else "upx"
+        
+        # 1. 检查是否已经下载过
+        for root, _, files in os.walk(upx_dir):
+            if upx_exe_name in files:
+                exe_path = Path(root) / upx_exe_name
+                if not IS_WIN: os.chmod(exe_path, 0o755)
+                return str(root)
+                
+        # 2. 如果不存在，自动执行全网匹配下载
+        self.stage.emit("准备 UPX 引擎")
+        self._emit("[INFO] 检测到开启了 UPX 压缩，正在自动获取最新版 UPX 引擎...")
+        
+        try:
+            safe_mkdir(upx_dir)
+            version = "4.2.4"
+            if IS_WIN: filename = f"upx-{version}-win64.zip"
+            elif IS_MAC: filename = f"upx-{version}-mac.zip"
+            else: filename = f"upx-{version}-amd64_linux.tar.xz"
+                
+            base_url = f"https://github.com/upx/upx/releases/download/v{version}/{filename}"
+            mirror_url = f"https://mirror.ghproxy.com/{base_url}"
+            archive_path = upx_dir / filename
+            
+            def download_file(url):
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=60) as response, open(archive_path, 'wb') as out_file:
+                    shutil.copyfileobj(response, out_file)
+
+            try:
+                download_file(mirror_url)
+            except Exception:
+                self._emit("[WARN] 镜像节点下载超时，自动切换直连模式...")
+                download_file(base_url)
+                
+            self._emit("[INFO] 下载完毕，正在部署 UPX 模块...")
+            if filename.endswith(".zip"):
+                with zipfile.ZipFile(archive_path, 'r') as z: z.extractall(upx_dir)
+            else:
+                with tarfile.open(archive_path, 'r:xz') as t: t.extractall(upx_dir)
+                    
+            # 授权并挂载
+            for root, _, files in os.walk(upx_dir):
+                if upx_exe_name in files:
+                    exe_path = Path(root) / upx_exe_name
+                    if not IS_WIN: os.chmod(exe_path, 0o755)
+                    self._emit("[INFO] UPX 引擎部署成功！")
+                    return str(root)
+        except Exception as e:
+            self._emit(f"[WARN] 自动下载 UPX 失败 ({e})，将关闭极限压缩功能。")
+        return None
 
     def _run_impl(self) -> str:
         cfg = self.cfg
@@ -335,7 +393,16 @@ class BuildWorker(QObject):
             if cfg.windowed: cmd += ["--windowed"]
             if cfg.icon_path: cmd += ["--icon", str(Path(cfg.icon_path).resolve())]
             if cfg.optimize_level > 0: cmd += [f"--optimize={cfg.optimize_level}"]
-            if not cfg.use_upx: cmd += ["--noupx"]
+            
+            # 🚀 激活 UPX 智能挂载机制
+            if cfg.use_upx:
+                upx_path = self._ensure_upx(proj_dir / BUILD_ROOT_NAME)
+                if upx_path:
+                    cmd += [f"--upx-dir={upx_path}"]
+                else:
+                    cmd += ["--noupx"]
+            else:
+                cmd += ["--noupx"]
             
             sep = ";" if IS_WIN else ":"
             for item in cfg.add_data: cmd += ["--add-data", item] if sep in item else []
@@ -427,7 +494,7 @@ class MainWindow(QMainWindow):
         left_panel = QWidget(); left_layout = QVBoxLayout(left_panel); left_layout.setContentsMargins(16, 16, 16, 16); left_layout.setSpacing(14)
         header = QWidget(); hl = QVBoxLayout(header); hl.setContentsMargins(0,0,0,0); hl.setSpacing(4)
         title = QLabel(f"📦 {APP_NAME}"); title.setStyleSheet("font-size: 22px; font-weight: 800; color: #0F172A;")
-        sub = QLabel("支持拖拽文件 • 每次开启全新纯净状态 • 硬核杀进程 • 终极免疫"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
+        sub = QLabel("支持拖拽文件 • 每次开启全新纯净状态 • UPX 自动下载与挂载"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
         hl.addWidget(title); hl.addWidget(sub); left_layout.addWidget(header)
 
         tabs = QTabWidget(); tabs.setDocumentMode(True)
@@ -491,7 +558,7 @@ class MainWindow(QMainWindow):
         gb_adv = QGroupBox("高级参数 (每行一个)"); fa_adv = QFormLayout(gb_adv)
         self.pt_hidden, self.pt_collect, self.pt_data, self.pt_extra = QPlainTextEdit(), QPlainTextEdit(), QPlainTextEdit(), QPlainTextEdit()
         for pt in (self.pt_hidden, self.pt_collect, self.pt_data, self.pt_extra): pt.setMaximumHeight(70)
-        self.ck_upx = QCheckBox("使用 UPX 极致压缩产物体积 (仅限 PyInstaller, 需预装 upx)")
+        self.ck_upx = QCheckBox("使用 UPX 极致压缩产物体积 (仅限 PyInstaller, 将自动下载与配置)")
         fa_adv.addRow("🛡️ 隐式导入：", self.pt_hidden); fa_adv.addRow("🧲 强制收集包：", self.pt_collect)
         fa_adv.addRow("📁 数据文件(src:dst)：", self.pt_data); fa_adv.addRow("🔧 其它参数：", self.pt_extra)
         fa_adv.addRow("", self.ck_upx)
