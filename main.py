@@ -1,7 +1,6 @@
 import os
 import sys
 import re
-import json
 import shutil
 import hashlib
 import subprocess
@@ -25,7 +24,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.4.0 Ultimate"  # 🚀 修复 FrozenApp 依赖穿透导致的 Nuitka 扫描崩溃
+APP_VERSION = "3.5.0 Ultimate"  # 🚀 新增 ttkbootstrap 免疫，强化环境隔离，保持每次开启纯净
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -35,6 +34,10 @@ IS_LINUX = sys.platform.startswith("linux")
 
 # 🧠 终极智能免疫知识库
 SMART_HEURISTICS = {
+    "ttkbootstrap": {
+        "collect_all": ["ttkbootstrap"], 
+        "hidden_imports": ["PIL._tkinter_finder"]
+    },
     "azure-cognitiveservices-speech": {"collect_all": ["azure.cognitiveservices.speech"]},
     "customtkinter": {"collect_all": ["customtkinter"], "hidden_imports": ["PIL._tkinter_finder"], "nuitka_plugins": ["tk-inter"]},
     "pandas": {"hidden_imports": ["pandas._libs.tslibs.timedeltas"], "nuitka_plugins": ["numpy"]},
@@ -143,7 +146,7 @@ def find_host_python() -> Path:
     raise RuntimeError("未在系统中探测到有效的 Python 3 环境，请手动浏览选择。")
 
 # -----------------------------
-# 子进程执行 (隔离环境变量)
+# 子进程执行 (支持硬核中断)
 # -----------------------------
 class BuildCancelledError(Exception): pass
 
@@ -289,7 +292,6 @@ class BuildWorker(QObject):
         proj_dir, entry_py = Path(normpath(cfg.project_dir)), Path(normpath(cfg.entry_script))
         if not proj_dir.exists() or not entry_py.exists(): raise RuntimeError("项目目录或入口脚本不存在")
 
-        # 核心逻辑：如果在 Mac 上勾选了 Windowed，绝不能带 onefile
         if IS_MAC and cfg.windowed: cfg.onefile = False
 
         out_dir, _ = ensure_writable_directory(Path(normpath(cfg.output_dir)) if cfg.output_dir else proj_dir / DEFAULT_OUTPUT_DIRNAME, home_desktop_dir() / DEFAULT_OUTPUT_DIRNAME)
