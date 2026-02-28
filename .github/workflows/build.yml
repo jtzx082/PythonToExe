@@ -1,36 +1,54 @@
-name: Build Gansu Gaokao Scorer EXE
+name: Cross-Platform Build & Release
 
-# 触发机制：仅保留 workflow_dispatch (手动触发)
-# 删除了 push 触发器，因此代码更新时不会自动运行
+# 触发条件：
+# 1. 当你推送以 "v" 开头的 tag 时 (例如 git tag v1.0.0 然后 push)
+# 2. 或者在 GitHub 网页上手动点击 "Run workflow" (workflow_dispatch)
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # 定义需要运行操作系统的矩阵
+        os: [windows-latest, macos-latest, ubuntu-latest]
 
     steps:
-    - uses: actions/checkout@v3
+      - name: 检出代码 (Checkout Code)
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: 设置 Python 环境 (Set up Python)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11' # 推荐使用稳定的 3.11 版本
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: 安装项目依赖 (Install Dependencies)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Build with PyInstaller
-      run: |
-        # --onefile: 打包成单文件
-        # --noconsole: 运行时不显示黑框命令行
-        # --name: 指定生成的exe名字
-        pyinstaller --onefile --noconsole --name Gansu_Gaokao_Scorer main.py
+      - name: 执行 PyInstaller 编译 (Build Executable)
+        # 注意: 因为这个工具本身使用了 customtkinter，所以打包它自己时必须携带 --collect-all customtkinter
+        run: |
+          pyinstaller -F -w -n PythonPackager_${{ runner.os }} --collect-all customtkinter main.py
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: Gansu_Gaokao_Scorer_EXE
-        path: dist/Gansu_Gaokao_Scorer.exe
+      - name: 上传构建产物至当前工作流 (Upload Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PythonPackager_${{ runner.os }}
+          path: dist/*
+          retention-days: 5
+
+      - name: 发布到 GitHub Releases (Create Release)
+        # 仅当是以 tag 触发时，自动将打包好的软件推送到 Release 页面
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

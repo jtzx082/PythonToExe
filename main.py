@@ -1,393 +1,295 @@
-import customtkinter as ctk
-import pandas as pd
-import numpy as np
-import threading
 import os
 import sys
-from tkinter import filedialog, messagebox
+import shutil
+import platform
+import datetime
+import threading
+import subprocess
+import ast
+import tkinter as tk
+from tkinter import ttk, filedialog
+import customtkinter as ctk
 
-# --- 全局外观设置 ---
-ctk.set_appearance_mode("System")  
-ctk.set_default_color_theme("blue")  
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
 
-class GaokaoApp(ctk.CTk):
+class PyInstallerGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        # 1. 窗口基础设置
-        self.title("甘肃新高考赋分系统 Pro Max (自定义参数版) | 俞晋全名师工作室")
-        self.geometry("1200x850")
-        self.minsize(1000, 750)
+        os_name = platform.system()
+        self.title(f"Python 终极打包工作站 - {os_name} 适用版")
+        self.geometry("950x850")
+        self.minsize(900, 800)
+
+        self.font_main = ctk.CTkFont(family="Microsoft YaHei", size=13)
+        self.font_title = ctk.CTkFont(family="Microsoft YaHei", size=13, weight="bold")
+        self.font_log = ctk.CTkFont(family="Consolas", size=12)
+
+        self.create_widgets()
+        self.safe_log(f"✅ 系统初始化完成，当前操作系统识别为: {os_name}")
+
+    def create_widgets(self):
+        self.tabview = ctk.CTkTabview(self, font=self.font_title)
+        self.tabview.pack(fill="x", padx=15, pady=(10, 5))
+
+        self.tabview.add("📄 基础配置")
+        self.tabview.add("🌱 环境与清理")
+        self.tabview.add("🚀 高级/专业特性")
+
+        self._build_tab_basic()
+        self._build_tab_env()
+        self._build_tab_advanced()
+
+        self.btn_pack = ctk.CTkButton(self, text="⚡ 开始极速打包", fg_color="#2E7D32", hover_color="#1B5E20", 
+                                      font=ctk.CTkFont(family="Microsoft YaHei", size=16, weight="bold"), 
+                                      height=45, command=self.start_pack_thread)
+        self.btn_pack.pack(fill="x", padx=15, pady=10)
+
+        log_frame = ctk.CTkFrame(self)
+        log_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+        ctk.CTkLabel(log_frame, text="📜 构建日志面板", font=self.font_title).pack(anchor="w", padx=10, pady=(5, 0))
         
-        # 数据变量
-        self.file_path = None
-        self.df_raw = None
-        self.sheet_names = []
-        self.param_entries = {} # 存储参数输入框的字典
+        self.textbox_log = ctk.CTkTextbox(log_frame, font=self.font_log, fg_color="#1e1e1e", text_color="#d4d4d4")
+        self.textbox_log.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+
+    def _build_tab_basic(self):
+        tab = self.tabview.tab("📄 基础配置")
         
-        # 布局配置
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        row1 = ctk.CTkFrame(tab, fg_color="transparent")
+        row1.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(row1, text="选择 Python 脚本：", font=self.font_main, width=130, anchor="w").pack(side="left")
+        self.entry_script = ctk.CTkEntry(row1, font=self.font_main)
+        self.entry_script.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ctk.CTkButton(row1, text="浏览", width=80, font=self.font_main, command=self.browse_script).pack(side="left")
 
-        # ==========================
-        # === 左侧边栏 (操作区) ===
-        # ==========================
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(9, weight=1) 
-
-        # Logo
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=22, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
-
-        # 1. 导入
-        self.btn_load = ctk.CTkButton(self.sidebar_frame, text="1. 导入Excel成绩表", height=40, command=self.load_file_action)
-        self.btn_load.grid(row=1, column=0, padx=20, pady=10)
-
-        # 2. Sheet选择
-        self.lbl_sheet = ctk.CTkLabel(self.sidebar_frame, text="选择工作表 (Sheet):", anchor="w")
-        self.lbl_sheet.grid(row=2, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.sheet_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_sheet_event)
-        self.sheet_dropdown.grid(row=3, column=0, padx=20, pady=(5, 10))
-        self.sheet_dropdown.set("等待导入...")
-        self.sheet_dropdown.configure(state="disabled")
-
-        # 3. 班级列
-        self.lbl_class = ctk.CTkLabel(self.sidebar_frame, text="指定班级列 (计算班排):", anchor="w")
-        self.lbl_class.grid(row=4, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.class_col_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[])
-        self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
-        self.class_col_dropdown.set("等待加载...")
-
-        # 底部按钮区
-        self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始赋分计算", height=50, fg_color="green", font=ctk.CTkFont(size=16, weight="bold"), command=self.start_calculation)
-        self.btn_calc.grid(row=10, column=0, padx=20, pady=15)
-        self.btn_calc.configure(state="disabled")
-
-        self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果 Excel", height=40, command=self.export_file)
-        self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
-        self.btn_export.configure(state="disabled")
-
-        # ==========================
-        # === 右侧主内容区 (Tab) ===
-        # ==========================
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        row2 = ctk.CTkFrame(tab, fg_color="transparent")
+        row2.pack(fill="x", padx=10, pady=(5, 10))
+        target_name = "输出 EXE 名称：" if platform.system() == "Windows" else "输出程序名称："
+        ctk.CTkLabel(row2, text=target_name, font=self.font_main, width=130, anchor="w").pack(side="left")
+        self.entry_name = ctk.CTkEntry(row2, font=self.font_main)
+        self.entry_name.pack(side="left", fill="x", expand=True, padx=(0, 20))
         
-        # 状态栏
-        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请先导入数据，然后确认【赋分标准】。", anchor="w", font=("Microsoft YaHei UI", 16))
-        self.status_label.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(row2, text="程序图标 (.ico/.icns)：", font=self.font_main).pack(side="left", padx=(0, 10))
+        self.entry_icon = ctk.CTkEntry(row2, font=self.font_main)
+        self.entry_icon.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ctk.CTkButton(row2, text="浏览", width=80, font=self.font_main, command=self.browse_icon).pack(side="left")
 
-        # 创建选项卡
-        self.tabview = ctk.CTkTabview(self.main_frame)
-        self.tabview.pack(fill="both", expand=True)
-        self.tabview.add("科目设置")
-        self.tabview.add("赋分标准设置")
+        row3 = ctk.CTkFrame(tab, fg_color="transparent")
+        row3.pack(fill="x", padx=10, pady=10)
+        self.var_single_file = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(row3, text="打包为单文件 (-F)", variable=self.var_single_file, font=self.font_main).pack(side="left", padx=(0, 30))
+
+        self.var_noconsole = ctk.IntVar(value=1)
+        ctk.CTkRadioButton(row3, text="控制台程序 (带黑框)", variable=self.var_noconsole, value=0, font=self.font_main).pack(side="left", padx=(0, 15))
+        ctk.CTkRadioButton(row3, text="纯 GUI 程序 (-w 无黑框)", variable=self.var_noconsole, value=1, font=self.font_main).pack(side="left")
+
+    def _build_tab_env(self):
+        tab = self.tabview.tab("🌱 环境与清理")
+
+        env_frame = ctk.CTkFrame(tab)
+        env_frame.pack(fill="x", padx=10, pady=5)
+        self.var_use_venv = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(env_frame, text="使用独立虚拟环境打包 (推荐：隔离系统庞杂库，减小体积)", variable=self.var_use_venv, font=self.font_title).pack(anchor="w", padx=15, pady=(15, 5))
         
-        # --- Tab 1: 科目设置 ---
-        self.setup_subject_tab()
+        self.var_auto_deps = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(env_frame, text="智能推导并安装依赖 (调用 pipreqs 扫描代码)", variable=self.var_auto_deps, font=self.font_main).pack(anchor="w", padx=40, pady=(5, 15))
 
-        # --- Tab 2: 赋分参数设置 ---
-        self.setup_params_tab()
+        clean_frame = ctk.CTkFrame(tab)
+        clean_frame.pack(fill="x", padx=10, pady=10)
+        self.var_clean_build = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(clean_frame, text="每次打包前彻底清理残留 (删除旧 build/dist/spec 及重建虚拟环境)", 
+                        variable=self.var_clean_build, font=self.font_title, text_color="#EF5350").pack(anchor="w", padx=15, pady=15)
 
-        # 进度条
-        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progressbar.pack(fill="x", pady=(15, 0))
-        self.progressbar.set(0)
+    def _build_tab_advanced(self):
+        tab = self.tabview.tab("🚀 高级/专业特性")
 
-    # --------------------------
-    # 界面构建辅助函数
-    # --------------------------
-    def setup_subject_tab(self):
-        tab = self.tabview.tab("科目设置")
-        
-        # 滚动设置区
-        self.scroll_frame = ctk.CTkScrollableFrame(tab, label_text="勾选对应列名")
-        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.var_smart_fix = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(tab, text="开启 AST 智能防丢包修复 (自动补全 CustomTkinter/PyQt 等依赖)", variable=self.var_smart_fix, font=self.font_main).pack(anchor="w", padx=15, pady=(15, 10))
 
-        # 原始计入科目区
-        self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【直接计入总分】 (语数外 + 物理/历史):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_raw.pack(fill="x", pady=(10, 5), padx=10)
-        self.raw_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.raw_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.raw_checkboxes = []
+        if platform.system() == "Windows":
+            self.var_uac = ctk.BooleanVar(value=False)
+            ctk.CTkCheckBox(tab, text="请求管理员权限 (注入 UAC 盾牌，适合系统管理工具)", variable=self.var_uac, font=self.font_main).pack(anchor="w", padx=15, pady=10)
+        else:
+            self.var_uac = ctk.BooleanVar(value=False)
 
-        # 赋分科目区
-        self.lbl_assign = ctk.CTkLabel(self.scroll_frame, text="【等级赋分科目】 (化生政地):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_assign.pack(fill="x", pady=(25, 5), padx=10)
-        self.assign_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.assign_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.assign_checkboxes = []
+        splash_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        splash_frame.pack(fill="x", padx=10, pady=5)
+        self.var_splash = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(splash_frame, text="添加加载启动屏 (Splash Image)：", variable=self.var_splash, font=self.font_main).pack(side="left", padx=(5, 10))
+        self.entry_splash = ctk.CTkEntry(splash_frame, font=self.font_main, placeholder_text="选择 .png 或 .jpg")
+        self.entry_splash.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ctk.CTkButton(splash_frame, text="浏览", width=80, font=self.font_main, command=self.browse_splash).pack(side="left")
 
-    def setup_params_tab(self):
-        tab = self.tabview.tab("赋分标准设置")
-        
-        info_lbl = ctk.CTkLabel(tab, text="请根据实际需求修改参数（默认值为甘肃省标准）。\n人数比例请输入整数（如15代表15%）。", font=("Microsoft YaHei UI", 13))
-        info_lbl.pack(pady=10)
+    def safe_log(self, message):
+        self.after(0, self._append_log, message)
 
-        # 参数网格容器
-        grid_frame = ctk.CTkFrame(tab)
-        grid_frame.pack(padx=20, pady=10)
+    def _append_log(self, message):
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        self.textbox_log.insert("end", f"[{timestamp}] {message}\n")
+        self.textbox_log.see("end")
 
-        # 表头
-        headers = ["等级", "人数比例 (%)", "赋分上限 (T2)", "赋分下限 (T1)"]
-        for col, text in enumerate(headers):
-            ctk.CTkLabel(grid_frame, text=text, font=("Arial", 12, "bold")).grid(row=0, column=col, padx=15, pady=10)
+    def browse_script(self):
+        filename = filedialog.askopenfilename(title="选择Python脚本", filetypes=[("Python Files", "*.py")])
+        if filename:
+            self.entry_script.delete(0, "end")
+            self.entry_script.insert(0, filename)
+            self.entry_name.delete(0, "end")
+            self.entry_name.insert(0, os.path.splitext(os.path.basename(filename))[0])
 
-        # 默认数据 (甘肃标准)
-        default_data = [
-            ('A', '15', '100', '86'),
-            ('B', '35', '85',  '71'),
-            ('C', '35', '70',  '56'),
-            ('D', '13', '55',  '41'),
-            ('E', '2',  '40',  '30')
-        ]
+    def browse_icon(self):
+        ext = "*.ico" if platform.system() == "Windows" else "*.icns"
+        filename = filedialog.askopenfilename(title="选择图标", filetypes=[("Icon Files", ext), ("All Files", "*.*")])
+        if filename:
+            self.entry_icon.delete(0, "end")
+            self.entry_icon.insert(0, filename)
 
-        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
+    def browse_splash(self):
+        filename = filedialog.askopenfilename(title="选择启动屏图片", filetypes=[("Image Files", "*.png;*.jpg;*.jpeg")])
+        if filename:
+            self.entry_splash.delete(0, "end")
+            self.entry_splash.insert(0, filename)
+            self.var_splash.set(True)
 
-        for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
-            # 等级标签
-            ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
-            
-            # 百分比输入
-            e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_pct.insert(0, pct)
-            e_pct.grid(row=row, column=1, pady=5)
-            
-            # 上限输入
-            e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_max.insert(0, tmax)
-            e_max.grid(row=row, column=2, pady=5)
-            
-            # 下限输入
-            e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_min.insert(0, tmin)
-            e_min.grid(row=row, column=3, pady=5)
-
-            # 存入字典方便调用
-            self.param_entries[f"{grade}_percent"] = e_pct
-            self.param_entries[f"{grade}_max"] = e_max
-            self.param_entries[f"{grade}_min"] = e_min
-
-    # --------------------------
-    # 文件加载与 UI 更新逻辑
-    # --------------------------
-    def load_file_action(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
-        if not file_path: return
-        
-        self.file_path = file_path
-        self.status_label.configure(text=f"正在分析文件: {os.path.basename(file_path)}...")
-        self.progressbar.start()
-        threading.Thread(target=self.read_excel_sheets).start()
-
-    def read_excel_sheets(self):
-        try:
-            excel_file = pd.ExcelFile(self.file_path)
-            self.sheet_names = excel_file.sheet_names
-            self.after(0, self.update_sheet_ui)
-        except Exception as e:
-            self.after(0, lambda: messagebox.showerror("错误", f"读取失败: {e}"))
-            self.after(0, self.progressbar.stop)
-
-    def update_sheet_ui(self):
-        self.progressbar.stop()
-        self.progressbar.set(1)
-        self.status_label.configure(text=f"已就绪: {os.path.basename(self.file_path)}")
-        self.sheet_dropdown.configure(values=self.sheet_names, state="normal")
-        self.sheet_dropdown.set(self.sheet_names[0])
-        self.change_sheet_event(self.sheet_names[0])
-
-    def change_sheet_event(self, sheet_name):
-        try:
-            self.df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name)
-            columns = self.df_raw.columns.tolist()
-            
-            self.class_col_dropdown.configure(values=columns)
-            default_class = next((c for c in columns if "班" in str(c)), columns[0] if columns else "")
-            self.class_col_dropdown.set(default_class)
-
-            self.create_subject_checkboxes(columns)
-            
-            self.btn_calc.configure(state="normal")
-            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请在【科目设置】页勾选")
-        except Exception as e:
-            messagebox.showerror("错误", f"加载工作表失败: {e}")
-
-    def create_subject_checkboxes(self, columns):
-        for cb in self.raw_checkboxes + self.assign_checkboxes: cb.destroy()
-        self.raw_checkboxes.clear()
-        self.assign_checkboxes.clear()
-        
-        common_raw = ["语文", "数学", "英语", "物理", "历史", "外语"]
-        common_assign = ["化学", "生物", "地理", "政治", "思想政治"]
-
-        def add_cb(parent, text, storage, keywords):
-            cb = ctk.CTkCheckBox(parent, text=text, font=("Microsoft YaHei UI", 12))
-            cb.grid(row=len(storage)//5, column=len(storage)%5, sticky="w", padx=10, pady=8)
-            if any(k in str(text) for k in keywords): cb.select()
-            storage.append(cb)
-
-        for col in columns:
-            add_cb(self.raw_checkboxes_frame, col, self.raw_checkboxes, common_raw)
-        for col in columns:
-            add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
-
-    # --------------------------
-    # 核心计算逻辑 (动态读取参数)
-    # --------------------------
-    def get_user_configs(self):
-        """从UI界面读取用户输入的参数"""
-        configs = []
-        grades = ['A', 'B', 'C', 'D', 'E']
-        try:
-            for g in grades:
-                pct = float(self.param_entries[f"{g}_percent"].get()) / 100.0
-                t_max = int(self.param_entries[f"{g}_max"].get())
-                t_min = int(self.param_entries[f"{g}_min"].get())
-                
-                configs.append({
-                    'grade': g,
-                    'percent': pct,
-                    't_max': t_max,
-                    't_min': t_min
-                })
-            return configs
-        except ValueError:
-            messagebox.showerror("参数错误", "赋分标准中请输入有效的数字！")
-            return None
-
-    def start_calculation(self):
-        self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
-        self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
-        self.selected_class_col = self.class_col_dropdown.get()
-
-        if not self.selected_raw and not self.selected_assign:
-            messagebox.showwarning("提示", "请至少勾选一个科目！")
+    def start_pack_thread(self):
+        script = self.entry_script.get()
+        if not script:
+            self.safe_log("❌ 请先选择要打包的脚本！")
             return
-        
-        # 验证并获取配置
-        self.user_configs = self.get_user_configs()
-        if not self.user_configs:
-            return
+        self.btn_pack.configure(state="disabled", text="引擎运转中...")
+        threading.Thread(target=self._pack_process, daemon=True).start()
 
-        self.btn_calc.configure(state="disabled")
-        self.status_label.configure(text="正在根据自定义参数计算...")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start()
-        
-        threading.Thread(target=self.run_math_logic).start()
-
-    def run_math_logic(self):
+    def _run_subprocess(self, cmd_list, cwd=None):
+        creationflags = subprocess.CREATE_NO_WINDOW if platform.system() == 'Windows' else 0
         try:
-            df = self.df_raw.copy()
-            grade_configs = self.user_configs # 使用用户自定义的配置
-
-            def calculate_assigned_score(series):
-                series_num = pd.to_numeric(series, errors='coerce')
-                valid = series_num.dropna()
-                if len(valid) == 0: return pd.Series(index=series.index, dtype=float)
-                
-                sorted_scores = valid.sort_values(ascending=False)
-                result = pd.Series(index=valid.index, dtype=float)
-                curr = 0
-                for cfg in grade_configs:
-                    cnt = int(np.round(len(valid) * cfg['percent']))
-                    if cfg['grade'] == 'E': cnt = len(valid) - curr
-                    if cnt <= 0: continue
-                    end = min(curr + cnt, len(valid))
-                    if curr >= end: break
-                    chunk = sorted_scores.iloc[curr:end]
-                    Y2, Y1 = chunk.max(), chunk.min()
-                    T2, T1 = cfg['t_max'], cfg['t_min']
-                    
-                    def linear(Y): return (T2+T1)/2 if Y2==Y1 else T1 + ((Y-Y1)*(T2-T1))/(Y2-Y1)
-                    
-                    result.loc[chunk.index] = chunk.apply(linear)
-                    curr = end
-                return result.round()
-
-            def calc_ranks(dframe, target_col, rank_base_name):
-                yr_rk = f"{rank_base_name}年排"
-                cl_rk = f"{rank_base_name}班排"
-                dframe[yr_rk] = dframe[target_col].rank(ascending=False, method='min')
-                if self.selected_class_col in dframe.columns:
-                    dframe[cl_rk] = dframe.groupby(self.selected_class_col)[target_col].rank(ascending=False, method='min')
-                else:
-                    dframe[cl_rk] = None
-                return yr_rk, cl_rk
-
-            cols_for_raw_total = []    
-            cols_for_final_total = []  
-            output_cols_order = []     
-
-            # 1. 原始科目
-            for sub in self.selected_raw:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                yr_rk, cl_rk = calc_ranks(df, sub, sub)
-                cols_for_raw_total.append(sub)
-                cols_for_final_total.append(sub)
-                output_cols_order.extend([sub, yr_rk, cl_rk])
-
-            # 2. 赋分科目
-            for sub in self.selected_assign:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                assigned_col_name = f"{sub}赋分"
-                df[assigned_col_name] = calculate_assigned_score(df[sub])
-                
-                yr_rk, cl_rk = calc_ranks(df, assigned_col_name, assigned_col_name)
-                
-                cols_for_raw_total.append(sub)            
-                cols_for_final_total.append(assigned_col_name) 
-                output_cols_order.extend([sub, assigned_col_name, yr_rk, cl_rk])
-
-            # 3. 原始总分
-            df["原始总分"] = df[cols_for_raw_total].sum(axis=1, min_count=1)
-            raw_yr_rk, raw_cl_rk = calc_ranks(df, "原始总分", "原始总分")
-            raw_total_group = ["原始总分", raw_yr_rk, raw_cl_rk]
-
-            # 4. 最终总分
-            df["总分"] = df[cols_for_final_total].sum(axis=1, min_count=1)
-            final_yr_rk, final_cl_rk = calc_ranks(df, "总分", "总分")
-            final_total_group = ["总分", final_yr_rk, final_cl_rk]
-
-            df = df.sort_values(final_yr_rk)
-
-            all_generated_cols = set(output_cols_order + raw_total_group + final_total_group)
-            base_info_cols = [c for c in df.columns if c not in all_generated_cols]
-            
-            final_order = base_info_cols + output_cols_order + raw_total_group + final_total_group
-            final_order = [c for c in final_order if c in df.columns]
-            self.df_result = df[final_order]
-
-            self.after(0, self.finish_calculation)
-
+            process = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=cwd, creationflags=creationflags, encoding='utf-8', errors='replace')
+            for line in process.stdout:
+                self.safe_log(line.strip())
+            process.wait()
+            return process.returncode
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("计算错误", str(e)))
-            self.after(0, self.stop_loading_ui)
+            self.safe_log(f"❌ 命令执行失败: {str(e)}")
+            return 1
 
-    def finish_calculation(self):
-        self.stop_loading_ui()
-        self.status_label.configure(text="✅ 计算完成！数据已应用当前赋分标准。")
-        self.btn_export.configure(state="normal", fg_color="#2CC985", text="导出 Excel 结果")
-        messagebox.showinfo("成功", "计算完成！\n请注意：本次计算使用了您在【赋分标准设置】中填写的参数。")
+    def _cleanup_old_builds(self, work_dir, exe_name, venv_dir):
+        self.safe_log("🧹 正在执行深度清理，扫除历史残留文件...")
+        dirs_to_remove = [os.path.join(work_dir, "build"), os.path.join(work_dir, "dist")]
+        if self.var_use_venv.get():
+            dirs_to_remove.append(venv_dir)
+            
+        for d in dirs_to_remove:
+            if os.path.exists(d):
+                try:
+                    shutil.rmtree(d)
+                    self.safe_log(f"   已删除目录: {os.path.basename(d)}")
+                except Exception as e:
+                    self.safe_log(f"   ⚠️ 删除目录 {d} 失败: {e}")
 
-    def stop_loading_ui(self):
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate")
-        self.progressbar.set(1)
-        self.btn_calc.configure(state="normal")
-
-    def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
-        if save_path:
+        spec_file = os.path.join(work_dir, f"{exe_name}.spec")
+        if os.path.exists(spec_file):
             try:
-                self.df_result.to_excel(save_path, index=False)
-                messagebox.showinfo("导出成功", f"文件已保存至:\n{save_path}")
-                os.startfile(os.path.dirname(save_path))
-            except Exception as e:
-                messagebox.showerror("保存失败", str(e))
+                os.remove(spec_file)
+            except Exception:
+                pass
+
+    def _pack_process(self):
+        try:
+            script_path = self.entry_script.get()
+            work_dir = os.path.dirname(script_path)
+            exe_name = self.entry_name.get()
+            venv_dir = os.path.join(work_dir, "smart_build_venv")
+            
+            if self.var_clean_build.get():
+                self._cleanup_old_builds(work_dir, exe_name, venv_dir)
+
+            if self.var_use_venv.get():
+                python_exe = sys.executable
+                if not os.path.exists(venv_dir):
+                    self.safe_log("🌱 [环境] 正在初始化全新虚拟环境 (请耐心等待)...")
+                    self._run_subprocess([python_exe, "-m", "venv", venv_dir])
+                else:
+                    self.safe_log("🌱 [环境] 检测到已有虚拟环境，直接复用。")
+
+                if platform.system() == 'Windows':
+                    active_python = os.path.join(venv_dir, "Scripts", "python")
+                    active_pip = os.path.join(venv_dir, "Scripts", "pip")
+                    active_pyinstaller = os.path.join(venv_dir, "Scripts", "pyinstaller")
+                else:
+                    active_python = os.path.join(venv_dir, "bin", "python")
+                    active_pip = os.path.join(venv_dir, "bin", "pip")
+                    active_pyinstaller = os.path.join(venv_dir, "bin", "pyinstaller")
+
+                self._run_subprocess([active_python, "-m", "pip", "install", "--upgrade", "pip", "-q"])
+                self._run_subprocess([active_pip, "install", "pyinstaller", "-q"])
+
+                if self.var_auto_deps.get():
+                    self.safe_log("🤖 [依赖] 调用 pipreqs 分析项目所需库...")
+                    self._run_subprocess([active_pip, "install", "pipreqs", "-q"])
+                    pipreqs_cmd = os.path.join(venv_dir, "Scripts" if platform.system() == 'Windows' else "bin", "pipreqs")
+                    req_path = os.path.join(work_dir, "auto_requirements.txt")
+                    self._run_subprocess([pipreqs_cmd, work_dir, "--force", "--savepath", req_path])
+                    
+                    if os.path.exists(req_path):
+                        self.safe_log("⏳ [依赖] 正在安装业务所需模块，由于网络原因可能较慢...")
+                        self._run_subprocess([active_pip, "install", "-r", req_path])
+            else:
+                self.safe_log("⚡ [环境] 警告：已关闭虚拟环境，将使用系统主环境直接打包！")
+                active_pyinstaller = "pyinstaller"
+
+            self.safe_log("🚀 正在构建最终打包参数...")
+            cmd = [active_pyinstaller, "-y"]
+            
+            if exe_name: cmd.extend(["-n", exe_name])
+            if self.var_single_file.get(): cmd.append("-F")
+            if self.var_noconsole.get() == 1: cmd.append("-w")
+            
+            icon = self.entry_icon.get()
+            if icon: cmd.extend(["-i", icon])
+
+            if self.var_uac.get():
+                cmd.append("--uac-admin")
+                self.safe_log("🛡️ [特性] 已注入管理员权限申请 (UAC)")
+            
+            if self.var_splash.get() and self.entry_splash.get():
+                cmd.extend(["--splash", self.entry_splash.get()])
+                self.safe_log("🖼️ [特性] 已加入启动屏特效")
+
+            if self.var_smart_fix.get():
+                self.safe_log("🔍 [AST] 正在扫描代码漏洞，注入补丁...")
+                try:
+                    with open(script_path, "r", encoding="utf-8") as f:
+                        tree = ast.parse(f.read(), filename=script_path)
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.Import):
+                            for alias in node.names:
+                                if "customtkinter" in alias.name: cmd.extend(["--collect-all", "customtkinter"])
+                                if "pandas" in alias.name: cmd.extend(["--hidden-import", "pandas"])
+                        elif isinstance(node, ast.ImportFrom) and node.module:
+                            if "customtkinter" in node.module: cmd.extend(["--collect-all", "customtkinter"])
+                except Exception as e:
+                    self.safe_log(f"⚠️ AST扫描跳过: {e}")
+
+            cmd.append(script_path)
+
+            return_code = self._run_subprocess(cmd, cwd=work_dir)
+            
+            if return_code == 0:
+                self.safe_log("🎉 [大功告成] 打包已完美完成！")
+                dist_dir = os.path.join(work_dir, "dist")
+                if platform.system() == "Windows":
+                    os.startfile(dist_dir)
+                elif platform.system() == "Darwin":
+                    subprocess.call(["open", dist_dir])
+                else:
+                    subprocess.call(["xdg-open", dist_dir])
+            else:
+                self.safe_log("❌ [打包失败] 请检查上方日志。")
+
+        except Exception as e:
+            self.safe_log(f"❌ 发生致命异常: {str(e)}")
+        finally:
+            self.after(0, lambda: self.btn_pack.configure(state="normal", text="⚡ 开始极速打包"))
 
 if __name__ == "__main__":
-    app = GaokaoApp()
+    app = PyInstallerGUI()
     app.mainloop()

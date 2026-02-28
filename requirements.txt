@@ -1,6 +1,2 @@
-pandas
-numpy
-openpyxl
-customtkinter
-packaging
-pyinstaller
+customtkinter>=5.2.2
+pyinstaller>=6.0.0
