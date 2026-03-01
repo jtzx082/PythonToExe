@@ -22,7 +22,8 @@ from docx.shared import Cm, Pt, RGBColor
 from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
-import pptx  # 新增：用于解析 PPTX 文件
+import pptx
+import pypdf # 新增：用于解析 PDF 文件
 
 # --- 字体自动适配 ---
 DEFAULT_FONT = "Helvetica"
@@ -43,7 +44,7 @@ CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".jinta_lesson_config.json")
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly") 
-        self.title("金塔县中学教案智能生成系统 v3.5 (文档智编版)")
+        self.title("金塔县中学教案智能生成系统 v4.0 (多源文档智编版)")
         self.geometry("1350x950")
         
         self.lesson_data = {} 
@@ -52,9 +53,8 @@ class LessonPlanWriter(ttk.Window):
         self.is_generating = False
         self.stop_flag = False
         
-        # 新增：文档内容存储
-        self.uploaded_file_text = ""
-        self.uploaded_file_name_var = tk.StringVar(value="未上传参考文档")
+        # 新增：多文档内容存储字典 { filepath: {"name": filename, "text": text_content, "ui_frame": frame} }
+        self.uploaded_files = {}
         
         # 变量
         self.api_key = "" 
@@ -107,40 +107,77 @@ class LessonPlanWriter(ttk.Window):
             else:
                 self.api_status_var.set("❌ 未配置")
 
-    # ================= 新增：文档上传解析逻辑 =================
+    # ================= 优化：多文档上传解析逻辑 =================
     def upload_document(self):
-        filepath = filedialog.askopenfilename(
+        filepaths = filedialog.askopenfilenames(
             title="选择参考文档",
-            filetypes=[("支持的文档", "*.pptx *.docx"), ("PowerPoint", "*.pptx"), ("Word", "*.docx")]
+            filetypes=[("所有支持的文件", "*.*"), ("PowerPoint", "*.pptx"), ("Word", "*.docx"), ("PDF", "*.pdf"), ("纯文本", "*.txt *.md")]
         )
-        if not filepath:
+        if not filepaths:
             return
         
-        self.status_var.set("⏳ 正在解析文档内容...")
-        threading.Thread(target=self._process_document_thread, args=(filepath,)).start()
+        for filepath in filepaths:
+            if filepath in self.uploaded_files:
+                continue # 避免重复注入
+            self.status_var.set(f"⏳ 正在解析文档: {os.path.basename(filepath)}...")
+            threading.Thread(target=self._process_document_thread, args=(filepath,)).start()
 
     def _process_document_thread(self, filepath):
         try:
             text_content = ""
-            if filepath.endswith('.docx'):
+            ext = os.path.splitext(filepath)[1].lower()
+            filename = os.path.basename(filepath)
+
+            if ext == '.docx':
                 doc = Document(filepath)
                 text_content = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-            elif filepath.endswith('.pptx'):
+            elif ext == '.pptx':
                 prs = pptx.Presentation(filepath)
                 for slide in prs.slides:
                     for shape in slide.shapes:
                         if hasattr(shape, "text"):
                             text_content += shape.text + "\n"
-            
-            # 截取前 15000 字符，避免输入 Token 过大导致 API 拒绝或超时
-            self.uploaded_file_text = text_content[:15000] 
-            filename = os.path.basename(filepath)
-            
-            self.after(0, lambda: self.uploaded_file_name_var.set(f"📄 {filename}"))
-            self.after(0, lambda: self.status_var.set(f"✅ 文档 {filename} 解析成功，AI 将参考此内容！"))
+            elif ext == '.pdf':
+                reader = pypdf.PdfReader(filepath)
+                text_content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            else:
+                # 尝试作为纯文本读取（含 txt, md, csv, py 等任意格式）
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    text_content = f.read()
+
+            if not text_content.strip():
+                raise ValueError("未提取到有效文本或不支持该二进制格式。")
+
+            # 移除原来的 15000 字符限制，完全保留原文
+            self.after(0, lambda: self._add_file_ui_chip(filepath, filename, text_content))
+            self.after(0, lambda: self.status_var.set(f"✅ 文档 {filename} 解析成功！"))
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("解析失败", f"无法解析该文档，请确保文件未被占用:\n{str(e)}"))
-            self.after(0, lambda: self.status_var.set("❌ 文档解析失败"))
+            self.after(0, lambda: messagebox.showerror("解析失败", f"无法解析 {os.path.basename(filepath)}:\n{str(e)}"))
+            self.after(0, lambda: self.status_var.set("❌ 部分文档解析失败"))
+
+    def _add_file_ui_chip(self, filepath, filename, text_content):
+        chip_frame = ttk.Frame(self.files_container)
+        chip_frame.pack(side=LEFT, padx=5, pady=2)
+        
+        lbl = ttk.Label(chip_frame, text=f"📄 {filename}", font=(MAIN_FONT_NAME, 9), bootstyle="secondary")
+        lbl.pack(side=LEFT)
+        
+        def delete_file():
+            if filepath in self.uploaded_files:
+                del self.uploaded_files[filepath]
+            chip_frame.destroy()
+            if not self.uploaded_files:
+                self.files_container_wrapper.pack_forget()
+
+        btn = ttk.Button(chip_frame, text="✖", command=delete_file, bootstyle="danger-link", padding=(0,0))
+        btn.pack(side=LEFT, padx=(2,0))
+
+        self.uploaded_files[filepath] = {
+            "name": filename,
+            "text": text_content,
+            "ui_frame": chip_frame
+        }
+        self.files_container_wrapper.pack(fill=X, pady=(5,0)) # 确保容器显示
 
     def setup_ui(self):
         header_frame = ttk.Frame(self, padding=(15, 15))
@@ -183,10 +220,13 @@ class LessonPlanWriter(ttk.Window):
         self.period_combo.bind("<<ComboboxSelected>>", self.handle_period_switch)
         ttk.Label(f2, text="课时").pack(side=LEFT, padx=2)
 
-        # 新增：文档上传 UI 区域
         ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
-        ttk.Button(f2, text="📎 注入PPT/文档", command=self.upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
-        ttk.Label(f2, textvariable=self.uploaded_file_name_var, font=(MAIN_FONT_NAME, 9), bootstyle="secondary").pack(side=LEFT)
+        ttk.Button(f2, text="📎 注入参考文件(可多选)", command=self.upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
+
+        # 新增：多文件UI流式容器
+        self.files_container_wrapper = ttk.Frame(topic_frame)
+        self.files_container = ttk.Frame(self.files_container_wrapper)
+        self.files_container.pack(fill=X)
 
         action_frame = ttk.Labelframe(header_frame, text="⚙️ 全局操作", padding=10, bootstyle="secondary")
         action_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
@@ -293,7 +333,7 @@ class LessonPlanWriter(ttk.Window):
         author_lbl.pack(side=RIGHT)
 
     def show_author(self):
-        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.5.0 (文档智编版)\n适用：金塔县中学教案模版标准")
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：4.0.0 (多源文档智编版)\n适用：金塔县中学教案模版标准")
 
     def update_period_list(self):
         try:
@@ -372,8 +412,11 @@ class LessonPlanWriter(ttk.Window):
             self.period_combo['values'] = [1]
             self.period_combo.current(0)
             
-            self.uploaded_file_text = ""
-            self.uploaded_file_name_var.set("未上传参考文档")
+            # 清理文件列表UI及数据
+            for filepath, file_data in list(self.uploaded_files.items()):
+                file_data['ui_frame'].destroy()
+            self.uploaded_files.clear()
+            self.files_container_wrapper.pack_forget()
             
             for key in self.fields:
                 self.fields[key].delete("1.0", END)
@@ -382,6 +425,16 @@ class LessonPlanWriter(ttk.Window):
             self.topic_entry.insert(0, "离子反应")
             
             self.status_var.set("⚠️ 所有数据已重置")
+
+    def get_combined_doc_context(self):
+        """组合所有上传的文件内容，供 AI 使用"""
+        if not self.uploaded_files:
+            return ""
+        
+        context = "\n【重要参考：教师上传素材】\n以下是从教师提供的多份文件中提取的内容，请务必高度吸收其中的知识体系、实验情境设计：\n"
+        for filepath, data in self.uploaded_files.items():
+            context += f"\n--- 来源文件: {data['name']} ---\n{data['text']}\n"
+        return context
 
     def generate_framework(self):
         api_key = self.get_api_key()
@@ -405,10 +458,7 @@ class LessonPlanWriter(ttk.Window):
         else:
             content_instruction = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
 
-        # 新增：将文档内容注入到 Prompt
-        doc_context = ""
-        if self.uploaded_file_text:
-            doc_context = f"\n【重要参考：教师上传素材】\n以下是从教师提供的PPT/文档中提取的文本，请务必高度吸收其中的知识体系、实验情境设计作为本课时设计的骨架素材：\n<文档内容>\n{self.uploaded_file_text}\n</文档内容>\n"
+        doc_context = self.get_combined_doc_context()
 
         prompt = f"""
         任务：为高中化学课题《{topic}》设计第 {current_p} 课时的教案框架。
@@ -500,10 +550,7 @@ class LessonPlanWriter(ttk.Window):
         elif "详案" in plan_type:
             detail_level = "【篇幅与深度要求】需要详细写出教师的具体话术引导、预期的学生具体回答，以及每一道评价训练和课堂检测的具体题目内容。"
 
-        # 新增：将文档内容注入到 Prompt
-        doc_context = ""
-        if self.uploaded_file_text:
-            doc_context = f"\n【重要参考：教师上传素材】\n以下是从教师提供的PPT/文档中提取的内容，请在设计师生活动、提问环节及例题时，直接引用和改编其中的素材：\n<文档内容>\n{self.uploaded_file_text}\n</文档内容>\n"
+        doc_context = self.get_combined_doc_context()
 
         prompt = f"""
         任务：撰写高中化学《{topic}》第 {current_p} 课时的“教学过程”。

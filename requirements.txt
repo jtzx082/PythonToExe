@@ -1,6 +1,8 @@
 requests
 python-docx
 python-pptx
+pypdf
 ttkbootstrap
-pyinstaller
 Pillow==9.5.0
+nuitka
+zstandard
