@@ -28,7 +28,7 @@ jobs:
         pip install -r requirements.txt
 
     # ------------------
-    # Windows 打包策略 (exe 直接传)
+    # Windows 打包策略
     # ------------------
     - name: Build for Windows
       if: matrix.os == 'windows-latest'
@@ -43,34 +43,33 @@ jobs:
         path: dist/MultiPlatform-Py-Packer-Win.exe
 
     # ------------------
-    # macOS 打包策略 (使用 tar.gz 保留权限)
+    # macOS 打包策略 (✨ 进化：打包为原生 .dmg 磁盘映像)
     # ------------------
     - name: Build for macOS
       if: matrix.os == 'macos-latest'
       run: |
         pyinstaller --noconfirm --onedir --windowed --name "MultiPlatform-Py-Packer-Mac" main.py
-        cd dist
-        # ⚠️ 用 tar.gz 完美保留 Mac 内部可执行权限和软链接
-        tar -czvf MultiPlatform-Py-Packer-Mac.tar.gz MultiPlatform-Py-Packer-Mac.app
+        
+        # 使用 macOS 自带的 hdiutil 工具，将 .app 封装为 .dmg，完美锁死内部执行权限
+        hdiutil create -volname "PyPacker" -srcfolder "dist/MultiPlatform-Py-Packer-Mac.app" -ov -format UDZO "dist/MultiPlatform-Py-Packer-Mac.dmg"
 
     - name: Upload macOS Artifact
       if: matrix.os == 'macos-latest'
       uses: actions/upload-artifact@v4
       with:
         name: PyPacker-macOS
-        path: dist/MultiPlatform-Py-Packer-Mac.tar.gz
+        path: dist/MultiPlatform-Py-Packer-Mac.dmg
 
     # ------------------
-    # Linux 打包策略 (使用 tar.gz 保留权限)
+    # Linux 打包策略
     # ------------------
     - name: Build for Linux
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libxcb-cursor0
+        sudo apt-get install -y libxcb-cursor0 patchelf
         pyinstaller --noconfirm --onefile --windowed --name "MultiPlatform-Py-Packer-Linux" main.py
         cd dist
-        # ⚠️ 用 tar.gz 完美保留 Linux 可执行权限
         tar -czvf MultiPlatform-Py-Packer-Linux.tar.gz MultiPlatform-Py-Packer-Linux
 
     - name: Upload Linux Artifact
