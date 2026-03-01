@@ -44,7 +44,7 @@ CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".jinta_lesson_config.json")
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly") 
-        self.title("金塔县中学教案智能生成系统 v4.2 (沉浸智编版)")
+        self.title("金塔县中学教案智能生成系统 v4.3 (精排优化版)")
         self.geometry("1350x950")
         
         self.lesson_data = {} 
@@ -107,7 +107,6 @@ class LessonPlanWriter(ttk.Window):
 
     # ================= 右键菜单模块 =================
     def setup_context_menu(self):
-        """初始化全局右键菜单"""
         self.context_menu = tk.Menu(self, tearoff=0, font=(MAIN_FONT_NAME, UI_FONT_SIZE))
         self.context_menu.add_command(label="✂️ 剪切", command=self._menu_cut)
         self.context_menu.add_command(label="📋 复制", command=self._menu_copy)
@@ -144,7 +143,6 @@ class LessonPlanWriter(ttk.Window):
             pass
 
     def add_right_click(self, widget):
-        """为指定的输入框绑定右键菜单事件"""
         if sys.platform == "darwin":
             widget.bind("<Button-2>", self.show_context_menu)
             widget.bind("<Button-3>", self.show_context_menu)
@@ -153,7 +151,6 @@ class LessonPlanWriter(ttk.Window):
 
     # ================= 多文档上传解析与管理逻辑 =================
     
-    # 修复按钮不灵敏：使用延迟执行，让按钮动画先跑完
     def btn_upload_document(self):
         self.after(50, self.upload_document)
         
@@ -231,7 +228,6 @@ class LessonPlanWriter(ttk.Window):
         scrollbar = ttk.Scrollbar(sf, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
-        # 修复布局：确保画布宽度同步，防止删除按钮被挤出屏幕
         canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         def _configure_canvas(event):
             canvas.itemconfig(canvas_window, width=event.width)
@@ -249,7 +245,6 @@ class LessonPlanWriter(ttk.Window):
                 cf = ttk.Frame(scrollable_frame)
                 cf.pack(fill=X, expand=True, pady=4, padx=5)
                 
-                # 文件名靠左
                 lbl = ttk.Label(cf, text=f"📄 {data['name']}", font=(MAIN_FONT_NAME, UI_FONT_SIZE))
                 lbl.pack(side=LEFT, fill=X, expand=True)
                 
@@ -263,7 +258,6 @@ class LessonPlanWriter(ttk.Window):
                             top.destroy()
                     return _delete
                 
-                # 删除按钮靠右（更换为醒目的大红色按钮）
                 btn = ttk.Button(cf, text="✖ 删除", bootstyle="danger", command=make_delete_cmd(filepath))
                 btn.pack(side=RIGHT, padx=(5, 0))
                 
@@ -274,14 +268,12 @@ class LessonPlanWriter(ttk.Window):
         header_frame = ttk.Frame(self, padding=(15, 15))
         header_frame.pack(fill=X)
         
-        # 1. 左侧 API 模块
         api_frame = ttk.Labelframe(header_frame, text="🔑 授权管理", padding=10, bootstyle="info")
         api_frame.pack(side=LEFT, fill=Y, padx=(0, 10))
         
         ttk.Button(api_frame, text="⚙️ 配置 API Key", command=self.open_api_settings, bootstyle="info").pack(side=LEFT, padx=5)
         ttk.Label(api_frame, textvariable=self.api_status_var, font=(MAIN_FONT_NAME, 9)).pack(side=LEFT, padx=5)
 
-        # 2. 核心布局优化：先放置最右侧的操作模块
         action_frame = ttk.Labelframe(header_frame, text="⚙️ 全局操作", padding=10, bootstyle="secondary")
         action_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
         
@@ -289,7 +281,6 @@ class LessonPlanWriter(ttk.Window):
         ttk.Button(action_frame, text="🗑️ 清空所有数据", command=self.clear_all_data, bootstyle="danger outline").pack(fill=X, pady=2)
         ttk.Button(action_frame, text="ℹ️ 关于作者", command=self.show_author, bootstyle="info outline").pack(fill=X, pady=2)
 
-        # 3. 中间的课题模块填充剩余空间
         topic_frame = ttk.Labelframe(header_frame, text="📚 课题与进度规划", padding=10, bootstyle="primary")
         topic_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
         
@@ -299,7 +290,7 @@ class LessonPlanWriter(ttk.Window):
         self.topic_entry = ttk.Entry(f1, width=25, bootstyle="primary")
         self.topic_entry.pack(side=LEFT, padx=5, fill=X, expand=True)
         self.topic_entry.insert(0, "离子反应")
-        self.add_right_click(self.topic_entry) # 绑定右键
+        self.add_right_click(self.topic_entry) 
         
         ttk.Label(f1, text="教案类型:", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT, padx=(10, 5))
         self.type_combo = ttk.Combobox(f1, values=["详案 (标准)", "简案 (提纲)", "匹配教学环节详案", "匹配教学环节简案"], state="readonly", width=16, bootstyle="primary")
@@ -311,7 +302,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Label(f2, text="总课时:", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT)
         self.total_spin = ttk.Spinbox(f2, from_=1, to=10, width=3, textvariable=self.total_periods_var, command=self.update_period_list, bootstyle="primary")
         self.total_spin.pack(side=LEFT, padx=5)
-        self.add_right_click(self.total_spin) # 绑定右键
+        self.add_right_click(self.total_spin) 
         
         ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
         
@@ -325,7 +316,6 @@ class LessonPlanWriter(ttk.Window):
 
         ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
         
-        # 绑定优化后的延迟点击事件
         ttk.Button(f2, text="📎 注入参考文档", command=self.btn_upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
         ttk.Label(f2, textvariable=self.files_count_var, font=(MAIN_FONT_NAME, 9), bootstyle="secondary").pack(side=LEFT, padx=(5,10))
         ttk.Button(f2, text="📂 管理文档", command=self.btn_open_file_manager, bootstyle="secondary-link").pack(side=LEFT)
@@ -377,7 +367,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Label(custom_frame, text="若在此输入指令，AI将严格执行；若要求分析文件，AI会自动调用已注入文档解读。", font=(MAIN_FONT_NAME, UI_FONT_SIZE-1), bootstyle="secondary").pack(anchor=W)
         self.fields['custom_content'] = tk.Text(custom_frame, height=3, font=font_norm, bg="#fff0f0", fg="#000")
         self.fields['custom_content'].pack(fill=X, pady=2)
-        self.add_right_click(self.fields['custom_content']) # 绑定右键
+        self.add_right_click(self.fields['custom_content']) 
         
         labels = [
             ("📖 章节名称", "chapter", 1),
@@ -394,7 +384,7 @@ class LessonPlanWriter(ttk.Window):
             lbl.pack(anchor=W, pady=(5, 0))
             txt = tk.Text(self.scrollable_frame, height=height, font=font_norm)
             txt.pack(fill=X, pady=(0, 5))
-            self.add_right_click(txt) # 为每个文本框绑定右键
+            self.add_right_click(txt) 
             self.fields[key] = txt
         
         ttk.Button(left_frame, text="⚡ 生成当前课时框架", command=self.generate_framework, bootstyle="info").pack(fill=X, pady=5)
@@ -408,11 +398,11 @@ class LessonPlanWriter(ttk.Window):
         self.instruction_entry = ttk.Entry(cmd_frame, bootstyle="success")
         self.instruction_entry.pack(side=LEFT, fill=X, expand=True, padx=5)
         self.instruction_entry.insert(0, "环节清晰，体现学生探究，师生互动具体")
-        self.add_right_click(self.instruction_entry) # 绑定右键
+        self.add_right_click(self.instruction_entry) 
 
         self.process_text = ScrolledText(right_frame, font=(MAIN_FONT_NAME, 11), padding=10)
         self.process_text.pack(fill=BOTH, expand=True, pady=5)
-        self.add_right_click(self.process_text) # 绑定右键
+        self.add_right_click(self.process_text) 
         
         ctrl_frame = ttk.Frame(right_frame)
         ctrl_frame.pack(fill=X, pady=5)
@@ -432,7 +422,7 @@ class LessonPlanWriter(ttk.Window):
         author_lbl.pack(side=RIGHT)
 
     def show_author(self):
-        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：4.2.0 (沉浸智编版)\n适用：金塔县中学教案模版标准")
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：4.3.0 (精排优化版)\n适用：金塔县中学教案模版标准")
 
     def update_period_list(self):
         try:
@@ -558,6 +548,7 @@ class LessonPlanWriter(ttk.Window):
         else:
             custom_instruction_block = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
 
+        # 优化点：修改了 Prompt 指令，强制要求素养目标带有数字编号分条列出。
         prompt = f"""
         任务：为高中化学课题《{topic}》设计第 {current_p} 课时的教案框架。
         
@@ -566,7 +557,7 @@ class LessonPlanWriter(ttk.Window):
 
         【核心要求】
         1. **课程标准**：【必须】引用**《普通高中化学课程标准（2017年版2025年日常修订版）》**中与本课时内容直接相关的具体条目，严禁使用“匹配课标”等模糊词汇。
-        2. **素养导向**：严禁使用“三维目标”分类。请用一段通顺的话描述“通过...培养...素养”。
+        2. **素养导向**：严禁使用“三维目标”分类。必须分条列出具体的素养目标，并带上数字编号（如 1. 2. 3.），每条采用“通过...培养...素养”的句式描述。
         3. 格式：纯文本，无Markdown。**【重要】化学式、离子符号、化学方程式【必须】严格使用 Unicode 标准的上标和下标字符（例如：H₂O, SO₄²⁻, Fe³⁺, ∆表示加热），绝对不能用普通数字替代。**
         4. 返回JSON格式，Key必须保持一致：
         {{
@@ -744,9 +735,8 @@ class LessonPlanWriter(ttk.Window):
                 table.cell(0, 2).text = "时间"
                 table.cell(0, 3).text = datetime.now().strftime("%Y-%m-%d")
 
-                custom_info = data.get('custom_content', '')
+                # 优化点：导出教案时不再将“自定义内容”写入课时说明
                 info_text = f"第 {i} 课时 (共 {total_p} 课时)"
-                if custom_info: info_text += f"\n[自定义内容]: {custom_info}"
                 
                 table.cell(1, 0).text = "课程章节"
                 table.cell(1, 1).text = data.get('chapter', '')
