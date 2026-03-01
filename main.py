@@ -1,29 +1,9 @@
 import sys
 import os
-
-# =======================================================
-# 补丁：修复 macOS Nuitka 打包后 fallback 到系统级老旧 Tcl 8.5 的 Bug
-# =======================================================
-if sys.platform == 'darwin':
-    _exe_dir = os.path.dirname(sys.executable)
-    _tcl_dir = None
-    _tk_dir = None
-    try:
-        # 动态寻找 Nuitka 释出的 tcl8.x 和 tk8.x 文件夹
-        for item in os.listdir(_exe_dir):
-            if item.startswith('tcl') and os.path.isdir(os.path.join(_exe_dir, item)):
-                _tcl_dir = os.path.join(_exe_dir, item)
-            elif item.startswith('tk') and not item.startswith('tcl') and os.path.isdir(os.path.join(_exe_dir, item)):
-                _tk_dir = os.path.join(_exe_dir, item)
-        
-        # 强行指定环境变量
-        if _tcl_dir and _tk_dir:
-            os.environ["TCL_LIBRARY"] = _tcl_dir
-            os.environ["TK_LIBRARY"] = _tk_dir
-    except Exception:
-        pass
-
 import json
+import threading
+import tkinter as tk
+from tkinter import messagebox, filedialog, simpledialog
 
 # --- 兼容性修复 ---
 try:
@@ -33,9 +13,6 @@ except ImportError:
 import PIL.ImageTk 
 # -----------------
 
-import threading
-import tkinter as tk
-from tkinter import messagebox, filedialog, simpledialog
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText

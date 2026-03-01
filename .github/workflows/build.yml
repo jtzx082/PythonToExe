@@ -22,40 +22,43 @@ jobs:
       with:
         python-version: '3.10'
 
+    # Ubuntu系统依赖安装
     - name: Install System Dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-tk tk-dev patchelf ccache upx-ucl
+        sudo apt-get install -y python3-tk tk-dev
 
-    - name: Install System Dependencies (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        choco install upx
-
+    # Python依赖安装
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    # -------------------------
+    # Windows 打包 (单文件Exe)
+    # -------------------------
     - name: Build for Windows
       if: matrix.os == 'windows-latest'
       run: |
-        python -m nuitka --assume-yes-for-downloads --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package-data=ttkbootstrap --enable-plugin=upx -o "JintaLessonWriter-Win.exe" main.py
+        pyinstaller --noconfirm --onefile --windowed --collect-all ttkbootstrap --name "JintaLessonWriter-Win" main.py
 
     - name: Upload Windows Artifact
       if: matrix.os == 'windows-latest'
       uses: actions/upload-artifact@v4
       with:
         name: JintaLessonWriter-Windows
-        path: JintaLessonWriter-Win.exe
+        path: dist/JintaLessonWriter-Win.exe
 
+    # -------------------------
+    # macOS 打包 (.app 转 .dmg)
+    # -------------------------
     - name: Build for macOS
       if: matrix.os == 'macos-latest'
       run: |
-        python -m nuitka --assume-yes-for-downloads --standalone --macos-create-app-bundle --macos-app-name="JintaLessonWriter" --macos-app-mode=gui --enable-plugin=tk-inter --include-package-data=ttkbootstrap main.py
-        mv main.app "JintaLessonWriter.app"
-        hdiutil create -volname "JintaLessonWriter" -srcfolder "JintaLessonWriter.app" -ov -format UDZO "JintaLessonWriter-Mac.dmg"
+        pyinstaller --noconfirm --windowed --collect-all ttkbootstrap --name "JintaLessonWriter" main.py
+        # pyinstaller会在dist目录下生成 .app 文件
+        hdiutil create -volname "JintaLessonWriter" -srcfolder "dist/JintaLessonWriter.app" -ov -format UDZO "JintaLessonWriter-Mac.dmg"
 
     - name: Upload macOS Artifact
       if: matrix.os == 'macos-latest'
@@ -64,15 +67,19 @@ jobs:
         name: JintaLessonWriter-macOS
         path: JintaLessonWriter-Mac.dmg
 
+    # -------------------------
+    # Linux 打包 (单文件压缩包)
+    # -------------------------
     - name: Build for Linux
       if: matrix.os == 'ubuntu-latest'
       run: |
-        python -m nuitka --assume-yes-for-downloads --onefile --enable-plugin=tk-inter --include-package-data=ttkbootstrap --enable-plugin=upx -o "JintaLessonWriter-Linux.bin" main.py
-        tar -czvf JintaLessonWriter-Linux.tar.gz JintaLessonWriter-Linux.bin
+        pyinstaller --noconfirm --onefile --windowed --collect-all ttkbootstrap --name "JintaLessonWriter-Linux" main.py
+        cd dist
+        tar -czvf JintaLessonWriter-Linux.tar.gz JintaLessonWriter-Linux
 
     - name: Upload Linux Artifact
       if: matrix.os == 'ubuntu-latest'
       uses: actions/upload-artifact@v4
       with:
         name: JintaLessonWriter-Linux
-        path: JintaLessonWriter-Linux.tar.gz
+        path: dist/JintaLessonWriter-Linux.tar.gz

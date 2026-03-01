@@ -4,6 +4,4 @@ python-pptx
 pypdf
 ttkbootstrap
 Pillow==9.5.0
-nuitka
-zstandard
-ordered-set
+pyinstaller
