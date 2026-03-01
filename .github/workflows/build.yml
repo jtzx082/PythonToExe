@@ -11,7 +11,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # 在三大平台并行编译
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
@@ -24,7 +23,7 @@ jobs:
         python-version: '3.11'
 
     # ------------------
-    # 安装系统级依赖 (UPX 和 Patchelf)
+    # 安装系统级依赖
     # ------------------
     - name: Install System Dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
@@ -38,7 +37,7 @@ jobs:
         choco install upx
 
     # ------------------
-    # 安装 Python 依赖 (包含 Nuitka 和 Zstandard 压缩算法)
+    # 安装 Python 依赖
     # ------------------
     - name: Install Python Dependencies
       run: |
@@ -47,12 +46,12 @@ jobs:
         pip install nuitka zstandard
 
     # ------------------
-    # Windows: Nuitka 单文件 + UPX 极限压缩
+    # Windows: 采用官方建议的新参数，关闭二次重压提升速度
     # ------------------
     - name: Build for Windows
       if: matrix.os == 'windows-latest'
       run: |
-        python -m nuitka --assume-yes-for-downloads --onefile --windows-disable-console --enable-plugin=pyside6 --enable-plugin=upx -o "MultiPlatform-Py-Packer-Win.exe" main.py
+        python -m nuitka --assume-yes-for-downloads --onefile --onefile-no-compression --windows-console-mode=disable --enable-plugin=pyside6 --enable-plugin=upx -o "MultiPlatform-Py-Packer-Win.exe" main.py
 
     - name: Upload Windows Artifact
       if: matrix.os == 'windows-latest'
@@ -62,14 +61,14 @@ jobs:
         path: MultiPlatform-Py-Packer-Win.exe
 
     # ------------------
-    # macOS: Nuitka 独立程序包 + DMG 封装 (避开 macOS 的 UPX/Onefile 损坏问题)
+    # macOS: 独立程序包 + DMG 封装
     # ------------------
     - name: Build for macOS
       if: matrix.os == 'macos-latest'
       run: |
-        # Mac 上必须使用 standalone 模式生成 .app，并利用 hdiutil 锁死权限
         python -m nuitka --assume-yes-for-downloads --standalone --macos-create-app-bundle --macos-app-name="PyPacker" --enable-plugin=pyside6 main.py
-        hdiutil create -volname "PyPacker" -srcfolder "main.dist/PyPacker.app" -ov -format UDZO "PyPacker-Mac.dmg"
+        mv main.app "MultiPlatform-Py-Packer.app"
+        hdiutil create -volname "PyPacker" -srcfolder "MultiPlatform-Py-Packer.app" -ov -format UDZO "PyPacker-Mac.dmg"
 
     - name: Upload macOS Artifact
       if: matrix.os == 'macos-latest'
@@ -79,13 +78,14 @@ jobs:
         path: PyPacker-Mac.dmg
 
     # ------------------
-    # Linux: Nuitka 单文件 + UPX 极限压缩 + tar.gz 权限保留
+    # Linux: Nuitka 单文件 + UPX 压缩
     # ------------------
     - name: Build for Linux
       if: matrix.os == 'ubuntu-latest'
       run: |
-        python -m nuitka --assume-yes-for-downloads --onefile --disable-console --enable-plugin=pyside6 --enable-plugin=upx -o "MultiPlatform-Py-Packer-Linux" main.py
-        tar -czvf PyPacker-Linux.tar.gz MultiPlatform-Py-Packer-Linux
+        python -m nuitka --assume-yes-for-downloads --onefile --enable-plugin=pyside6 --enable-plugin=upx main.py
+        mv main.bin MultiPlatform-Py-Packer-Linux.bin
+        tar -czvf PyPacker-Linux.tar.gz MultiPlatform-Py-Packer-Linux.bin
 
     - name: Upload Linux Artifact
       if: matrix.os == 'ubuntu-latest'
