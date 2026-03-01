@@ -44,7 +44,7 @@ CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".jinta_lesson_config.json")
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly") 
-        self.title("金塔县中学教案智能生成系统 v4.1 (多源文档智编版)")
+        self.title("金塔县中学教案智能生成系统 v4.2 (沉浸智编版)")
         self.geometry("1350x950")
         
         self.lesson_data = {} 
@@ -53,7 +53,7 @@ class LessonPlanWriter(ttk.Window):
         self.is_generating = False
         self.stop_flag = False
         
-        # 多文档内容存储字典 { filepath: {"name": filename, "text": text_content} }
+        # 多文档内容存储字典
         self.uploaded_files = {}
         
         # 变量
@@ -66,6 +66,7 @@ class LessonPlanWriter(ttk.Window):
         self.author_info = "设计与开发：金塔县中学化学教研组 · 俞晋全 | 核心驱动：DeepSeek-V3"
         
         self.load_config() 
+        self.setup_context_menu() # 初始化右键菜单
         self.setup_ui()
         self.save_current_data_to_memory(1)
 
@@ -104,7 +105,61 @@ class LessonPlanWriter(ttk.Window):
             else:
                 self.api_status_var.set("❌ 未配置")
 
+    # ================= 右键菜单模块 =================
+    def setup_context_menu(self):
+        """初始化全局右键菜单"""
+        self.context_menu = tk.Menu(self, tearoff=0, font=(MAIN_FONT_NAME, UI_FONT_SIZE))
+        self.context_menu.add_command(label="✂️ 剪切", command=self._menu_cut)
+        self.context_menu.add_command(label="📋 复制", command=self._menu_copy)
+        self.context_menu.add_command(label="📝 粘贴", command=self._menu_paste)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="✅ 全选", command=self._menu_select_all)
+
+    def _menu_cut(self):
+        widget = self.focus_get()
+        if widget: widget.event_generate("<<Cut>>")
+        
+    def _menu_copy(self):
+        widget = self.focus_get()
+        if widget: widget.event_generate("<<Copy>>")
+        
+    def _menu_paste(self):
+        widget = self.focus_get()
+        if widget: widget.event_generate("<<Paste>>")
+        
+    def _menu_select_all(self):
+        widget = self.focus_get()
+        if isinstance(widget, tk.Text) or isinstance(widget, ScrolledText):
+            widget.tag_add("sel", "1.0", "end")
+        elif isinstance(widget, ttk.Entry) or isinstance(widget, tk.Entry):
+            widget.select_range(0, tk.END)
+            widget.icursor(tk.END)
+        return "break"
+
+    def show_context_menu(self, event):
+        try:
+            event.widget.focus_set()
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+        except Exception:
+            pass
+
+    def add_right_click(self, widget):
+        """为指定的输入框绑定右键菜单事件"""
+        if sys.platform == "darwin":
+            widget.bind("<Button-2>", self.show_context_menu)
+            widget.bind("<Button-3>", self.show_context_menu)
+        else:
+            widget.bind("<Button-3>", self.show_context_menu)
+
     # ================= 多文档上传解析与管理逻辑 =================
+    
+    # 修复按钮不灵敏：使用延迟执行，让按钮动画先跑完
+    def btn_upload_document(self):
+        self.after(50, self.upload_document)
+        
+    def btn_open_file_manager(self):
+        self.after(50, self.open_file_manager)
+
     def upload_document(self):
         filepaths = filedialog.askopenfilenames(
             title="选择参考文档",
@@ -164,7 +219,7 @@ class LessonPlanWriter(ttk.Window):
             
         top = tk.Toplevel(self)
         top.title("文档管理器")
-        top.geometry("450x300")
+        top.geometry("500x350")
         top.transient(self) 
         
         ttk.Label(top, text="下方是已成功解析并注入AI大脑的参考文件：", padding=10, font=(MAIN_FONT_NAME, UI_FONT_SIZE, "bold")).pack(anchor=W)
@@ -176,10 +231,14 @@ class LessonPlanWriter(ttk.Window):
         scrollbar = ttk.Scrollbar(sf, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
+        # 修复布局：确保画布宽度同步，防止删除按钮被挤出屏幕
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        def _configure_canvas(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        canvas.bind('<Configure>', _configure_canvas)
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
         
+        canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
@@ -188,8 +247,11 @@ class LessonPlanWriter(ttk.Window):
                 widget.destroy()
             for filepath, data in list(self.uploaded_files.items()):
                 cf = ttk.Frame(scrollable_frame)
-                cf.pack(fill=X, pady=4)
-                ttk.Label(cf, text=f"📄 {data['name']}", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT, padx=5)
+                cf.pack(fill=X, expand=True, pady=4, padx=5)
+                
+                # 文件名靠左
+                lbl = ttk.Label(cf, text=f"📄 {data['name']}", font=(MAIN_FONT_NAME, UI_FONT_SIZE))
+                lbl.pack(side=LEFT, fill=X, expand=True)
                 
                 def make_delete_cmd(fp=filepath):
                     def _delete():
@@ -201,10 +263,13 @@ class LessonPlanWriter(ttk.Window):
                             top.destroy()
                     return _delete
                 
-                ttk.Button(cf, text="✖ 删除", bootstyle="danger-outline", padding=(4,2), command=make_delete_cmd(filepath)).pack(side=RIGHT, padx=5)
+                # 删除按钮靠右（更换为醒目的大红色按钮）
+                btn = ttk.Button(cf, text="✖ 删除", bootstyle="danger", command=make_delete_cmd(filepath))
+                btn.pack(side=RIGHT, padx=(5, 0))
                 
         refresh_list()
 
+    # ================= 界面构建模块 =================
     def setup_ui(self):
         header_frame = ttk.Frame(self, padding=(15, 15))
         header_frame.pack(fill=X)
@@ -216,7 +281,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Button(api_frame, text="⚙️ 配置 API Key", command=self.open_api_settings, bootstyle="info").pack(side=LEFT, padx=5)
         ttk.Label(api_frame, textvariable=self.api_status_var, font=(MAIN_FONT_NAME, 9)).pack(side=LEFT, padx=5)
 
-        # 2. 核心布局优化：先放置最右侧的操作模块，防止被中间模块挤占
+        # 2. 核心布局优化：先放置最右侧的操作模块
         action_frame = ttk.Labelframe(header_frame, text="⚙️ 全局操作", padding=10, bootstyle="secondary")
         action_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
         
@@ -234,6 +299,7 @@ class LessonPlanWriter(ttk.Window):
         self.topic_entry = ttk.Entry(f1, width=25, bootstyle="primary")
         self.topic_entry.pack(side=LEFT, padx=5, fill=X, expand=True)
         self.topic_entry.insert(0, "离子反应")
+        self.add_right_click(self.topic_entry) # 绑定右键
         
         ttk.Label(f1, text="教案类型:", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT, padx=(10, 5))
         self.type_combo = ttk.Combobox(f1, values=["详案 (标准)", "简案 (提纲)", "匹配教学环节详案", "匹配教学环节简案"], state="readonly", width=16, bootstyle="primary")
@@ -245,6 +311,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Label(f2, text="总课时:", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT)
         self.total_spin = ttk.Spinbox(f2, from_=1, to=10, width=3, textvariable=self.total_periods_var, command=self.update_period_list, bootstyle="primary")
         self.total_spin.pack(side=LEFT, padx=5)
+        self.add_right_click(self.total_spin) # 绑定右键
         
         ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
         
@@ -257,9 +324,11 @@ class LessonPlanWriter(ttk.Window):
         ttk.Label(f2, text="课时").pack(side=LEFT, padx=2)
 
         ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
-        ttk.Button(f2, text="📎 注入参考文档(可多选)", command=self.upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
+        
+        # 绑定优化后的延迟点击事件
+        ttk.Button(f2, text="📎 注入参考文档", command=self.btn_upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
         ttk.Label(f2, textvariable=self.files_count_var, font=(MAIN_FONT_NAME, 9), bootstyle="secondary").pack(side=LEFT, padx=(5,10))
-        ttk.Button(f2, text="📂 管理文档", command=self.open_file_manager, bootstyle="secondary-link").pack(side=LEFT)
+        ttk.Button(f2, text="📂 管理文档", command=self.btn_open_file_manager, bootstyle="secondary-link").pack(side=LEFT)
 
         main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=15, pady=5)
@@ -308,6 +377,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Label(custom_frame, text="若在此输入指令，AI将严格执行；若要求分析文件，AI会自动调用已注入文档解读。", font=(MAIN_FONT_NAME, UI_FONT_SIZE-1), bootstyle="secondary").pack(anchor=W)
         self.fields['custom_content'] = tk.Text(custom_frame, height=3, font=font_norm, bg="#fff0f0", fg="#000")
         self.fields['custom_content'].pack(fill=X, pady=2)
+        self.add_right_click(self.fields['custom_content']) # 绑定右键
         
         labels = [
             ("📖 章节名称", "chapter", 1),
@@ -324,6 +394,7 @@ class LessonPlanWriter(ttk.Window):
             lbl.pack(anchor=W, pady=(5, 0))
             txt = tk.Text(self.scrollable_frame, height=height, font=font_norm)
             txt.pack(fill=X, pady=(0, 5))
+            self.add_right_click(txt) # 为每个文本框绑定右键
             self.fields[key] = txt
         
         ttk.Button(left_frame, text="⚡ 生成当前课时框架", command=self.generate_framework, bootstyle="info").pack(fill=X, pady=5)
@@ -337,9 +408,11 @@ class LessonPlanWriter(ttk.Window):
         self.instruction_entry = ttk.Entry(cmd_frame, bootstyle="success")
         self.instruction_entry.pack(side=LEFT, fill=X, expand=True, padx=5)
         self.instruction_entry.insert(0, "环节清晰，体现学生探究，师生互动具体")
+        self.add_right_click(self.instruction_entry) # 绑定右键
 
         self.process_text = ScrolledText(right_frame, font=(MAIN_FONT_NAME, 11), padding=10)
         self.process_text.pack(fill=BOTH, expand=True, pady=5)
+        self.add_right_click(self.process_text) # 绑定右键
         
         ctrl_frame = ttk.Frame(right_frame)
         ctrl_frame.pack(fill=X, pady=5)
@@ -359,7 +432,7 @@ class LessonPlanWriter(ttk.Window):
         author_lbl.pack(side=RIGHT)
 
     def show_author(self):
-        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：4.1.0 (多源文档智编版)\n适用：金塔县中学教案模版标准")
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：4.2.0 (沉浸智编版)\n适用：金塔县中学教案模版标准")
 
     def update_period_list(self):
         try:
