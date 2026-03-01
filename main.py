@@ -11,6 +11,7 @@ import time
 import urllib.request
 import zipfile
 import tarfile
+import tempfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Optional, Tuple, Callable
@@ -28,7 +29,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.8.0 Ultimate"  # 🚀 解除中文命名封印，底层沙盒安全隔离防乱码
+APP_VERSION = "3.9.0 Ultimate"  # 🚀 新增：影子沙盒技术彻底规避中文路径崩溃，补齐 tk 插件
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -40,7 +41,8 @@ IS_LINUX = sys.platform.startswith("linux")
 SMART_HEURISTICS = {
     "ttkbootstrap": {
         "collect_all": ["ttkbootstrap"], 
-        "hidden_imports": ["PIL._tkinter_finder"]
+        "hidden_imports": ["PIL._tkinter_finder"],
+        "nuitka_plugins": ["tk-inter"]  # 🚀 补齐 tk-inter 插件，防止打包后无法运行
     },
     "azure-cognitiveservices-speech": {"collect_all": ["azure.cognitiveservices.speech"]},
     "customtkinter": {"collect_all": ["customtkinter"], "hidden_imports": ["PIL._tkinter_finder"], "nuitka_plugins": ["tk-inter"]},
@@ -86,7 +88,7 @@ def ensure_writable_directory(target: Path, fallback: Path) -> Tuple[Path, Optio
         return fallback, f"目录不可写，已切换至桌面：{fallback}"
 
 def sanitize_name(s: str) -> str:
-    # 🚀 优化：\w 包含了中文等各国语言字符，允许中文、字母、数字、下划线、短横线和空格
+    # 🚀 优化：允许中文、字母、数字、下划线、短横线和空格作为软件最终名称
     s = re.sub(r"[^\w\-\.\s]+", "_", s.strip())
     return s.strip("._-") or "MyApp"
 
@@ -258,7 +260,9 @@ class BuildWorker(QObject):
 
     def _run_cmd(self, cmd: List[str], cwd: Path, msg: str = "", extra_bin_dir: str = None):
         if msg: self._emit(msg)
+        
         clean_env = os.environ.copy()
+        # 🛡️ 隔离系统环境变量穿透
         for key in ["PYTHONPATH", "PYTHONHOME", "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"]:
             clean_env.pop(key, None)
             
@@ -294,8 +298,9 @@ class BuildWorker(QObject):
             for p in applied: self._emit("  - " + p)
         else: self._emit("未检测到高危依赖。")
 
-    def _ensure_upx(self, cache_root: Path) -> Optional[str]:
-        upx_dir = cache_root / "upx_tool"
+    def _ensure_upx(self) -> Optional[str]:
+        # UPX 缓存池放在用户主目录，安全且一劳永逸
+        upx_dir = Path.home() / ".mp_packer_cache" / "upx_tool"
         upx_exe_name = "upx.exe" if IS_WIN else "upx"
         
         for root, _, files in os.walk(upx_dir):
@@ -355,11 +360,17 @@ class BuildWorker(QObject):
         final_export = str(out_dir / f"{cfg.app_name}_export")
         
         host_py = Path(cfg.host_python) if cfg.host_python and _is_valid_host_python(Path(cfg.host_python)) else find_host_python()
-        work_root = proj_dir / BUILD_ROOT_NAME / sha1_text(json.dumps(asdict(cfg), ensure_ascii=False, sort_keys=True))[:12]
+        
+        # 🚀 绝杀技：影子沙盒 (Shadow Sandbox)
+        # 将所有的虚拟环境、编译过程、动态库全部转移至系统级临时无汉字纯净目录。彻底规避中文路径引起的 Nuitka 崩溃。
+        sandbox_base = Path(tempfile.gettempdir()) / "mp_packer_sandbox"
+        work_root = sandbox_base / sha1_text(json.dumps(asdict(cfg), ensure_ascii=False, sort_keys=True))[:12]
+        
         venv_dir, build_dir, dist_dir, logs_dir = work_root/"venv", work_root/"build", work_root/"dist", work_root/"logs"
         for d in (work_root, build_dir, dist_dir, logs_dir): safe_mkdir(d)
 
         self._header("环境准备")
+        self._emit(f"[INFO] 已开启纯英文安全沙盒：{work_root}")
         if cfg.clean_build_dirs: rm_tree(build_dir); rm_tree(dist_dir); safe_mkdir(build_dir); safe_mkdir(dist_dir)
         if cfg.purge_venv: rm_tree(venv_dir)
 
@@ -388,7 +399,7 @@ class BuildWorker(QObject):
         self.stage.emit("编译打包")
         self._header(f"开始 {cfg.builder.upper()} 打包")
         
-        upx_bin_dir = self._ensure_upx(work_root) if cfg.use_upx else None
+        upx_bin_dir = self._ensure_upx() if cfg.use_upx else None
         
         if cfg.builder == "pyinstaller":
             cmd = [str(vpy), "-m", "PyInstaller", str(entry_py), "--noconfirm", "--clean", "--name", cfg.app_name]
@@ -431,11 +442,16 @@ class BuildWorker(QObject):
         if cfg.builder == "nuitka": cmd += [str(entry_py)]
 
         self._emit(format_cmd(cmd))
+        # 执行命令，并在环境变量注入 UPX 路径
         self._run_cmd(cmd, proj_dir, extra_bin_dir=upx_bin_dir)
 
         self.stage.emit("导出产物")
         rm_tree(Path(final_export)); safe_mkdir(Path(final_export))
-        for it in dist_dir.glob("*"): shutil.copytree(it, Path(final_export) / it.name) if it.is_dir() else shutil.copy2(it, Path(final_export) / it.name)
+        
+        # 将沙盒里的安全产物，护送回原始项目的中文文件夹中
+        for it in dist_dir.glob("*"):
+            if it.is_dir(): shutil.copytree(it, Path(final_export) / it.name)
+            else: shutil.copy2(it, Path(final_export) / it.name)
         
         return final_export
 
@@ -495,7 +511,7 @@ class MainWindow(QMainWindow):
         left_panel = QWidget(); left_layout = QVBoxLayout(left_panel); left_layout.setContentsMargins(16, 16, 16, 16); left_layout.setSpacing(14)
         header = QWidget(); hl = QVBoxLayout(header); hl.setContentsMargins(0,0,0,0); hl.setSpacing(4)
         title = QLabel(f"📦 {APP_NAME}"); title.setStyleSheet("font-size: 22px; font-weight: 800; color: #0F172A;")
-        sub = QLabel("支持拖拽文件 • 纯净状态 • UPX 全平台极限压缩 • 支持中文命名"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
+        sub = QLabel("支持拖拽文件 • 安全影子沙盒 • 完美支持中文路径与命名"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
         hl.addWidget(title); hl.addWidget(sub); left_layout.addWidget(header)
 
         tabs = QTabWidget(); tabs.setDocumentMode(True)
