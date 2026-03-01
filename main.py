@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.9.1 Ultimate"  # 🚀 修复 Mac 平台 404 错误，智能屏蔽 Mac 的 UPX 破坏性加壳
+APP_VERSION = "3.9.2 Ultimate"  # 🚀 终极进化：Mac 平台全自动 Ad-Hoc 深度签名与 DMG 原生封装
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -297,12 +297,9 @@ class BuildWorker(QObject):
         else: self._emit("未检测到高危依赖。")
 
     def _ensure_upx(self) -> Optional[str]:
-        # 🚀 阻断 Mac 下载：防止 UPX 破坏签名
         if IS_MAC:
             self.stage.emit("跳过 UPX (Mac环境拦截)")
             self._emit("[INFO] 检测到 macOS 平台，已自动拦截 UPX 下载。")
-            self._emit("[WARN] 💡 原因：苹果 M 系列芯片强制要求二进制代码拥有完整签名，UPX 压缩加壳会直接破坏底层签名结构，导致程序彻底报废。")
-            self._emit("[WARN] 💡 Nuitka 依然会使用内部的 zstandard 为您进行无损压缩，请放心等待。")
             return None
 
         upx_dir = Path.home() / ".mp_packer_cache" / "upx_tool"
@@ -410,12 +407,8 @@ class BuildWorker(QObject):
             if cfg.windowed: cmd += ["--windowed"]
             if cfg.icon_path: cmd += ["--icon", str(Path(cfg.icon_path).resolve())]
             if cfg.optimize_level > 0: cmd += [f"--optimize={cfg.optimize_level}"]
-            
-            if cfg.use_upx and upx_bin_dir:
-                if IS_WIN: cmd += [f"--upx-dir={upx_bin_dir}"]
-                else: cmd += ["--noupx"]; self._emit("[WARN] PyInstaller 官方限制：Mac/Linux 平台禁用 UPX。已自动忽略。")
-            else:
-                cmd += ["--noupx"]
+            if cfg.use_upx and upx_bin_dir: cmd += [f"--upx-dir={upx_bin_dir}"] if IS_WIN else ["--noupx"]
+            else: cmd += ["--noupx"]
             
             sep = ";" if IS_WIN else ":"
             for item in cfg.add_data: cmd += ["--add-data", item] if sep in item else []
@@ -429,7 +422,10 @@ class BuildWorker(QObject):
         else:
             cmd = [str(vpy), "-m", "nuitka", "--assume-yes-for-downloads", f"--output-dir={dist_dir}"]
             cmd += ["--onefile"] if cfg.onefile else ["--standalone"]
-            if cfg.windowed: cmd += ["--macos-create-app-bundle"] if IS_MAC else ["--windows-disable-console"] if IS_WIN else ["--disable-console"]
+            if cfg.windowed:
+                if IS_MAC: cmd += ["--macos-create-app-bundle", f"--macos-app-name={cfg.app_name}"]
+                elif IS_WIN: cmd += ["--windows-disable-console"]
+                else: cmd += ["--disable-console"]
             if cfg.icon_path: cmd += [f"--macos-app-icon={cfg.icon_path}"] if IS_MAC else [f"--windows-icon-from-ico={cfg.icon_path}"] if IS_WIN else [f"--linux-icon={cfg.icon_path}"]
             
             for h in cfg.hidden_imports: cmd += [f"--include-module={h}"]
@@ -445,6 +441,26 @@ class BuildWorker(QObject):
 
         self._emit(format_cmd(cmd))
         self._run_cmd(cmd, proj_dir, extra_bin_dir=upx_bin_dir)
+
+        # 🚀 绝杀技：Mac 平台后处理 (免签清洗与 DMG 封装)
+        if IS_MAC and cfg.windowed:
+            self.stage.emit("Mac 免签与封装 DMG")
+            self._header("🍎 正在进行 Mac 专属免签与 DMG 封装")
+            for app_bundle in dist_dir.glob("*.app"):
+                app_path = str(app_bundle)
+                dmg_name = f"{cfg.app_name}.dmg"
+                dmg_path = str(dist_dir / dmg_name)
+                
+                try:
+                    # 1. 清除系统隔离属性
+                    self._run_cmd(["xattr", "-cr", app_path], dist_dir, "🧹 清除隔离属性...")
+                    # 2. 强行本地 Ad-Hoc 签名 (破解 M 系列芯片的崩溃魔咒)
+                    self._run_cmd(["codesign", "--force", "--deep", "-s", "-", app_path], dist_dir, "✍️ 注入本地 Ad-Hoc 深度签名...")
+                    # 3. 封装为 DMG
+                    self._run_cmd(["hdiutil", "create", "-volname", cfg.app_name, "-srcfolder", app_path, "-ov", "-format", "UDZO", dmg_path], dist_dir, f"📦 生成原生 DMG 安装包: {dmg_name}")
+                    self._emit(f"✅ Mac 平台深度修复与封装完成！")
+                except Exception as e:
+                    self._emit(f"[WARN] Mac 封装阶段出现警告，但不影响基础文件生成: {e}")
 
         self.stage.emit("导出产物")
         rm_tree(Path(final_export)); safe_mkdir(Path(final_export))
@@ -511,7 +527,7 @@ class MainWindow(QMainWindow):
         left_panel = QWidget(); left_layout = QVBoxLayout(left_panel); left_layout.setContentsMargins(16, 16, 16, 16); left_layout.setSpacing(14)
         header = QWidget(); hl = QVBoxLayout(header); hl.setContentsMargins(0,0,0,0); hl.setSpacing(4)
         title = QLabel(f"📦 {APP_NAME}"); title.setStyleSheet("font-size: 22px; font-weight: 800; color: #0F172A;")
-        sub = QLabel("安全影子沙盒 • 全平台智能拦截无用操作 • 一键零报错打包"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
+        sub = QLabel("安全影子沙盒 • 苹果 M 系列强签名防闪退 • DMG 原生封装"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
         hl.addWidget(title); hl.addWidget(sub); left_layout.addWidget(header)
 
         tabs = QTabWidget(); tabs.setDocumentMode(True)
@@ -543,7 +559,7 @@ class MainWindow(QMainWindow):
         self.ck_windowed = QCheckBox("GUI 模式 (.app 程序包)")
         if IS_MAC:
             self.ck_onefile.setText("Unix 单文件 (双击会弹终端黑框，不支持内置图标)")
-            self.ck_windowed.setText("macOS .app 程序包 (无终端，支持图标，强烈推荐)")
+            self.ck_windowed.setText("macOS .app 程序包 (自动进行强签名并封装为.dmg)")
             self.ck_onefile.clicked.connect(lambda: self._mac_mutex(True))
             self.ck_windowed.clicked.connect(lambda: self._mac_mutex(False))
         
@@ -579,7 +595,7 @@ class MainWindow(QMainWindow):
         fa_adv.addRow("🛡️ 隐式导入：", self.pt_hidden); fa_adv.addRow("🧲 强制收集包：", self.pt_collect)
         fa_adv.addRow("📁 数据文件(src:dst)：", self.pt_data); fa_adv.addRow("🔧 其它参数：", self.pt_extra)
         fa_adv.addRow("", self.ck_upx)
-        info_lb = QLabel("💡 提示：所有系统特定的环境隔离和下载行为都已被智能优化，无需人工干预。")
+        info_lb = QLabel("💡 提示：所有系统特定的环境隔离和防闪退签名都已被深度优化，一键打包即可。")
         info_lb.setStyleSheet("color: #059669; font-weight: bold;")
         l_a.addWidget(gb_adv); l_a.addWidget(info_lb); l_a.addStretch(1)
         tabs.addTab(wrap_scroll(tab_adv), "🛠️ 高级与优化")
