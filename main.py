@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.9.0 Ultimate"  # 🚀 新增：影子沙盒技术彻底规避中文路径崩溃，补齐 tk 插件
+APP_VERSION = "3.9.1 Ultimate"  # 🚀 修复 Mac 平台 404 错误，智能屏蔽 Mac 的 UPX 破坏性加壳
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -42,7 +42,7 @@ SMART_HEURISTICS = {
     "ttkbootstrap": {
         "collect_all": ["ttkbootstrap"], 
         "hidden_imports": ["PIL._tkinter_finder"],
-        "nuitka_plugins": ["tk-inter"]  # 🚀 补齐 tk-inter 插件，防止打包后无法运行
+        "nuitka_plugins": ["tk-inter"]
     },
     "azure-cognitiveservices-speech": {"collect_all": ["azure.cognitiveservices.speech"]},
     "customtkinter": {"collect_all": ["customtkinter"], "hidden_imports": ["PIL._tkinter_finder"], "nuitka_plugins": ["tk-inter"]},
@@ -88,7 +88,6 @@ def ensure_writable_directory(target: Path, fallback: Path) -> Tuple[Path, Optio
         return fallback, f"目录不可写，已切换至桌面：{fallback}"
 
 def sanitize_name(s: str) -> str:
-    # 🚀 优化：允许中文、字母、数字、下划线、短横线和空格作为软件最终名称
     s = re.sub(r"[^\w\-\.\s]+", "_", s.strip())
     return s.strip("._-") or "MyApp"
 
@@ -202,7 +201,7 @@ def generate_default_splash_png(path: Path, app_name: str):
     safe_mkdir(path.parent); img.save(str(path), "PNG")
 
 # -----------------------------
-# 自定义 UI 组件 (支持拖拽)
+# 自定义 UI 组件
 # -----------------------------
 class DropLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -262,7 +261,6 @@ class BuildWorker(QObject):
         if msg: self._emit(msg)
         
         clean_env = os.environ.copy()
-        # 🛡️ 隔离系统环境变量穿透
         for key in ["PYTHONPATH", "PYTHONHOME", "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"]:
             clean_env.pop(key, None)
             
@@ -299,7 +297,14 @@ class BuildWorker(QObject):
         else: self._emit("未检测到高危依赖。")
 
     def _ensure_upx(self) -> Optional[str]:
-        # UPX 缓存池放在用户主目录，安全且一劳永逸
+        # 🚀 阻断 Mac 下载：防止 UPX 破坏签名
+        if IS_MAC:
+            self.stage.emit("跳过 UPX (Mac环境拦截)")
+            self._emit("[INFO] 检测到 macOS 平台，已自动拦截 UPX 下载。")
+            self._emit("[WARN] 💡 原因：苹果 M 系列芯片强制要求二进制代码拥有完整签名，UPX 压缩加壳会直接破坏底层签名结构，导致程序彻底报废。")
+            self._emit("[WARN] 💡 Nuitka 依然会使用内部的 zstandard 为您进行无损压缩，请放心等待。")
+            return None
+
         upx_dir = Path.home() / ".mp_packer_cache" / "upx_tool"
         upx_exe_name = "upx.exe" if IS_WIN else "upx"
         
@@ -316,11 +321,10 @@ class BuildWorker(QObject):
             safe_mkdir(upx_dir)
             version = "4.2.4"
             if IS_WIN: filename = f"upx-{version}-win64.zip"
-            elif IS_MAC: filename = f"upx-{version}-mac.zip"
             else: filename = f"upx-{version}-amd64_linux.tar.xz"
                 
             base_url = f"https://github.com/upx/upx/releases/download/v{version}/{filename}"
-            mirror_url = f"https://gh-proxy.com/{base_url}"
+            mirror_url = f"https://mirror.ghproxy.com/{base_url}"
             archive_path = upx_dir / filename
             
             def download_file(url):
@@ -361,8 +365,6 @@ class BuildWorker(QObject):
         
         host_py = Path(cfg.host_python) if cfg.host_python and _is_valid_host_python(Path(cfg.host_python)) else find_host_python()
         
-        # 🚀 绝杀技：影子沙盒 (Shadow Sandbox)
-        # 将所有的虚拟环境、编译过程、动态库全部转移至系统级临时无汉字纯净目录。彻底规避中文路径引起的 Nuitka 崩溃。
         sandbox_base = Path(tempfile.gettempdir()) / "mp_packer_sandbox"
         work_root = sandbox_base / sha1_text(json.dumps(asdict(cfg), ensure_ascii=False, sort_keys=True))[:12]
         
@@ -442,13 +444,11 @@ class BuildWorker(QObject):
         if cfg.builder == "nuitka": cmd += [str(entry_py)]
 
         self._emit(format_cmd(cmd))
-        # 执行命令，并在环境变量注入 UPX 路径
         self._run_cmd(cmd, proj_dir, extra_bin_dir=upx_bin_dir)
 
         self.stage.emit("导出产物")
         rm_tree(Path(final_export)); safe_mkdir(Path(final_export))
         
-        # 将沙盒里的安全产物，护送回原始项目的中文文件夹中
         for it in dist_dir.glob("*"):
             if it.is_dir(): shutil.copytree(it, Path(final_export) / it.name)
             else: shutil.copy2(it, Path(final_export) / it.name)
@@ -511,7 +511,7 @@ class MainWindow(QMainWindow):
         left_panel = QWidget(); left_layout = QVBoxLayout(left_panel); left_layout.setContentsMargins(16, 16, 16, 16); left_layout.setSpacing(14)
         header = QWidget(); hl = QVBoxLayout(header); hl.setContentsMargins(0,0,0,0); hl.setSpacing(4)
         title = QLabel(f"📦 {APP_NAME}"); title.setStyleSheet("font-size: 22px; font-weight: 800; color: #0F172A;")
-        sub = QLabel("支持拖拽文件 • 安全影子沙盒 • 完美支持中文路径与命名"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
+        sub = QLabel("安全影子沙盒 • 全平台智能拦截无用操作 • 一键零报错打包"); sub.setStyleSheet("color: #64748B; font-size: 13px;")
         hl.addWidget(title); hl.addWidget(sub); left_layout.addWidget(header)
 
         tabs = QTabWidget(); tabs.setDocumentMode(True)
@@ -575,11 +575,11 @@ class MainWindow(QMainWindow):
         gb_adv = QGroupBox("高级参数 (每行一个)"); fa_adv = QFormLayout(gb_adv)
         self.pt_hidden, self.pt_collect, self.pt_data, self.pt_extra = QPlainTextEdit(), QPlainTextEdit(), QPlainTextEdit(), QPlainTextEdit()
         for pt in (self.pt_hidden, self.pt_collect, self.pt_data, self.pt_extra): pt.setMaximumHeight(70)
-        self.ck_upx = QCheckBox("使用 UPX 极致压缩 (PyInstaller 仅 Windows 有效，Nuitka 全平台适用)")
+        self.ck_upx = QCheckBox("使用 UPX 极致压缩 (若为 Mac 平台，打包时将智能忽略以防止系统报错)")
         fa_adv.addRow("🛡️ 隐式导入：", self.pt_hidden); fa_adv.addRow("🧲 强制收集包：", self.pt_collect)
         fa_adv.addRow("📁 数据文件(src:dst)：", self.pt_data); fa_adv.addRow("🔧 其它参数：", self.pt_extra)
         fa_adv.addRow("", self.ck_upx)
-        info_lb = QLabel("💡 提示：如果勾选 UPX 且系统中未安装，软件会在后台自动下载并配置。")
+        info_lb = QLabel("💡 提示：所有系统特定的环境隔离和下载行为都已被智能优化，无需人工干预。")
         info_lb.setStyleSheet("color: #059669; font-weight: bold;")
         l_a.addWidget(gb_adv); l_a.addWidget(info_lb); l_a.addStretch(1)
         tabs.addTab(wrap_scroll(tab_adv), "🛠️ 高级与优化")
