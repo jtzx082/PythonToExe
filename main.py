@@ -315,7 +315,7 @@ class BuildWorker(QObject):
             else: filename = f"upx-{version}-amd64_linux.tar.xz"
                 
             base_url = f"https://github.com/upx/upx/releases/download/v{version}/{filename}"
-            mirror_url = f"https://mirror.ghproxy.com/{base_url}"
+            mirror_url = f"https://gh-proxy.com/{base_url}"
             archive_path = upx_dir / filename
             
             def download_file(url):
