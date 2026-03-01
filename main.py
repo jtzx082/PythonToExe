@@ -44,7 +44,7 @@ CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".jinta_lesson_config.json")
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly") 
-        self.title("金塔县中学教案智能生成系统 v4.0 (多源文档智编版)")
+        self.title("金塔县中学教案智能生成系统 v4.1 (多源文档智编版)")
         self.geometry("1350x950")
         
         self.lesson_data = {} 
@@ -53,7 +53,7 @@ class LessonPlanWriter(ttk.Window):
         self.is_generating = False
         self.stop_flag = False
         
-        # 多文档内容存储字典 { filepath: {"name": filename, "text": text_content, "ui_frame": frame} }
+        # 多文档内容存储字典 { filepath: {"name": filename, "text": text_content} }
         self.uploaded_files = {}
         
         # 变量
@@ -61,6 +61,7 @@ class LessonPlanWriter(ttk.Window):
         self.api_status_var = tk.StringVar(value="❌ 未配置")
         self.total_periods_var = tk.IntVar(value=1)
         self.current_period_disp_var = tk.StringVar(value="1")
+        self.files_count_var = tk.StringVar(value="已载入 0 个文档")
         
         self.author_info = "设计与开发：金塔县中学化学教研组 · 俞晋全 | 核心驱动：DeepSeek-V3"
         
@@ -69,7 +70,6 @@ class LessonPlanWriter(ttk.Window):
         self.save_current_data_to_memory(1)
 
     def load_config(self):
-        """加载配置文件"""
         try:
             if os.path.exists(CONFIG_FILE):
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -81,7 +81,6 @@ class LessonPlanWriter(ttk.Window):
             pass
 
     def save_config(self):
-        """保存配置文件"""
         try:
             config = {"api_key": self.api_key}
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -96,18 +95,16 @@ class LessonPlanWriter(ttk.Window):
             initialvalue=self.api_key,
             parent=self
         )
-        
         if new_key is not None:
             self.api_key = new_key.strip()
             self.save_config() 
-            
             if self.api_key:
                 self.api_status_var.set("✅ 已就绪")
                 messagebox.showinfo("成功", "API Key 已保存！下次打开软件可直接使用。")
             else:
                 self.api_status_var.set("❌ 未配置")
 
-    # ================= 多文档上传解析逻辑 =================
+    # ================= 多文档上传解析与管理逻辑 =================
     def upload_document(self):
         filepaths = filedialog.askopenfilenames(
             title="选择参考文档",
@@ -141,53 +138,93 @@ class LessonPlanWriter(ttk.Window):
                 reader = pypdf.PdfReader(filepath)
                 text_content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             else:
-                # 尝试作为纯文本读取
                 with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                     text_content = f.read()
 
             if not text_content.strip():
                 raise ValueError("未提取到有效文本或不支持该二进制格式。")
 
-            self.after(0, lambda: self._add_file_ui_chip(filepath, filename, text_content))
+            self.uploaded_files[filepath] = {
+                "name": filename,
+                "text": text_content
+            }
+            self.after(0, self.update_files_count_ui)
             self.after(0, lambda: self.status_var.set(f"✅ 文档 {filename} 解析成功！"))
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("解析失败", f"无法解析 {os.path.basename(filepath)}:\n{str(e)}"))
             self.after(0, lambda: self.status_var.set("❌ 部分文档解析失败"))
 
-    def _add_file_ui_chip(self, filepath, filename, text_content):
-        chip_frame = ttk.Frame(self.files_container)
-        chip_frame.pack(side=LEFT, padx=5, pady=2)
-        
-        lbl = ttk.Label(chip_frame, text=f"📄 {filename}", font=(MAIN_FONT_NAME, 9), bootstyle="secondary")
-        lbl.pack(side=LEFT)
-        
-        def delete_file():
-            if filepath in self.uploaded_files:
-                del self.uploaded_files[filepath]
-            chip_frame.destroy()
-            if not self.uploaded_files:
-                self.files_container_wrapper.pack_forget()
+    def update_files_count_ui(self):
+        self.files_count_var.set(f"已载入 {len(self.uploaded_files)} 个文档")
 
-        btn = ttk.Button(chip_frame, text="✖", command=delete_file, bootstyle="danger-link", padding=(0,0))
-        btn.pack(side=LEFT, padx=(2,0))
-
-        self.uploaded_files[filepath] = {
-            "name": filename,
-            "text": text_content,
-            "ui_frame": chip_frame
-        }
-        self.files_container_wrapper.pack(fill=X, pady=(5,0)) 
+    def open_file_manager(self):
+        if not self.uploaded_files:
+            messagebox.showinfo("管理文档", "当前未载入任何参考文档。")
+            return
+            
+        top = tk.Toplevel(self)
+        top.title("文档管理器")
+        top.geometry("450x300")
+        top.transient(self) 
+        
+        ttk.Label(top, text="下方是已成功解析并注入AI大脑的参考文件：", padding=10, font=(MAIN_FONT_NAME, UI_FONT_SIZE, "bold")).pack(anchor=W)
+        
+        sf = ttk.Frame(top)
+        sf.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        
+        canvas = tk.Canvas(sf, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(sf, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        def refresh_list():
+            for widget in scrollable_frame.winfo_children():
+                widget.destroy()
+            for filepath, data in list(self.uploaded_files.items()):
+                cf = ttk.Frame(scrollable_frame)
+                cf.pack(fill=X, pady=4)
+                ttk.Label(cf, text=f"📄 {data['name']}", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT, padx=5)
+                
+                def make_delete_cmd(fp=filepath):
+                    def _delete():
+                        if fp in self.uploaded_files:
+                            del self.uploaded_files[fp]
+                        self.update_files_count_ui()
+                        refresh_list()
+                        if not self.uploaded_files:
+                            top.destroy()
+                    return _delete
+                
+                ttk.Button(cf, text="✖ 删除", bootstyle="danger-outline", padding=(4,2), command=make_delete_cmd(filepath)).pack(side=RIGHT, padx=5)
+                
+        refresh_list()
 
     def setup_ui(self):
         header_frame = ttk.Frame(self, padding=(15, 15))
         header_frame.pack(fill=X)
         
+        # 1. 左侧 API 模块
         api_frame = ttk.Labelframe(header_frame, text="🔑 授权管理", padding=10, bootstyle="info")
         api_frame.pack(side=LEFT, fill=Y, padx=(0, 10))
         
         ttk.Button(api_frame, text="⚙️ 配置 API Key", command=self.open_api_settings, bootstyle="info").pack(side=LEFT, padx=5)
         ttk.Label(api_frame, textvariable=self.api_status_var, font=(MAIN_FONT_NAME, 9)).pack(side=LEFT, padx=5)
 
+        # 2. 核心布局优化：先放置最右侧的操作模块，防止被中间模块挤占
+        action_frame = ttk.Labelframe(header_frame, text="⚙️ 全局操作", padding=10, bootstyle="secondary")
+        action_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
+        
+        ttk.Button(action_frame, text="📥 导出全套Word教案", command=self.export_word, bootstyle="warning").pack(fill=X, pady=2)
+        ttk.Button(action_frame, text="🗑️ 清空所有数据", command=self.clear_all_data, bootstyle="danger outline").pack(fill=X, pady=2)
+        ttk.Button(action_frame, text="ℹ️ 关于作者", command=self.show_author, bootstyle="info outline").pack(fill=X, pady=2)
+
+        # 3. 中间的课题模块填充剩余空间
         topic_frame = ttk.Labelframe(header_frame, text="📚 课题与进度规划", padding=10, bootstyle="primary")
         topic_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
         
@@ -220,19 +257,9 @@ class LessonPlanWriter(ttk.Window):
         ttk.Label(f2, text="课时").pack(side=LEFT, padx=2)
 
         ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
-        ttk.Button(f2, text="📎 注入参考文件(可多选)", command=self.upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
-
-        # 多文件UI流式容器
-        self.files_container_wrapper = ttk.Frame(topic_frame)
-        self.files_container = ttk.Frame(self.files_container_wrapper)
-        self.files_container.pack(fill=X)
-
-        action_frame = ttk.Labelframe(header_frame, text="⚙️ 全局操作", padding=10, bootstyle="secondary")
-        action_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
-        
-        ttk.Button(action_frame, text="📥 导出全套Word教案", command=self.export_word, bootstyle="warning").pack(fill=X, pady=2)
-        ttk.Button(action_frame, text="🗑️ 清空所有数据", command=self.clear_all_data, bootstyle="danger outline").pack(fill=X, pady=2)
-        ttk.Button(action_frame, text="ℹ️ 关于作者", command=self.show_author, bootstyle="info outline").pack(fill=X, pady=2)
+        ttk.Button(f2, text="📎 注入参考文档(可多选)", command=self.upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
+        ttk.Label(f2, textvariable=self.files_count_var, font=(MAIN_FONT_NAME, 9), bootstyle="secondary").pack(side=LEFT, padx=(5,10))
+        ttk.Button(f2, text="📂 管理文档", command=self.open_file_manager, bootstyle="secondary-link").pack(side=LEFT)
 
         main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=15, pady=5)
@@ -276,9 +303,9 @@ class LessonPlanWriter(ttk.Window):
         font_bold = (MAIN_FONT_NAME, UI_FONT_SIZE, "bold")
         font_norm = (MAIN_FONT_NAME, UI_FONT_SIZE)
 
-        custom_frame = ttk.LabelFrame(self.scrollable_frame, text="★ 本课时自定义教学内容 (可选)", padding=5, bootstyle="danger")
+        custom_frame = ttk.LabelFrame(self.scrollable_frame, text="★ 本课时自定义教学内容 (最高优先级指令)", padding=5, bootstyle="danger")
         custom_frame.pack(fill=X, pady=(0, 10))
-        ttk.Label(custom_frame, text="若填写，AI将严格围绕此内容设计；若留空，则自动规划。", font=(MAIN_FONT_NAME, UI_FONT_SIZE-1), bootstyle="secondary").pack(anchor=W)
+        ttk.Label(custom_frame, text="若在此输入指令，AI将严格执行；若要求分析文件，AI会自动调用已注入文档解读。", font=(MAIN_FONT_NAME, UI_FONT_SIZE-1), bootstyle="secondary").pack(anchor=W)
         self.fields['custom_content'] = tk.Text(custom_frame, height=3, font=font_norm, bg="#fff0f0", fg="#000")
         self.fields['custom_content'].pack(fill=X, pady=2)
         
@@ -332,7 +359,7 @@ class LessonPlanWriter(ttk.Window):
         author_lbl.pack(side=RIGHT)
 
     def show_author(self):
-        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：4.0.0 (多源文档智编版)\n适用：金塔县中学教案模版标准")
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：4.1.0 (多源文档智编版)\n适用：金塔县中学教案模版标准")
 
     def update_period_list(self):
         try:
@@ -411,11 +438,8 @@ class LessonPlanWriter(ttk.Window):
             self.period_combo['values'] = [1]
             self.period_combo.current(0)
             
-            # 清理文件列表UI及数据
-            for filepath, file_data in list(self.uploaded_files.items()):
-                file_data['ui_frame'].destroy()
             self.uploaded_files.clear()
-            self.files_container_wrapper.pack_forget()
+            self.update_files_count_ui()
             
             for key in self.fields:
                 self.fields[key].delete("1.0", END)
@@ -426,13 +450,11 @@ class LessonPlanWriter(ttk.Window):
             self.status_var.set("⚠️ 所有数据已重置")
 
     def get_combined_doc_context(self):
-        """组合所有上传的文件内容，供 AI 使用"""
         if not self.uploaded_files:
             return ""
-        
-        context = "\n【重要参考：教师上传素材】\n以下是从教师提供的多份文件中提取的内容，请务必高度吸收其中的知识体系、实验情境设计：\n"
+        context = "\n【文档素材库：教师上传的多份参考文件】\n"
         for filepath, data in self.uploaded_files.items():
-            context += f"\n--- 来源文件: {data['name']} ---\n{data['text']}\n"
+            context += f"\n--- 文件名称: {data['name']} ---\n{data['text']}\n"
         return context
 
     def generate_framework(self):
@@ -451,17 +473,22 @@ class LessonPlanWriter(ttk.Window):
     def _thread_generate_framework(self, api_key, topic, current_p, total_p, custom_content):
         self.status_var.set(f"🤖 正在分析第 {current_p} 课时框架...")
         
-        content_instruction = ""
-        if custom_content:
-            content_instruction = f"【特别指令】用户强制指定本课时(第{current_p}课时)内容为：『{custom_content}』。请只围绕此内容设计。"
-        else:
-            content_instruction = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
-
         doc_context = self.get_combined_doc_context()
+        
+        custom_instruction_block = ""
+        if custom_content:
+            custom_instruction_block = f"""
+        【最高优先级：教师自定义指令】
+        用户原话：“{custom_content}”
+        (注意：请你务必严格、优先遵循上述指令。如果指令中要求你解读、参考指定的上传文件，请仔细在下文的【文档素材库】中寻找对应内容，并完全依据指令的要求执行。请勿使用通用废话敷衍。)
+        """
+        else:
+            custom_instruction_block = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
 
         prompt = f"""
         任务：为高中化学课题《{topic}》设计第 {current_p} 课时的教案框架。
-        {content_instruction}
+        
+        {custom_instruction_block}
         {doc_context}
 
         【核心要求】
@@ -529,8 +556,7 @@ class LessonPlanWriter(ttk.Window):
         self.status_var.set(f"✍️ 正在撰写第 {current_p} 课时过程...")
         
         custom_content = context.get('custom_content', '')
-        custom_hint = f"本课时核心锁定：{custom_content}。" if custom_content else ""
-
+        
         stage_requirements = ""
         if "匹配教学环节" in plan_type:
             stage_requirements = """
@@ -550,12 +576,21 @@ class LessonPlanWriter(ttk.Window):
             detail_level = "【篇幅与深度要求】需要详细写出教师的具体话术引导、预期的学生具体回答，以及每一道评价训练和课堂检测的具体题目内容。"
 
         doc_context = self.get_combined_doc_context()
+        
+        custom_instruction_block = ""
+        if custom_content:
+            custom_instruction_block = f"""
+        【最高优先级：教师自定义指令】
+        用户原话：“{custom_content}”
+        (注意：请你必须严格、优先遵循上述指令。如果指令中点名要求依据某个具体课件或教材来撰写，请务必在下文的【文档素材库】中检索该文件内容，紧密结合其中的知识点、情境和习题来设计这节课的教学过程，你的输出必须高度体现该指令的定制意图。)
+        """
 
         prompt = f"""
         任务：撰写高中化学《{topic}》第 {current_p} 课时的“教学过程”。
         
-        【输入信息】
-        {custom_hint}
+        {custom_instruction_block}
+        
+        【基础设计信息】
         素养目标：{context['objectives']}
         重难点：{context['key_points']}
         {doc_context}
