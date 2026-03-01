@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 # 全局常量与智能免疫规则库
 # -----------------------------
 APP_NAME = "MultiPlatform Py Packer"
-APP_VERSION = "3.9.3 Ultimate"  # 🚀 绝杀版：手工重构 Nuitka Mac 包结构，彻底解决 Tcl/Tk 迷失崩溃
+APP_VERSION = "3.9.4 Ultimate"  # 🚀 更新 GitHub 加速代理源为 gh-proxy.com，持续稳定下载 UPX
 BUILD_ROOT_NAME = ".mpbuild"
 DEFAULT_OUTPUT_DIRNAME = "dist_out"
 
@@ -283,7 +283,8 @@ class BuildWorker(QObject):
             else: filename = f"upx-{version}-amd64_linux.tar.xz"
                 
             base_url = f"https://github.com/upx/upx/releases/download/v{version}/{filename}"
-            mirror_url = f"https://mirror.ghproxy.com/{base_url}"
+            # 🚀 替换为存活且稳定的 gh-proxy.com 节点
+            mirror_url = f"https://gh-proxy.com/{base_url}"
             archive_path = upx_dir / filename
             
             def download_file(url):
@@ -388,7 +389,6 @@ class BuildWorker(QObject):
             if cfg.windowed:
                 if IS_WIN: cmd += ["--windows-disable-console"]
                 else: cmd += ["--disable-console"]
-                # 🚀 绝杀操作：移除 Nuitka 的 --macos-create-app-bundle 参数，我们手工做！
 
             if cfg.icon_path: cmd += [f"--windows-icon-from-ico={cfg.icon_path}"] if IS_WIN else [f"--linux-icon={cfg.icon_path}"]
             
@@ -406,7 +406,7 @@ class BuildWorker(QObject):
         self._emit(format_cmd(cmd))
         self._run_cmd(cmd, proj_dir, extra_bin_dir=upx_bin_dir)
 
-        # 🚀 绝杀技1：如果是 Mac + Nuitka + GUI模式，手工接管 .app 生成，避开 Nuitka 目录破损 Bug
+        # 🚀 绝杀技1：手工接管 Mac .app 生成，避开 Nuitka 目录破损 Bug
         if IS_MAC and cfg.windowed and cfg.builder == "nuitka":
             self.stage.emit("重构 Mac 程序包")
             self._emit("[INFO] 正在绕过 Nuitka 的 Mac 目录破损 Bug，手工重构原生 .app 结构...")
