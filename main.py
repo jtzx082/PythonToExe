@@ -1,5 +1,28 @@
 import sys
 import os
+
+# =======================================================
+# 补丁：修复 macOS Nuitka 打包后 fallback 到系统级老旧 Tcl 8.5 的 Bug
+# =======================================================
+if sys.platform == 'darwin':
+    _exe_dir = os.path.dirname(sys.executable)
+    _tcl_dir = None
+    _tk_dir = None
+    try:
+        # 动态寻找 Nuitka 释出的 tcl8.x 和 tk8.x 文件夹
+        for item in os.listdir(_exe_dir):
+            if item.startswith('tcl') and os.path.isdir(os.path.join(_exe_dir, item)):
+                _tcl_dir = os.path.join(_exe_dir, item)
+            elif item.startswith('tk') and not item.startswith('tcl') and os.path.isdir(os.path.join(_exe_dir, item)):
+                _tk_dir = os.path.join(_exe_dir, item)
+        
+        # 强行指定环境变量
+        if _tcl_dir and _tk_dir:
+            os.environ["TCL_LIBRARY"] = _tcl_dir
+            os.environ["TK_LIBRARY"] = _tk_dir
+    except Exception:
+        pass
+
 import json
 
 # --- 兼容性修复 ---
@@ -23,7 +46,7 @@ from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 import pptx
-import pypdf # 新增：用于解析 PDF 文件
+import pypdf
 
 # --- 字体自动适配 ---
 DEFAULT_FONT = "Helvetica"
@@ -53,7 +76,7 @@ class LessonPlanWriter(ttk.Window):
         self.is_generating = False
         self.stop_flag = False
         
-        # 新增：多文档内容存储字典 { filepath: {"name": filename, "text": text_content, "ui_frame": frame} }
+        # 多文档内容存储字典 { filepath: {"name": filename, "text": text_content, "ui_frame": frame} }
         self.uploaded_files = {}
         
         # 变量
@@ -107,7 +130,7 @@ class LessonPlanWriter(ttk.Window):
             else:
                 self.api_status_var.set("❌ 未配置")
 
-    # ================= 优化：多文档上传解析逻辑 =================
+    # ================= 多文档上传解析逻辑 =================
     def upload_document(self):
         filepaths = filedialog.askopenfilenames(
             title="选择参考文档",
@@ -118,7 +141,7 @@ class LessonPlanWriter(ttk.Window):
         
         for filepath in filepaths:
             if filepath in self.uploaded_files:
-                continue # 避免重复注入
+                continue 
             self.status_var.set(f"⏳ 正在解析文档: {os.path.basename(filepath)}...")
             threading.Thread(target=self._process_document_thread, args=(filepath,)).start()
 
@@ -141,14 +164,13 @@ class LessonPlanWriter(ttk.Window):
                 reader = pypdf.PdfReader(filepath)
                 text_content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             else:
-                # 尝试作为纯文本读取（含 txt, md, csv, py 等任意格式）
+                # 尝试作为纯文本读取
                 with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                     text_content = f.read()
 
             if not text_content.strip():
                 raise ValueError("未提取到有效文本或不支持该二进制格式。")
 
-            # 移除原来的 15000 字符限制，完全保留原文
             self.after(0, lambda: self._add_file_ui_chip(filepath, filename, text_content))
             self.after(0, lambda: self.status_var.set(f"✅ 文档 {filename} 解析成功！"))
         except Exception as e:
@@ -177,7 +199,7 @@ class LessonPlanWriter(ttk.Window):
             "text": text_content,
             "ui_frame": chip_frame
         }
-        self.files_container_wrapper.pack(fill=X, pady=(5,0)) # 确保容器显示
+        self.files_container_wrapper.pack(fill=X, pady=(5,0)) 
 
     def setup_ui(self):
         header_frame = ttk.Frame(self, padding=(15, 15))
@@ -223,7 +245,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Separator(f2, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
         ttk.Button(f2, text="📎 注入参考文件(可多选)", command=self.upload_document, bootstyle="success outline").pack(side=LEFT, padx=5)
 
-        # 新增：多文件UI流式容器
+        # 多文件UI流式容器
         self.files_container_wrapper = ttk.Frame(topic_frame)
         self.files_container = ttk.Frame(self.files_container_wrapper)
         self.files_container.pack(fill=X)
